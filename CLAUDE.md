@@ -57,7 +57,7 @@ alive, nothing to SSH into.
 
 ### The non-negotiable trust rule
 Anything that affects **security, money, or data integrity** MUST be enforced
-server-side (RLS, server action, or DB constraint). The client may mirror logic
+server-side (**RLS**, server action, or DB constraint). The client may mirror logic
 for UX, but is never the source of truth. Never trust a client-supplied role,
 price, permission, or ownership check.
 
