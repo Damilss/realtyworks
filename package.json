@@ -2,11 +2,16 @@
   "name": "realtyworks",
   "version": "0.1.0",
   "private": true,
+  "packageManager": "pnpm@9.15.9",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
   },
   "dependencies": {
     "next": "16.2.6",
@@ -19,6 +24,8 @@
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.2.6",
-    "typescript": "^5"
+    "prettier": "^3.8.3",
+    "typescript": "^5",
+    "vitest": "^4.1.6"
   }
 }
