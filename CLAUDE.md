@@ -1,5 +1,7 @@
 # CLAUDE.md — RealtyWorks
 
+@AGENTS.md
+
 Operating guide and source of truth for working on this repo with Claude Code.
 Read this fully before generating code, scaffolding, or migrations.
 
