@@ -1,0 +1,9 @@
+# pnpm lockfile — managed by pnpm, not Prettier
+pnpm-lock.yaml
+
+# Markdown is hand-maintained (CLAUDE.md, README.md, AGENTS.md, docs/)
+*.md
+
+# Generated / build output (also covered by .gitignore)
+.next/
+next-env.d.ts
