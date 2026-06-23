@@ -7,6 +7,60 @@ Read this fully before generating code, scaffolding, or migrations.
 
 ---
 
+## 0. Quick reference
+
+**Package manager is `pnpm` (`pnpm@9.15.9`), not npm.** The README's `npm`
+examples are stale — ignore them. Node is pinned to **24** (`.nvmrc`, matched by
+CI). Stack versions are new and have breaking changes: **Next.js 16.2.6**,
+**React 19.2.4**. Per `AGENTS.md`, read the relevant guide in
+`node_modules/next/dist/docs/` (`01-app`, `02-pages`, `03-architecture`, …)
+before writing Next.js code — do not assume training-data APIs.
+
+### Commands
+```bash
+pnpm install            # install deps (CI uses --frozen-lockfile)
+pnpm dev                # dev server, http://localhost:3000
+pnpm build              # production build (next build)
+pnpm start              # serve the production build
+pnpm lint               # eslint (next core-web-vitals + typescript)
+pnpm typecheck          # tsc --noEmit (strict)
+pnpm test               # vitest run --passWithNoTests
+pnpm format             # prettier --write .
+pnpm format:check       # prettier --check . (CI gate)
+```
+
+Run a single test file / name:
+```bash
+pnpm exec vitest run src/path/to/file.test.ts     # one file (one-shot)
+pnpm exec vitest run -t "name of test"            # filter by test name
+pnpm exec vitest src/path/to/file.test.ts         # watch a single file
+```
+
+Vitest only collects `src/**/*.{test,spec}.{ts,tsx}` and
+`tests/unit/**/*.{test,spec}.{ts,tsx}` (see `vitest.config.ts`). Import app code
+via the `@/*` alias (`@/* → ./src/*`, `tsconfig.json`).
+
+**CI** (`.github/workflows/ci.yml`, on PR + push to `main`): one job runs
+lint → format:check → typecheck → test → build. Each step uses `if: !cancelled()`
+so one run reports *every* failure, not just the first. Reproduce locally by
+running the five commands above in order before pushing.
+
+### Current state vs. the target in §3
+
+The repo is at **Phase 1 (Foundations)** — a near-empty Next.js scaffold
+(`src/app/{layout,page}.tsx` + globals). Most of §3's tree and several §5
+tools are the **target**, not yet present. Verify before assuming they exist:
+
+- **Not yet created:** `supabase/` (no migrations/seed/config), `src/server/`,
+  `src/lib/`, `src/schemas/`, `src/components/`, `tests/`, `.env.example`.
+- **Not yet installed:** Husky pre-commit + commitlint, Playwright,
+  `@supabase/ssr` / Supabase client. `database.types.ts` does not exist until
+  the first migration is generated.
+- When you add the first of these, follow §3/§5 exactly (e.g. RLS in the same
+  migration as its table; `src/server/` as the trust boundary).
+
+---
+
 ## 1. What this project is
 
 **RealtyWorks** is an enterprise work interface for property managers and
