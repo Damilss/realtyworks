@@ -71,12 +71,13 @@ Suggested baseline variables:
 - `AUTH_SECRET=`
 - `BASE_URL=http://localhost:3000`
 
-### Run (example)
-If this repo uses a Node/TS workflow:
+### Run
+
+This repo uses **pnpm** (`pnpm@9.15.9`, see `package.json`):
 
 ```bash
-npm install
-npm run dev
+pnpm install
+pnpm dev
 ```
 
 ---
@@ -90,13 +91,7 @@ This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-
 First, run the development server:
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
 pnpm dev
-# or
-bun dev
 ```
 
 Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
