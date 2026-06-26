@@ -80,6 +80,12 @@ pnpm install
 pnpm dev
 ```
 
+### Testing
+
+- Unit tests (Vitest): `pnpm test`
+- End-to-end tests (Playwright): `pnpm test:e2e` — see
+  [docs/playwright.md](docs/playwright.md) for installation and usage.
+
 ---
 
 
