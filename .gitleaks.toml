@@ -8,4 +8,4 @@ useDefault = true
 # (e.g. .env.example placeholders, test fixtures).
 [allowlist]
 description = "Global allowlist"
-paths = ['''pnpm-lock\.yaml''']
+paths = ['''(^|/)pnpm-lock\.yaml$''']
