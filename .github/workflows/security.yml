@@ -11,9 +11,11 @@ concurrency:
   group: security-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-# Least privilege: the scan only needs to read the repository.
+# Least privilege: read the repo, plus read the PR's commit list on pull_request
+# events (gitleaks-action calls GET /pulls/:n/commits, which needs pull-requests: read).
 permissions:
   contents: read
+  pull-requests: read
 
 jobs:
   gitleaks:
