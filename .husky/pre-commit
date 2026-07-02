@@ -1,1 +1,9 @@
-pnpm exec lint-staged
+pnpm exec lint-staged || exit $?
+
+# Secret scan of staged changes (after lint-staged sees the final content).
+# Best-effort locally; CI re-runs gitleaks as the authoritative gate.
+if command -v gitleaks >/dev/null 2>&1; then
+  gitleaks git --pre-commit --staged --redact
+else
+  echo "gitleaks not found — skipping local secret scan (CI still scans). Install: https://github.com/gitleaks/gitleaks"
+fi

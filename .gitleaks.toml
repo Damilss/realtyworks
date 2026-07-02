@@ -1,0 +1,11 @@
+title = "RealtyWorks gitleaks config"
+
+# Baseline: gitleaks' built-in rule set.
+[extend]
+useDefault = true
+
+# Global allowlist — add paths/regexes here as false positives surface
+# (e.g. .env.example placeholders, test fixtures).
+[allowlist]
+description = "Global allowlist"
+paths = ['''(^|/)pnpm-lock\.yaml$''']
