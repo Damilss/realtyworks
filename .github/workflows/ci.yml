@@ -17,7 +17,7 @@ permissions:
 
 jobs:
   verify:
-    name: Lint, format, typecheck, test, build
+    name: Lint, format, typecheck, test, build, audit
     runs-on: ubuntu-latest
     env:
       NEXT_TELEMETRY_DISABLED: "1"
@@ -67,3 +67,13 @@ jobs:
       - name: Build
         if: ${{ !cancelled() }}
         run: pnpm run build
+
+      # Dependency vulnerability gate (issue #20). Non-blocking until 2026-07-08
+      # (one week after the issue opened) to allow triage of existing advisories;
+      # on/after that date, delete the continue-on-error line to make it blocking.
+      # Known finding today: vite@8.0.13 (dev-only, transitive via vitest) —
+      # GHSA-fx2h-pf6j-xcff, patched in vite >=8.0.16.
+      - name: Audit dependencies
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        run: pnpm audit --audit-level=high
