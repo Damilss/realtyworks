@@ -1,0 +1,31 @@
+name: OSV Scanner
+
+on:
+  schedule:
+    # Weekly lockfile CVE scan, Mondays 12:30 UTC (matches the osv-scanner docs example).
+    - cron: "30 12 * * 1"
+  # Manual runs for verification. Both triggers only work once this file is on main.
+  workflow_dispatch:
+
+# Cancel an in-progress run when a newer one starts on the same ref.
+concurrency:
+  group: osv-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# Least privilege: SARIF upload is disabled below, so we only grant read permissions.
+# If `upload-sarif` is later enabled, add `security-events: write` to allow SARIF upload.
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  scan:
+    name: Lockfile CVE scan (osv-scanner)
+    # Pinned to the full release tag; Dependabot's github-actions ecosystem keeps it bumped.
+    uses: google/osv-scanner-action/.github/workflows/osv-scanner-reusable.yml@v2.3.8
+    with:
+      # SARIF upload to the Security tab requires GitHub Code Security on private
+      # repos, so it would fail here. Findings appear in the job log instead, and
+      # fail-on-vuln (default true) fails the job, which emails the repo owner on
+      # scheduled runs. Flip to true if the repo goes public or Code Security is enabled.
+      upload-sarif: false
