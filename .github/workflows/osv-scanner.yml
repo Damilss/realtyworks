@@ -12,9 +12,8 @@ concurrency:
   group: osv-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-# The reusable workflow's job requests exactly these permissions; the caller must
-# grant at least this set or the run fails at setup — even though SARIF upload is
-# disabled below.
+# Least privilege: SARIF upload is disabled below, so we only grant read permissions.
+ # If `upload-sarif` is later enabled, add `security-events: write` to allow SARIF upload.
 permissions:
   actions: read
   contents: read
