@@ -13,7 +13,7 @@ concurrency:
   cancel-in-progress: true
 
 # Least privilege: SARIF upload is disabled below, so we only grant read permissions.
- # If `upload-sarif` is later enabled, add `security-events: write` to allow SARIF upload.
+# If `upload-sarif` is later enabled, add `security-events: write` to allow SARIF upload.
 permissions:
   actions: read
   contents: read
