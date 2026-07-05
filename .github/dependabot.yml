@@ -6,9 +6,15 @@ updates:
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 10
+    # Wait a week before proposing a newly published version — a compromised
+    # release is usually caught within days (semgrep dependabot-missing-cooldown).
+    cooldown:
+      default-days: 7
 
   # GitHub Actions (if you use workflows)
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
       interval: "weekly"
+    cooldown:
+      default-days: 7
