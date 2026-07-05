@@ -55,8 +55,8 @@ before pushing.
 
 **Git hooks** (Husky, installed by `pnpm install`): pre-commit runs
 lint-staged + a gitleaks staged-changes scan (skipped if the binary is
-missing); commit-msg runs commitlint (conventional types + `deps`; the old
-`CI/CD` type is retired in favor of `ci` — see `commitlint.config.mjs`).
+missing); commit-msg runs commitlint (conventional types + `deps` + `wip`; the
+old `CI/CD` type is retired in favor of `ci` — see `commitlint.config.mjs`).
 
 ### Current state vs. the target in §3
 
