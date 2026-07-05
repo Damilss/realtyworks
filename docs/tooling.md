@@ -54,7 +54,7 @@ Config: `commitlint.config.mjs`, extending `@commitlint/config-conventional`
 Allowed types:
 
 ```
-build chore ci deps docs feat fix perf refactor revert style test
+build chore ci deps docs feat fix perf refactor revert style test wip
 ```
 
 **Decision (PR #40):** the default type list is overridden in two ways —
@@ -64,6 +64,11 @@ build chore ci deps docs feat fix perf refactor revert style test
 - `CI/CD` **retired** — early history used a nonstandard `CI/CD(...)` type,
   which the standard list rejects. New commits use `ci`. Old commits stay as
   they are; commitlint only checks new ones.
+
+`wip` was added later (this change, not PR #40) for local work-in-progress
+checkpoints, so a `wip:` save doesn't need `--no-verify`. We merge with merge
+commits, so an un-squashed `wip` commit persists in `main`'s history — tidy
+them before merging if you don't want the noise.
 
 The config uses a named (not anonymous) default export to keep ESLint's
 `import/no-anonymous-default-export` happy.
