@@ -15,24 +15,27 @@ Pick them off at your discretion.
 
 ---
 
-## State verified (2026-07-01)
+## State verified (2026-07-04)
 
 - `next 16.2.6` / `react 19.2.4` / `pnpm@9.15.9`, Node pinned to 24 (`.nvmrc`).
-- CI runs `lint → format:check → typecheck → test → build` — with `!cancelled()`,
-  concurrency-cancel, `permissions: contents: read`, and pnpm + Next build caching.
-- Dependabot on (npm + github-actions, weekly).
-- Husky **pre-commit** only (lint-staged). No `commit-msg` hook.
+- CI runs `lint → format:check → typecheck → test → build → audit` — with
+  `!cancelled()`, concurrency-cancel, `permissions: contents: read`, and
+  pnpm + Next build caching. The audit step is non-blocking pending triage
+  (see `docs/tooling.md`).
+- Security workflows live: **gitleaks** on PR/push (+ pre-commit layer),
+  weekly **osv-scanner** lockfile scan.
+- Dependabot on (npm + github-actions, weekly) — still untuned (see 🟠 below).
+- Husky **pre-commit** (lint-staged + gitleaks) **and `commit-msg`**
+  (commitlint, conventional types + `deps`, `CI/CD` retired → `ci`).
 - Playwright + one smoke test, **local-only by design** (`docs/playwright.md`).
 - Prettier configured (markdown intentionally ignored).
 
 ### Sharp edges these issues address
-- **Commitlint is not installed** — no config, no `commit-msg` hook — yet `CLAUDE.md`
-  §5 claims conventional commits are "enforced by commitlint." Nothing checks commit
-  format today. Existing history uses `deps(...)` and `CI/CD(...)`, which the standard
-  `config-conventional` type list **rejects** — the type list must be decided.
-- **~11 open Dependabot branches** (ungrouped, no conventional prefix). Once commitlint
-  is on, Dependabot's default messages will fail it. The open `@types/node → 26` bump
-  **leads** the Node 24 runtime; types should track the runtime major (24), not lead it.
+- **~11 open Dependabot branches** (ungrouped). Dependabot emits
+  `chore(deps)` / `chore(deps-dev)` prefixes — valid conventional commits, but
+  not the house `deps` type (and commitlint is hook-only, so bot commits are
+  never linted anyway). The open `@types/node → 26` bump **leads** the Node 24
+  runtime; types should track the runtime major (24), not lead it.
   `@types/node` is currently `^20`.
 - Native GitHub security features (CodeQL, secret-scanning push-protection,
   dependency-review) are **GHAS-gated on private repos**. Security issues below default
@@ -41,24 +44,40 @@ Pick them off at your discretion.
 
 ---
 
+## ✅ Done (kept for the paper trail)
+
+### ✅ Secret scanning (gitleaks) in CI + pre-commit — issue #19, PR #41
+CI job on push + PR (full-history scan), `gitleaks git --pre-commit --staged`
+in `.husky/pre-commit` (fail-safe when the binary is missing), committed
+`.gitleaks.toml` (default rules + anchored `pnpm-lock.yaml` allowlist).
+Follow-up hardening: `pull-requests: read` permission for the action.
+
+### ✅ Dependency vulnerability gate — issue #20, PR #43
+`pnpm audit --audit-level=high` in CI (**non-blocking** until existing
+advisories are triaged — the flip to blocking is a deliberate manual edit, not
+date-based) + weekly `osv-scanner` reusable workflow (SARIF upload off:
+GHAS-gated on private repos). Known finding: `vite@8.0.13`
+(GHSA-fx2h-pf6j-xcff, dev-only via vitest, patched ≥ 8.0.16).
+Web-UI half (enable Dependabot **alerts** + **security updates** in Settings →
+Security) — verify it's on.
+
+### ✅ Enforce conventional commits (commitlint + commit-msg hook) — PR #40
+`@commitlint/cli` + `config-conventional`, `commitlint.config.mjs` with the
+decided type list (standard set + `deps`; `CI/CD` retired in favor of `ci`),
+`.husky/commit-msg` running `commitlint --edit`.
+
+---
+
 ## 🔴 Critical
 
-### 🔴 Secret scanning (gitleaks) in CI + pre-commit
-**Why:** Phase 2 introduces Supabase keys. A leaked `service_role` key = full DB
-compromise, and native push-protection needs GHAS on a private repo. Catch it in OSS.
+### 🔴 Flip the `pnpm audit` gate to blocking
+**Why:** The gate exists (PR #43) but is `continue-on-error: true`; until flipped,
+a high/critical CVE surfaces in the log without failing the PR.
 **Do:**
-- Add a `gitleaks` GitHub Actions job (`gitleaks/gitleaks-action`) on push + PR.
-- Add a local `gitleaks protect --staged` step to `.husky/pre-commit` (after lint-staged).
-- Commit a `.gitleaks.toml` (start from default rules).
-**Done when:** a fake key in a test commit is blocked locally and fails CI.
-
-### 🔴 Dependency vulnerability gate + enable Dependabot alerts/security updates
-**Why:** You have Dependabot *version* updates, but nothing fails the build on a known CVE.
-**Do:**
-- Repo Settings → Security: enable **Dependabot alerts** + **security updates** (free on private).
-- Add a CI step: `pnpm audit --audit-level=high` (non-blocking first week, then blocking).
-- Add a weekly `osv-scanner` job (`google/osv-scanner-action`) for lockfile CVEs.
-**Done when:** CI surfaces high/critical vulns; alerts appear in the Security tab.
+- Clear/accept the known `vite@8.0.13` advisory (bump so vite ≥ 8.0.16 resolves).
+- Delete the `continue-on-error: true` line from the **Audit dependencies** step;
+  update the stale "non-blocking until" comment.
+**Done when:** a seeded high/critical advisory fails CI.
 
 ### 🔴 Branch protection on `main` (verify/enable — web UI)
 **Why:** `CLAUDE.md` §4/§5 make this a Phase-1 requirement and the paper trail depends on it.
@@ -72,28 +91,12 @@ compromise, and native push-protection needs GHAS on a private repo. Catch it in
 
 ## 🟠 High
 
-### 🟠 Enforce conventional commits (commitlint + commit-msg hook)
-**Why:** `CLAUDE.md` claims this is enforced; it isn't. The audit trail is a product feature.
-**Do:**
-- `pnpm add -D @commitlint/cli @commitlint/config-conventional`
-- `commitlint.config.js` — **decide the type list**. History uses `deps` and `CI/CD`,
-  which the default set rejects. Recommended: map `CI/CD → ci`, and allow `deps`:
-  ```js
-  export default {
-    extends: ["@commitlint/config-conventional"],
-    rules: { "type-enum": [2, "always",
-      ["build","chore","ci","docs","feat","fix","perf","refactor","revert","style","test","deps"]] },
-  };
-  ```
-- Add `.husky/commit-msg`: `pnpm exec commitlint --edit "$1"`
-**Done when:** a non-conventional commit message is rejected locally.
-
 ### 🟠 Tune Dependabot: group, prefix, and pin @types/node to Node 24
-**Why:** ~11 ungrouped PRs is noise; default messages will fail commitlint; the open
-`@types/node → 26` bump leads your Node 24 runtime.
+**Why:** ~11 ungrouped PRs is noise; Dependabot's `chore(deps)` prefix doesn't match
+the house `deps` type; the open `@types/node → 26` bump leads your Node 24 runtime.
 **Do:** in `.github/dependabot.yml`:
 - `groups:` — bundle minor+patch (e.g. one `dev-minor` group) to cut PR count.
-- `commit-message: { prefix: "deps", prefix-development: "deps" }` so commits pass commitlint.
+- `commit-message: { prefix: "deps", prefix-development: "deps" }` to match the house type.
 - `ignore:` a major bump on `@types/node` beyond `24.x` (types track runtime, not lead it).
 - Add `labels: ["dependencies"]`; consider dropping `open-pull-requests-limit` back down.
 **Done when:** next Dependabot run opens grouped PRs with `deps(...)` messages that pass CI.
@@ -205,7 +208,7 @@ Dockerfile so self-host stays `docker run` away (`CLAUDE.md` §5/§7).
 
 | Package | Why | When |
 |---|---|---|
-| `@commitlint/cli` + `@commitlint/config-conventional` | Enforce the commit convention CLAUDE.md already assumes | High / now |
+| ~~`@commitlint/cli` + `@commitlint/config-conventional`~~ | ✅ Installed (PR #40) | Done |
 | `@testing-library/react`, `@testing-library/jest-dom`, `happy-dom` | Component tests need a DOM | Medium |
 | `@vitest/coverage-v8` | Coverage visibility | Medium |
 | `@t3-oss/env-nextjs` + `zod` | Typed, validated env vars (also the shared zod schemas per §3) | Medium → Phase 3 |
@@ -221,11 +224,13 @@ and the `supabase` CLI (Phase 2).
 
 ## Recommended order for the next few sessions
 
-1. **commitlint** (High) + **Dependabot tuning** (High) together — they interact
-   (Dependabot's commit prefix must satisfy commitlint).
-2. **gitleaks** (Critical) — secrets before Phase 2 keys.
-3. **Semgrep + `pnpm audit`** (Critical / High) — the SAST + dependency gate.
-4. **Branch protection** (Critical) — last of this batch, so you can require the new
-   checks once they exist.
+*(Done so far: commitlint → gitleaks → `pnpm audit` gate + osv-scanner.)*
+
+1. **Dependabot tuning** (High) — grouping cuts the open-PR noise, and the
+   `deps` commit prefix aligns bot commits with the house type.
+2. **Flip the audit gate to blocking** (Critical) — clear the vite advisory first.
+3. **Semgrep** (High) — the remaining SAST layer.
+4. **Branch protection** (Critical) — last of this batch, so you can require every
+   check that now exists (CI, gitleaks, Semgrep).
 
 That gets the full security + CI + commit-hygiene foundation green before any Supabase code.

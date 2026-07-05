@@ -9,12 +9,12 @@ Read this fully before generating code, scaffolding, or migrations.
 
 ## 0. Quick reference
 
-**Package manager is `pnpm` (`pnpm@9.15.9`), not npm.** The README's `npm`
-examples are stale — ignore them. Node is pinned to **24** (`.nvmrc`, matched by
-CI). Stack versions are new and have breaking changes: **Next.js 16.2.6**,
-**React 19.2.4**. Per `AGENTS.md`, read the relevant guide in
-`node_modules/next/dist/docs/` (`01-app`, `02-pages`, `03-architecture`, …)
-before writing Next.js code — do not assume training-data APIs.
+**Package manager is `pnpm` (`pnpm@9.15.9`), not npm.** Node is pinned to
+**24** (`.nvmrc`, matched by CI). Stack versions are new and have breaking
+changes: **Next.js 16.2.6**, **React 19.2.4**. Per `AGENTS.md`, read the
+relevant guide in `node_modules/next/dist/docs/` (`01-app`, `02-pages`,
+`03-architecture`, …) before writing Next.js code — do not assume
+training-data APIs.
 
 ### Commands
 ```bash
@@ -25,8 +25,9 @@ pnpm start              # serve the production build
 pnpm lint               # eslint (next core-web-vitals + typescript)
 pnpm typecheck          # tsc --noEmit (strict)
 pnpm test               # vitest run --passWithNoTests
+pnpm test:e2e           # playwright (local-only; boots the dev server itself)
 pnpm format             # prettier --write .
-pnpm format:check       # prettier --check . (CI gate)
+pnpm format:check       # prettier --check . (CI gate; *.md is ignored)
 ```
 
 Run a single test file / name:
@@ -41,23 +42,39 @@ Vitest only collects `src/**/*.{test,spec}.{ts,tsx}` and
 via the `@/*` alias (`@/* → ./src/*`, `tsconfig.json`).
 
 **CI** (`.github/workflows/ci.yml`, on PR + push to `main`): one job runs
-lint → format:check → typecheck → test → build. Each step uses `if: !cancelled()`
-so one run reports *every* failure, not just the first. Reproduce locally by
-running the five commands above in order before pushing.
+lint → format:check → typecheck → test → build → audit. Each check step after
+the first uses `if: !cancelled()` so one run reports *every* failure, not just
+the first.
+The audit step (`pnpm audit --audit-level=high`) is currently non-blocking
+pending advisory triage. Two more workflows: gitleaks secret scan
+(`security.yml`, PR + push) and a weekly osv-scanner lockfile CVE scan
+(`osv-scanner.yml`). Details + decisions: `docs/tooling.md`. Reproduce the
+main gate locally by running lint/format:check/typecheck/test/build in order
+before pushing.
+
+**Git hooks** (Husky, installed by `pnpm install`): pre-commit runs
+lint-staged + a gitleaks staged-changes scan (skipped if the binary is
+missing); commit-msg runs commitlint (conventional types + `deps`; the old
+`CI/CD` type is retired in favor of `ci` — see `commitlint.config.mjs`).
 
 ### Current state vs. the target in §3
 
-The repo is at **Phase 1 (Foundations)** — a near-empty Next.js scaffold
-(`src/app/{layout,page}.tsx` + globals). Most of §3's tree and several §5
-tools are the **target**, not yet present. Verify before assuming they exist:
+The repo is at **Phase 1 (Foundations)** — tooling/CI/security gates are in
+place around a near-empty Next.js scaffold (`src/app/{layout,page}.tsx` +
+globals, one Playwright smoke test). Most of §3's *application* tree and some
+§5 tools are the **target**, not yet present. Verify before assuming they
+exist:
 
 - **Not yet created:** `supabase/` (no migrations/seed/config), `src/server/`,
-  `src/lib/`, `src/schemas/`, `src/components/`, `tests/`, `.env.example`.
-- **Not yet installed:** Husky pre-commit + commitlint, Playwright,
-  `@supabase/ssr` / Supabase client. `database.types.ts` does not exist until
-  the first migration is generated.
-- When you add the first of these, follow §3/§5 exactly (e.g. RLS in the same
-  migration as its table; `src/server/` as the trust boundary).
+  `src/lib/`, `src/schemas/`, `src/components/`, `tests/unit/`, `.env.example`.
+- **Not yet installed:** `@supabase/ssr` / Supabase client, Tailwind,
+  shadcn/ui. `database.types.ts` does not exist until the first migration is
+  generated.
+- **Already in place:** Husky (pre-commit + commit-msg), commitlint,
+  lint-staged, Playwright (+ `tests/e2e/smoke.spec.ts`), gitleaks
+  (CI + pre-commit), `pnpm audit` gate, weekly osv-scanner, Dependabot.
+- When you add the first missing piece, follow §3/§5 exactly (e.g. RLS in the
+  same migration as its table; `src/server/` as the trust boundary).
 
 ---
 
@@ -69,7 +86,7 @@ work orders, vendor coordination, documentation, and audit-ready records.
 
 - Status: MVP / in active development
 - Solo developer. No team. Optimize for low operational burden and a clear paper trail.
-- License: Proprietary (see `LICENSE`).
+- License: Proprietary (see `LICENSE.md`).
 
 ### MVP scope
 - Properties & units (basic structure for organizing work)
@@ -134,8 +151,11 @@ that belong in them — no speculative/empty folders.
 
 ```
 realtyworks/
-├── .github/workflows/ci.yml        # lint → typecheck → test → build per PR
-├── .husky/                         # pre-commit (lint-staged), commit-msg (commitlint)
+├── .github/
+│   ├── workflows/                  # ci.yml (main gate — see §0) · security.yml · osv-scanner.yml
+│   └── dependabot.yml              # weekly npm + github-actions updates
+├── .husky/                         # pre-commit (lint-staged + gitleaks), commit-msg (commitlint)
+├── docs/                           # tooling.md · playwright.md · backlog.md · dependency-version-management.md
 ├── public/
 ├── src/
 │   ├── app/                        # App Router
@@ -169,8 +189,9 @@ realtyworks/
 │   └── e2e/                        # playwright
 ├── .env.example                    # committed — documents required vars
 ├── .env.local                      # gitignored — real secrets
+├── .gitleaks.toml                  # secret-scanning config (default rules + allowlist)
 ├── .nvmrc                          # pinned Node, matches CI
-├── commitlint.config.js
+├── commitlint.config.mjs
 ├── eslint.config.mjs
 ├── .prettierrc
 ├── next.config.ts
@@ -199,9 +220,11 @@ Foundations before features. Do not jump ahead to feature breadth.
 
 **Phase 1 — Foundations**
 Repo + tooling + green CI on a near-empty Next.js app. TS strict, ESLint +
-Prettier, Husky pre-commit, conventional commits, branch protection on `main`,
-Vitest + Playwright installed (mostly empty), GitHub Actions running
-lint + typecheck + test + build per PR. Pipeline green before features.
+Prettier, Husky hooks (lint-staged + gitleaks, commitlint), conventional
+commits, branch protection on `main`, Vitest + Playwright installed (mostly
+empty), GitHub Actions running lint + format check + typecheck + test +
+build + dependency audit per PR, plus gitleaks secret scanning and a weekly
+osv-scanner CVE scan. Pipeline green before features.
 
 **Phase 2 — Supabase local + schema + RLS**
 `supabase init`, `supabase start` (Docker). Schema as numbered migrations only —

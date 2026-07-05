@@ -51,7 +51,8 @@ Useful variants:
 pnpm exec playwright test --ui              # interactive UI mode (great for debugging)
 pnpm exec playwright test --headed          # watch the real browser
 pnpm exec playwright test --debug           # step through with the inspector
-pnpm exec playwright test smoke             # filter by file/title substring
+pnpm exec playwright test smoke             # filter by test file name/path
+pnpm exec playwright test -g "home page"    # filter by test title (--grep)
 pnpm exec playwright show-report            # open the HTML report from the last run
 ```
 
@@ -96,6 +97,7 @@ test("home page loads", async ({ page }) => {
 
 ## CI
 
-Intentionally **not** wired into CI yet. The CI job stays
-`lint → format:check → typecheck → test → build` (Vitest only). E2E joins CI in
-Phase 3/4 once there are real flows to test. See `CLAUDE.md` §4–§5.
+Intentionally **not** wired into CI yet. The CI job is
+`lint → format:check → typecheck → test → build → audit` (Vitest only — no
+Playwright step). E2E joins CI in Phase 3/4 once there are real flows to test.
+See `CLAUDE.md` §4–§5.
