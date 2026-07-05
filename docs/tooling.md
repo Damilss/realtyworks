@@ -17,8 +17,10 @@ the [README](../README.md#quality-gates); this is the detail.
 | osv-scanner lockfile CVE scan | `.github/workflows/osv-scanner.yml` | weekly + manual |
 | Dependabot version updates | `.github/dependabot.yml` | weekly |
 
-Local hooks are convenience; **CI is the authoritative gate**. Hooks can be
-skipped (`--no-verify`, missing gitleaks binary) — CI can't.
+Local hooks are convenience; for linting, formatting, and secret scanning,
+**CI is the authoritative gate** — hooks can be skipped (`--no-verify`,
+missing gitleaks binary), CI can't. One exception: commit-message linting is
+hook-only today; there is no commitlint step in CI.
 
 ---
 
@@ -88,13 +90,16 @@ lint → format:check → typecheck → unit tests → build → audit
 
 Every step after the first carries `if: ${{ !cancelled() }}`, so a failing
 step doesn't stop the rest — **one run reports every problem**, not just the
-first. Any failed step still fails the job (and the PR check).
+first. Any failed step still fails the job (and the PR check), except the
+audit step while it remains non-blocking (next section).
 
-Reproduce the whole gate locally:
+Reproduce the gate locally (everything but the audit step):
 
 ```bash
 pnpm lint && pnpm format:check && pnpm typecheck && pnpm test && pnpm build
 ```
+
+Add `pnpm audit --audit-level=high` to preview the audit step too.
 
 ### Dependency vulnerability gate (`pnpm audit`)
 
@@ -109,7 +114,10 @@ suggestion proposed switching automatically on a hardcoded date; declined —
 a date-triggered flip can redden an unrelated PR with no warning, and a
 hardcoded date lies the moment the triage slips. Flipping is a deliberate,
 reviewed edit: delete the `continue-on-error: true` line, update the comment.
-A tracking issue is the "don't forget" mechanism.
+A tracking issue is the "don't forget" mechanism. (The comment in `ci.yml`
+still carries the original "non-blocking until 2026-07-08" wording from PR
+#43; rewriting it is part of the flip — tracked in
+[docs/backlog.md](backlog.md).)
 
 **Known finding (as of 2026-07-04):**
 
@@ -121,7 +129,7 @@ A tracking issue is the "don't forget" mechanism.
 
 ## Secret scanning (gitleaks)
 
-Two layers (issue #19, PRs #41–#42):
+Two layers (issue #19, PR #41):
 
 1. **Pre-commit** (above) — catches a secret before it ever enters history.
    Best-effort: skipped when the binary is missing.
@@ -184,9 +192,12 @@ Belt and suspenders, both free.
 
 - **Ungrouped PRs** — every bump is its own PR (~11 open at last count).
   Fix: `groups:` to bundle minor+patch.
-- **Commit prefix vs commitlint** — Dependabot's default commit messages
-  don't use a conventional type, so they'll fail the commitlint-checked
-  convention. Fix: `commit-message: { prefix: "deps" }`.
+- **Commit prefix vs house convention** — Dependabot currently emits
+  `chore(deps)` / `chore(deps-dev)` prefixes (valid conventional commits, and
+  `chore` passes the type list) rather than the house `deps` type. Fix:
+  `commit-message: { prefix: "deps" }` to align. (Note commitlint is hook-only,
+  so bot commits are never actually linted — this is about consistency, not a
+  failing check.)
 - **`@types/node` leads the runtime** — an open Dependabot PR bumps
   `@types/node` to 26 while the runtime is pinned to Node 24 (and the manifest
   still says `^20`). Types should **track** the runtime major, not lead it:
@@ -219,7 +230,7 @@ the paper trail; see git history for the full diffs.)
   `vite >= 8.0.16`.
 - **2026-07 · gitleaks hardening** — first CI run needed `pull-requests: read`;
   the allowlist regex was anchored; the pre-commit hook made fail-safe
-  (PRs #41–#42).
+  (PR #41).
 - **2026-07 · commitlint type list** — `CI/CD` retired in favor of `ci`;
   `deps` added for dependency bumps (PR #40).
 - **2026-07 · Native GitHub security features are GHAS-gated** on private

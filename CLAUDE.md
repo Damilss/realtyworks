@@ -42,8 +42,9 @@ Vitest only collects `src/**/*.{test,spec}.{ts,tsx}` and
 via the `@/*` alias (`@/* → ./src/*`, `tsconfig.json`).
 
 **CI** (`.github/workflows/ci.yml`, on PR + push to `main`): one job runs
-lint → format:check → typecheck → test → build → audit. Each step uses
-`if: !cancelled()` so one run reports *every* failure, not just the first.
+lint → format:check → typecheck → test → build → audit. Each check step after
+the first uses `if: !cancelled()` so one run reports *every* failure, not just
+the first.
 The audit step (`pnpm audit --audit-level=high`) is currently non-blocking
 pending advisory triage. Two more workflows: gitleaks secret scan
 (`security.yml`, PR + push) and a weekly osv-scanner lockfile CVE scan
@@ -150,8 +151,11 @@ that belong in them — no speculative/empty folders.
 
 ```
 realtyworks/
-├── .github/workflows/ci.yml        # lint → typecheck → test → build per PR
-├── .husky/                         # pre-commit (lint-staged), commit-msg (commitlint)
+├── .github/
+│   ├── workflows/                  # ci.yml (main gate — see §0) · security.yml · osv-scanner.yml
+│   └── dependabot.yml              # weekly npm + github-actions updates
+├── .husky/                         # pre-commit (lint-staged + gitleaks), commit-msg (commitlint)
+├── docs/                           # tooling.md · playwright.md · backlog.md · dependency-version-management.md
 ├── public/
 ├── src/
 │   ├── app/                        # App Router
@@ -185,6 +189,7 @@ realtyworks/
 │   └── e2e/                        # playwright
 ├── .env.example                    # committed — documents required vars
 ├── .env.local                      # gitignored — real secrets
+├── .gitleaks.toml                  # secret-scanning config (default rules + allowlist)
 ├── .nvmrc                          # pinned Node, matches CI
 ├── commitlint.config.mjs
 ├── eslint.config.mjs
@@ -215,9 +220,11 @@ Foundations before features. Do not jump ahead to feature breadth.
 
 **Phase 1 — Foundations**
 Repo + tooling + green CI on a near-empty Next.js app. TS strict, ESLint +
-Prettier, Husky pre-commit, conventional commits, branch protection on `main`,
-Vitest + Playwright installed (mostly empty), GitHub Actions running
-lint + typecheck + test + build per PR. Pipeline green before features.
+Prettier, Husky hooks (lint-staged + gitleaks, commitlint), conventional
+commits, branch protection on `main`, Vitest + Playwright installed (mostly
+empty), GitHub Actions running lint + format check + typecheck + test +
+build + dependency audit per PR, plus gitleaks secret scanning and a weekly
+osv-scanner CVE scan. Pipeline green before features.
 
 **Phase 2 — Supabase local + schema + RLS**
 `supabase init`, `supabase start` (Docker). Schema as numbered migrations only —

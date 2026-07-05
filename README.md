@@ -36,7 +36,8 @@ Typical workflow:
 ### Non-goals (for MVP)
 
 Full accounting / rent collection · tenant portal / messaging suite · full
-leasing pipeline · deep third-party integrations · mobile app.
+leasing pipeline · deep third-party integrations · mobile app / second
+surface · dashboards beyond the minimal reporting above.
 
 ---
 
@@ -98,7 +99,8 @@ the gitignored `.env.local`).
 | `pnpm test` | Vitest, one-shot (`--passWithNoTests`) |
 | `pnpm test:e2e` | Playwright E2E (boots the dev server itself) |
 
-Run the full CI gauntlet locally before pushing:
+Run the CI gauntlet locally before pushing (everything but the audit step —
+add `pnpm audit --audit-level=high` to preview that too):
 
 ```bash
 pnpm lint && pnpm format:check && pnpm typecheck && pnpm test && pnpm build
@@ -140,8 +142,8 @@ Everything below must pass before code lands on `main`.
 ### CI — `.github/workflows/ci.yml` (PRs + pushes to `main`)
 
 One job runs **lint → format check → typecheck → unit tests → build → audit**.
-Each step uses `if: ${{ !cancelled() }}`, so a single run reports *every*
-failure rather than stopping at the first. pnpm's store and the Next.js build
+Every check step after the first uses `if: ${{ !cancelled() }}`, so a single
+run reports *every* failure rather than stopping at the first. pnpm's store and the Next.js build
 cache are cached between runs.
 
 The final step, `pnpm audit --audit-level=high`, is a dependency vulnerability
@@ -205,7 +207,7 @@ land — not speculatively.
 
 | Phase | Scope | Status |
 | --- | --- | --- |
-| 1 — Foundations | Tooling, CI, hooks, security scanning on a near-empty app | ✅ Essentially complete |
+| 1 — Foundations | Tooling, CI, hooks, security scanning on a near-empty app | 🔷 Nearly done — open: audit-gate flip, branch protection ([backlog](docs/backlog.md)) |
 | 2 — Supabase | Local stack, migrations (RLS from day one), seed data | Next |
 | 3 — Vertical slice | One full path: manager → work order → vendor → activity log | Planned |
 | 4 — Hosted deploy | Vercel + Supabase Cloud, PR previews, Sentry | Planned |

@@ -31,10 +31,12 @@ Pick them off at your discretion.
 - Prettier configured (markdown intentionally ignored).
 
 ### Sharp edges these issues address
-- **~11 open Dependabot branches** (ungrouped, no conventional prefix). Now that
-  commitlint is on, Dependabot's default messages will fail it. The open
-  `@types/node → 26` bump **leads** the Node 24 runtime; types should track the
-  runtime major (24), not lead it. `@types/node` is currently `^20`.
+- **~11 open Dependabot branches** (ungrouped). Dependabot emits
+  `chore(deps)` / `chore(deps-dev)` prefixes — valid conventional commits, but
+  not the house `deps` type (and commitlint is hook-only, so bot commits are
+  never linted anyway). The open `@types/node → 26` bump **leads** the Node 24
+  runtime; types should track the runtime major (24), not lead it.
+  `@types/node` is currently `^20`.
 - Native GitHub security features (CodeQL, secret-scanning push-protection,
   dependency-review) are **GHAS-gated on private repos**. Security issues below default
   to **OSS CI tools** (gitleaks, Semgrep, osv-scanner) — free, vendor-neutral, and they
@@ -44,7 +46,7 @@ Pick them off at your discretion.
 
 ## ✅ Done (kept for the paper trail)
 
-### ✅ Secret scanning (gitleaks) in CI + pre-commit — issue #19, PRs #41–#42
+### ✅ Secret scanning (gitleaks) in CI + pre-commit — issue #19, PR #41
 CI job on push + PR (full-history scan), `gitleaks git --pre-commit --staged`
 in `.husky/pre-commit` (fail-safe when the binary is missing), committed
 `.gitleaks.toml` (default rules + anchored `pnpm-lock.yaml` allowlist).
@@ -90,11 +92,11 @@ a high/critical CVE surfaces in the log without failing the PR.
 ## 🟠 High
 
 ### 🟠 Tune Dependabot: group, prefix, and pin @types/node to Node 24
-**Why:** ~11 ungrouped PRs is noise; default messages will fail commitlint; the open
-`@types/node → 26` bump leads your Node 24 runtime.
+**Why:** ~11 ungrouped PRs is noise; Dependabot's `chore(deps)` prefix doesn't match
+the house `deps` type; the open `@types/node → 26` bump leads your Node 24 runtime.
 **Do:** in `.github/dependabot.yml`:
 - `groups:` — bundle minor+patch (e.g. one `dev-minor` group) to cut PR count.
-- `commit-message: { prefix: "deps", prefix-development: "deps" }` so commits pass commitlint.
+- `commit-message: { prefix: "deps", prefix-development: "deps" }` to match the house type.
 - `ignore:` a major bump on `@types/node` beyond `24.x` (types track runtime, not lead it).
 - Add `labels: ["dependencies"]`; consider dropping `open-pull-requests-limit` back down.
 **Done when:** next Dependabot run opens grouped PRs with `deps(...)` messages that pass CI.
@@ -224,8 +226,8 @@ and the `supabase` CLI (Phase 2).
 
 *(Done so far: commitlint → gitleaks → `pnpm audit` gate + osv-scanner.)*
 
-1. **Dependabot tuning** (High) — commitlint is now live, so Dependabot's default
-   commit messages will fail it; the `deps` prefix fix is overdue.
+1. **Dependabot tuning** (High) — grouping cuts the open-PR noise, and the
+   `deps` commit prefix aligns bot commits with the house type.
 2. **Flip the audit gate to blocking** (Critical) — clear the vite advisory first.
 3. **Semgrep** (High) — the remaining SAST layer.
 4. **Branch protection** (Critical) — last of this batch, so you can require every
