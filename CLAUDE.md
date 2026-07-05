@@ -46,8 +46,9 @@ lint → format:check → typecheck → test → build → audit. Each check ste
 the first uses `if: !cancelled()` so one run reports *every* failure, not just
 the first.
 The audit step (`pnpm audit --audit-level=high`) is currently non-blocking
-pending advisory triage. Two more workflows: gitleaks secret scan
-(`security.yml`, PR + push) and a weekly osv-scanner lockfile CVE scan
+pending advisory triage. Two more workflows: gitleaks secret scan + Semgrep
+SAST (`security.yml`, PR + push; semgrep is blocking, findings render as PR
+annotations) and a weekly osv-scanner lockfile CVE scan
 (`osv-scanner.yml`). Details + decisions: `docs/tooling.md`. Reproduce the
 main gate locally by running lint/format:check/typecheck/test/build in order
 before pushing.
@@ -72,7 +73,8 @@ exist:
   generated.
 - **Already in place:** Husky (pre-commit + commit-msg), commitlint,
   lint-staged, Playwright (+ `tests/e2e/smoke.spec.ts`), gitleaks
-  (CI + pre-commit), `pnpm audit` gate, weekly osv-scanner, Dependabot.
+  (CI + pre-commit), Semgrep SAST (CI), `pnpm audit` gate, weekly osv-scanner,
+  Dependabot.
 - When you add the first missing piece, follow §3/§5 exactly (e.g. RLS in the
   same migration as its table; `src/server/` as the trust boundary).
 

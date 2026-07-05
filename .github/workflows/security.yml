@@ -11,26 +11,65 @@ concurrency:
   group: security-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-# Least privilege: read the repo, plus read the PR's commit list on pull_request
-# events (gitleaks-action calls GET /pulls/:n/commits, which needs pull-requests: read).
+# Least privilege: read the repo. The gitleaks job adds pull-requests: read
+# for itself only.
 permissions:
   contents: read
-  pull-requests: read
 
 jobs:
   gitleaks:
     name: Secret scan (gitleaks)
     runs-on: ubuntu-latest
+    # gitleaks-action calls GET /pulls/:n/commits on pull_request events,
+    # which needs pull-requests: read on top of contents: read.
+    permissions:
+      contents: read
+      pull-requests: read
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           fetch-depth: 0 # full history so gitleaks can scan all commits
 
       - name: Run gitleaks
-        uses: gitleaks/gitleaks-action@v2
+        uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2.3.9
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # gitleaks auto-detects the repo-root .gitleaks.toml; no GITLEAKS_CONFIG needed.
           # gitleaks-action is free for personal accounts + public repos; only GitHub
           # organizations require a GITLEAKS_LICENSE secret.
+
+  semgrep:
+    name: SAST (Semgrep OSS)
+    runs-on: ubuntu-latest
+    # Official image, deliberately unpinned: Dependabot's github-actions
+    # ecosystem only bumps `uses:` references, not `container:` images, so a
+    # pin here would go stale silently — and the rulesets are fetched from the
+    # registry at scan time anyway, so pinning the CLI buys little
+    # reproducibility.
+    container:
+      image: semgrep/semgrep
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      # --error: findings fail the job (blocking gate; the baseline is clean).
+      # --json-output: JSON copy for the annotation step — the human-readable
+      # text output still goes to the job log.
+      - name: Run semgrep
+        run: >
+          semgrep scan
+          --config p/typescript
+          --config p/react
+          --config p/nextjs
+          --config p/owasp-top-ten
+          --error
+          --json-output=semgrep.json
+
+      # SARIF upload to the Security tab needs GHAS on private repos (same
+      # reason osv-scanner disables it), so findings surface as PR annotations
+      # via workflow commands instead. Runs even when the scan step failed —
+      # that's exactly when there are findings to annotate.
+      - name: Annotate findings
+        if: ${{ !cancelled() }}
+        run: python3 .github/scripts/semgrep-annotations.py semgrep.json

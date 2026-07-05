@@ -14,6 +14,7 @@ the [README](../README.md#quality-gates); this is the detail.
 | Lint → format → typecheck → test → build | `.github/workflows/ci.yml` | PRs + pushes to `main` |
 | `pnpm audit` dependency gate | `.github/workflows/ci.yml` | PRs + pushes to `main` |
 | gitleaks full-history scan | `.github/workflows/security.yml` | PRs + pushes to `main` |
+| Semgrep SAST scan | `.github/workflows/security.yml` | PRs + pushes to `main` |
 | osv-scanner lockfile CVE scan | `.github/workflows/osv-scanner.yml` | weekly + manual |
 | Dependabot version updates | `.github/dependabot.yml` | weekly |
 
@@ -137,9 +138,11 @@ Two layers (issue #19, PR #41):
    scans the **full git history** (`fetch-depth: 0`) on every PR and push to
    `main`. This is the authoritative layer.
 
-Workflow permissions are least-privilege with one addition: on PR events the
-action calls `GET /pulls/:n/commits`, which needs `pull-requests: read`
-(discovered when the first run failed without it — PR #41).
+Permissions are least-privilege: the workflow grants `contents: read`, and the
+gitleaks **job** adds `pull-requests: read` because on PR events the action
+calls `GET /pulls/:n/commits` (discovered when the first run failed without
+it — PR #41). The semgrep job (next section) shares the workflow but not the
+extra permission.
 
 Config: `.gitleaks.toml` —
 
@@ -155,6 +158,52 @@ repos; only GitHub **organizations** need a `GITLEAKS_LICENSE` secret.
 
 **If a real secret ever lands in history:** rotating the credential is the
 fix; scrubbing history is cosmetic. Rotate first, always.
+
+---
+
+## SAST (Semgrep OSS)
+
+`semgrep` job in `.github/workflows/security.yml` (issue #24) — static
+analysis on every PR and push to `main`, using the official `semgrep/semgrep`
+container and four registry rulesets: `p/typescript`, `p/react`, `p/nextjs`,
+`p/owasp-top-ten`.
+
+- **Semgrep OSS, not CodeQL** — CodeQL needs GHAS on private repos (see the
+  decisions log). Swap to CodeQL later if the repo goes public or GHAS is
+  bought.
+- **Blocking from day one** (`--error`: any finding fails the job). Unlike the
+  audit gate there was no pre-existing backlog: the first scan's findings
+  (below) were fixed in the same PR, so the gate landed green.
+- **Findings surface as PR annotations, not SARIF.** SARIF upload to the
+  Security tab needs GHAS on private repos (same reason osv-scanner disables
+  it). Instead the scan writes JSON (`--json-output`, text still goes to the
+  job log) and `.github/scripts/semgrep-annotations.py` converts each finding
+  into an `::error` / `::warning` / `::notice` workflow command, which GitHub
+  renders as annotations for free. The annotate step runs
+  `if: ${{ !cancelled() }}` so it still runs when the scan step fails — which
+  is exactly when there are findings to annotate.
+- **Container image is deliberately unpinned** (`semgrep/semgrep`, latest):
+  Dependabot only bumps `uses:` references, not `container:` images, so a pin
+  would go stale silently — and rulesets are fetched from the registry at scan
+  time anyway, so pinning the CLI buys little reproducibility.
+
+**The first scan flagged our own CI config** (8 findings, all fixed in the
+same PR):
+
+- `github-actions-mutable-action-tag` — a `uses: …@v4`-style tag can be
+  silently repointed by the action owner (the trivy-action compromise
+  pattern). All step-level action references are now **pinned to full commit
+  SHAs** with a `# vX.Y.Z` comment; Dependabot bumps SHA pins just like tags.
+- `dependabot-missing-cooldown` — `dependabot.yml` now waits 7 days
+  (`cooldown.default-days`) before proposing a newly published version;
+  compromised releases are usually caught within days.
+
+Run the same scan locally:
+
+```bash
+pipx run semgrep scan --config p/typescript --config p/react \
+  --config p/nextjs --config p/owasp-top-ten --error
+```
 
 ---
 
@@ -186,7 +235,11 @@ Belt and suspenders, both free.
 
 - **npm** (`open-pull-requests-limit: 10`)
 - **github-actions** — also serves as the auto-bumper for pinned workflow
-  versions (e.g. the osv-scanner tag).
+  versions (the osv-scanner tag and the SHA-pinned step actions).
+
+Both ecosystems set `cooldown.default-days: 7`: Dependabot waits a week before
+proposing a newly published version, so a compromised release has time to be
+caught and yanked first (flagged by the Semgrep gate — issue #24).
 
 ### Known gaps (tracked in [docs/backlog.md](backlog.md), not yet done)
 
@@ -218,6 +271,12 @@ ignored too. So `pnpm format:check` failures are never about docs.
 Running record of problems hit and calls made, newest first. (PR numbers are
 the paper trail; see git history for the full diffs.)
 
+- **2026-07 · Semgrep SAST gate added** (issue #24) — four registry rulesets
+  on every PR/push, blocking from day one; findings render as PR annotations
+  via workflow commands because SARIF upload is GHAS-gated. Its first run
+  flagged our own CI config: step actions are now SHA-pinned
+  (`github-actions-mutable-action-tag`) and Dependabot got a 7-day cooldown
+  (`dependabot-missing-cooldown`).
 - **2026-07 · Audit gate flip is manual** — declined an automated date-based
   switch to blocking; a tracking issue + deliberate edit beats a hardcoded
   date that can redden unrelated PRs (PR #43 review thread).

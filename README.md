@@ -157,6 +157,9 @@ finding.
 - **gitleaks** (`.github/workflows/security.yml`) — secret scan of the full
   git history on every PR and push to `main`. Config: `.gitleaks.toml`
   (default rules + an allowlist for `pnpm-lock.yaml` false positives).
+- **Semgrep OSS** (`.github/workflows/security.yml`) — SAST scan on every PR
+  and push to `main` (`p/typescript`, `p/react`, `p/nextjs`,
+  `p/owasp-top-ten`). Blocking; findings render as PR annotations.
 - **osv-scanner** (`.github/workflows/osv-scanner.yml`) — weekly lockfile CVE
   scan (Mondays 12:30 UTC, plus manual `workflow_dispatch`).
 - **Dependabot** — weekly version updates for npm packages and GitHub Actions.
@@ -170,7 +173,7 @@ Details, decisions, and known issues: [docs/tooling.md](docs/tooling.md).
 ```
 realtyworks/
 ├── .github/
-│   ├── workflows/          # ci.yml · security.yml (gitleaks) · osv-scanner.yml
+│   ├── workflows/          # ci.yml · security.yml (gitleaks + semgrep) · osv-scanner.yml
 │   └── dependabot.yml
 ├── .husky/                 # pre-commit (lint-staged + gitleaks) · commit-msg (commitlint)
 ├── docs/                   # project docs (see index below)
