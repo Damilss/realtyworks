@@ -301,6 +301,11 @@ ignored too. So `pnpm format:check` failures are never about docs.
 Running record of problems hit and calls made, newest first. (PR numbers are
 the paper trail; see git history for the full diffs.)
 
+- **2026-07 · pnpm store untracked** — `.pnpm-store/v11/index.db` (pnpm's local
+  content-addressable store index) had been committed by accident. Added
+  `.pnpm-store` to `.gitignore` and `git rm --cached`'d the binary so it stops
+  riding along in the tree. The store is a per-machine build artifact —
+  regenerated on `pnpm install` — and never belongs in git.
 - **2026-07 · Unit-test DOM harness** — added **happy-dom** + React Testing
   Library (`@testing-library/react` + its `@testing-library/dom` peer +
   `jest-dom` + `user-event`) so components are testable, not just plain TS.

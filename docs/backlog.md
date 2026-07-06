@@ -46,6 +46,12 @@ Pick them off at your discretion.
 
 ## ✅ Done (kept for the paper trail)
 
+### ✅ Untrack the committed pnpm store (2026-07-07)
+`.pnpm-store/v11/index.db` (pnpm's local content-addressable store index) had
+been committed by mistake. Added `.pnpm-store` to `.gitignore` and `git rm
+--cached`'d the binary so it stops riding along in the tree. It's a per-machine
+build artifact regenerated on `pnpm install` — never versioned.
+
 ### ✅ Vitest DOM environment + Testing Library
 `happy-dom` environment + React Testing Library wired into Vitest. Dev deps:
 `happy-dom`, `@testing-library/react` (+ its required `@testing-library/dom`
