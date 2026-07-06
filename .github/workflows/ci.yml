@@ -77,3 +77,57 @@ jobs:
         if: ${{ !cancelled() }}
         continue-on-error: true
         run: pnpm audit --audit-level=high
+
+  # Boots the app and runs the Playwright smoke test — proves it *runs*, not
+  # just that it compiles. Parallel to `verify`; same triggers. Only the
+  # existing smoke spec runs here; real flows arrive with the Phase 3 slice.
+  e2e:
+    name: E2E (Playwright smoke)
+    runs-on: ubuntu-latest
+    env:
+      NEXT_TELEMETRY_DISABLED: "1"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
+        # pnpm version is read from the "packageManager" field in package.json.
+
+      - name: Set up Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Cache the Chromium binary (~/.cache/ms-playwright), keyed on the
+      # lockfile — which pins the exact @playwright/test version, so a bump
+      # busts the cache and re-downloads.
+      - name: Cache Playwright browsers
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ hashFiles('pnpm-lock.yaml') }}
+
+      # Idempotent: on a cache hit the binary is present and only the OS libs
+      # (apt, a few seconds) are (re)installed; on a miss it also downloads.
+      - name: Install Playwright browser (Chromium + OS deps)
+        run: pnpm exec playwright install --with-deps chromium
+
+      # CI is set by GitHub Actions, so playwright.config.ts keys off it
+      # (forbidOnly, retries: 2, reuseExistingServer: false) with no extra flags.
+      - name: Run E2E smoke test
+        run: pnpm run test:e2e
+
+      # Upload the HTML report on failure (and on retried-pass, capturing the
+      # trace that retries: 2 would otherwise hide).
+      - name: Upload Playwright report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 7

@@ -25,7 +25,7 @@ pnpm start              # serve the production build
 pnpm lint               # eslint (next core-web-vitals + typescript)
 pnpm typecheck          # tsc --noEmit (strict)
 pnpm test               # vitest run --passWithNoTests
-pnpm test:e2e           # playwright (local-only; boots the dev server itself)
+pnpm test:e2e           # playwright smoke test (also runs in CI; boots the dev server itself)
 pnpm format             # prettier --write .
 pnpm format:check       # prettier --check . (CI gate; *.md is ignored)
 ```
@@ -41,10 +41,12 @@ Vitest only collects `src/**/*.{test,spec}.{ts,tsx}` and
 `tests/unit/**/*.{test,spec}.{ts,tsx}` (see `vitest.config.ts`). Import app code
 via the `@/*` alias (`@/* → ./src/*`, `tsconfig.json`).
 
-**CI** (`.github/workflows/ci.yml`, on PR + push to `main`): one job runs
-lint → format:check → typecheck → test → build → audit. Each check step after
-the first uses `if: !cancelled()` so one run reports *every* failure, not just
-the first.
+**CI** (`.github/workflows/ci.yml`, on PR + push to `main`): the `verify` job
+runs lint → format:check → typecheck → test → build → audit. Each check step
+after the first uses `if: !cancelled()` so one run reports *every* failure, not
+just the first. A parallel `e2e` job runs the Playwright smoke test (boots the
+app, Chromium only, HTML report uploaded as an artifact) — proving the app
+*runs*, not just that it compiles.
 The audit step (`pnpm audit --audit-level=high`) is currently non-blocking
 pending advisory triage. Two more workflows: gitleaks secret scan + Semgrep
 SAST (`security.yml`, PR + push; semgrep is blocking, findings render as PR
@@ -225,8 +227,9 @@ Repo + tooling + green CI on a near-empty Next.js app. TS strict, ESLint +
 Prettier, Husky hooks (lint-staged + gitleaks, commitlint), conventional
 commits, branch protection on `main`, Vitest + Playwright installed (mostly
 empty), GitHub Actions running lint + format check + typecheck + test +
-build + dependency audit per PR, plus gitleaks secret scanning and a weekly
-osv-scanner CVE scan. Pipeline green before features.
+build + dependency audit per PR plus a parallel Playwright smoke test, plus
+gitleaks secret scanning and a weekly osv-scanner CVE scan. Pipeline green
+before features.
 
 **Phase 2 — Supabase local + schema + RLS**
 `supabase init`, `supabase start` (Docker). Schema as numbered migrations only —

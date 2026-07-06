@@ -3,9 +3,9 @@
 End-to-end tests for RealtyWorks. Playwright drives a real browser against the
 running app to verify user-facing behavior.
 
-**Phase 1 scope:** install + a single smoke test only. Real flows and a CI job
-arrive with the Phase 3 vertical slice — see `CLAUDE.md` §4. For now E2E runs
-**locally only** and is not part of the CI gate.
+**Phase 1 scope:** install + a single smoke test only. The smoke test now runs
+in CI (see [CI](#ci) below); real **flows** still arrive with the Phase 3
+vertical slice — see `CLAUDE.md` §4.
 
 ---
 
@@ -97,7 +97,15 @@ test("home page loads", async ({ page }) => {
 
 ## CI
 
-Intentionally **not** wired into CI yet. The CI job is
-`lint → format:check → typecheck → test → build → audit` (Vitest only — no
-Playwright step). E2E joins CI in Phase 3/4 once there are real flows to test.
-See `CLAUDE.md` §4–§5.
+The smoke test runs in CI as a dedicated `e2e` job in
+`.github/workflows/ci.yml` — parallel to the `verify` gate
+(`lint → format:check → typecheck → test → build → audit`, Vitest only), on the
+same triggers (PRs → `main`, pushes to `main`). The job installs deps
+(`--frozen-lockfile`), installs Chromium (`playwright install --with-deps
+chromium`, cached across runs on `~/.cache/ms-playwright`), runs `pnpm
+test:e2e`, and uploads the HTML report as a `playwright-report` artifact for
+debugging. `next build` in `verify` proves the app compiles; this proves it
+boots and renders.
+
+Only the existing smoke spec runs here — real **flows** join in Phase 3/4 once
+the vertical slice exists to drive them. See `CLAUDE.md` §4–§5.
