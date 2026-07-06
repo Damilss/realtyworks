@@ -99,11 +99,10 @@ the gitignored `.env.local`).
 | `pnpm test` | Vitest, one-shot (`--passWithNoTests`) |
 | `pnpm test:e2e` | Playwright E2E (boots the dev server itself) |
 
-Run the CI gauntlet locally before pushing (everything but the audit step —
-add `pnpm audit --audit-level=high` to preview that too):
+Run the CI gauntlet locally before pushing:
 
 ```bash
-pnpm lint && pnpm format:check && pnpm typecheck && pnpm test && pnpm build
+pnpm lint && pnpm format:check && pnpm typecheck && pnpm test && pnpm build && pnpm audit --audit-level=high
 ```
 
 ---
@@ -146,11 +145,11 @@ Every check step after the first uses `if: ${{ !cancelled() }}`, so a single
 run reports *every* failure rather than stopping at the first. pnpm's store and the Next.js build
 cache are cached between runs.
 
-The final step, `pnpm audit --audit-level=high`, is a dependency vulnerability
-gate. It is currently **non-blocking** (`continue-on-error: true`) while
-existing advisories are triaged, and will be flipped to blocking manually —
-see [docs/tooling.md](docs/tooling.md) for the details and the one known
-finding.
+The final step, `pnpm audit --audit-level=high`, is a blocking dependency
+vulnerability gate. Any high/critical advisory fails CI; moderate/low
+advisories stay below the audit threshold. The flip from advisory-only to
+blocking was deliberate and manual — see [docs/tooling.md](docs/tooling.md)
+for the rationale and cleared advisory details.
 
 ### Security scanning
 
@@ -210,7 +209,7 @@ land — not speculatively.
 
 | Phase | Scope | Status |
 | --- | --- | --- |
-| 1 — Foundations | Tooling, CI, hooks, security scanning on a near-empty app | 🔷 Nearly done — open: audit-gate flip, branch protection ([backlog](docs/backlog.md)) |
+| 1 — Foundations | Tooling, CI, hooks, security scanning on a near-empty app | 🔷 Nearly done — open: branch protection ([backlog](docs/backlog.md)) |
 | 2 — Supabase | Local stack, migrations (RLS from day one), seed data | Next |
 | 3 — Vertical slice | One full path: manager → work order → vendor → activity log | Planned |
 | 4 — Hosted deploy | Vercel + Supabase Cloud, PR previews, Sentry | Planned |
