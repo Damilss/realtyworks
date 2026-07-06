@@ -123,10 +123,30 @@ the house `deps` type; the open `@types/node → 26` bump leads your Node 24 run
 ## 🟡 Medium
 
 ### 🟡 Vitest DOM environment + Testing Library
-**Why:** Component tests need a DOM; current Vitest is node-env only.
-**Do:** `pnpm add -D @testing-library/react @testing-library/jest-dom happy-dom`; set
-`test.environment: "happy-dom"` + a setup file in `vitest.config.ts`.
-**Done when:** a trivial component render test passes.
+**Why:** `react` / `react-dom` (19.2.4) and `@types/react-dom` are already installed for the app,
+but Vitest runs in the default **node** environment with no DOM and no render helpers — so only
+plain-TS logic is testable, not components. Needed before the Phase 3 slice's component tests
+(`CLAUDE.md` §5).
+**Current state:** `vitest.config.ts` sets only `include` globs (no `environment`, `setupFiles`, or
+`globals`); `tests/unit/` doesn't exist yet (only `tests/e2e/smoke.spec.ts`); no `@testing-library/*`,
+`happy-dom`, or `jsdom` installed (the lockfile mentions are Vitest's optional peer declarations).
+**Do:**
+- `pnpm add -D happy-dom @testing-library/react @testing-library/jest-dom` (React 19 / Vitest 4 compatible —
+  `@testing-library/react` ≥ 16 for React 19).
+- In `vitest.config.ts`: `test.environment: "happy-dom"`, `test.setupFiles: ["./tests/unit/setup.ts"]`,
+  and `test.globals: true` (enables Testing Library's automatic per-test `cleanup()`).
+- Add `tests/unit/setup.ts` → `import "@testing-library/jest-dom/vitest";` (registers the DOM matchers
+  and augments Vitest's `expect` types via module augmentation — no tsconfig change needed for the matchers).
+- For `globals: true` typing, add a `vitest.d.ts` with `/// <reference types="vitest/globals" />` rather
+  than a `types: [...]` array in `tsconfig.json` — this repo has **no** `types` field, so introducing one
+  would drop the currently auto-included `@types/node` / `@types/react`.
+- Add one render test under the existing glob (`tests/unit/**` or `src/**/*.test.tsx`) to prove the setup;
+  this also creates `tests/unit/`.
+**Notes:** happy-dom over jsdom for speed/footprint (swap only if a needed API is missing). `tsconfig`
+already sets `jsx: "react-jsx"`, so esbuild transforms `.tsx` in tests — `@vitejs/plugin-react` is **not**
+required unless a test needs full `act()` / Fast-Refresh parity.
+**Done when:** `pnpm test` runs a component render test green under happy-dom, `pnpm typecheck` still passes,
+and jest-dom matchers (e.g. `toBeInTheDocument`) are available in specs.
 
 ### 🟡 Coverage visibility (not a gate)
 **Why:** See what's tested without chasing a %.
