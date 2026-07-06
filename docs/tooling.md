@@ -97,8 +97,8 @@ lint → format:check → typecheck → unit tests → build → audit
 
 Every step after the first carries `if: ${{ !cancelled() }}`, so a failing
 step doesn't stop the rest — **one run reports every problem**, not just the
-first. Any failed step still fails the job (and the PR check), except the
-audit step while it remains non-blocking (next section).
+first. Any failed step fails the job (and the PR check) — including the audit
+step, now that it is blocking (next section).
 
 Reproduce the gate locally (everything but the audit step):
 
@@ -124,24 +124,29 @@ flows arrive with the Phase 3 vertical slice. Details: [playwright.md](playwrigh
 The final CI step runs `pnpm audit --audit-level=high` (issue #20, PR #43):
 fails on any known high/critical advisory in the dependency tree.
 
-**Current state: non-blocking** (`continue-on-error: true`) to allow triage of
-pre-existing advisories without turning every PR red.
+**Current state: blocking.** A high/critical advisory fails the step, which
+fails the PR. Moderate/low advisories stay below the `--audit-level=high`
+threshold and don't gate. Landed non-blocking (`continue-on-error: true`) so
+pre-existing advisories could be triaged without reddening every PR; flipped to
+blocking once they were cleared.
 
-**Decision:** the flip to blocking is **manual, not date-based**. A review
+**Decision:** the flip to blocking was **manual, not date-based**. A review
 suggestion proposed switching automatically on a hardcoded date; declined —
 a date-triggered flip can redden an unrelated PR with no warning, and a
-hardcoded date lies the moment the triage slips. Flipping is a deliberate,
-reviewed edit: delete the `continue-on-error: true` line, update the comment.
-A tracking issue is the "don't forget" mechanism. (The comment in `ci.yml`
-still carries the original "non-blocking until 2026-07-08" wording from PR
-#43; rewriting it is part of the flip — tracked in
-[docs/backlog.md](backlog.md).)
+hardcoded date lies the moment the triage slips. A tracking issue was the
+"don't forget" mechanism, and flipping was a deliberate, reviewed edit
+(delete `continue-on-error: true`, rewrite the comment).
 
-**Known finding (as of 2026-07-04):**
-
-| Advisory | Package | Exposure | Fix |
-| --- | --- | --- | --- |
-| [GHSA-fx2h-pf6j-xcff](https://github.com/advisories/GHSA-fx2h-pf6j-xcff) | `vite@8.0.13` | dev-only, transitive via `vitest` | patched in `vite >= 8.0.16` — clear by bumping vitest/vite |
+**Advisory cleared to enable the flip:** GHSA-fx2h-pf6j-xcff
+(`vite`, `server.fs.deny` bypass; dev-only, pulled in transitively as a peer of
+`vitest`), patched in `vite >= 8.0.16`. Cleared by pinning `vite` to `^8.0.16`
+(resolves to 8.1.3) as a **direct `devDependency`**. This looks odd — we don't
+import vite — but it's deliberate: `vitest` requires vite as an
+**auto-installed peer**, and pnpm `overrides` do **not** govern auto-installed
+peers (they rewrite the requirement but the peer installer keeps resolving the
+old version). Declaring vite directly is the mechanism that actually controls
+the resolved version. Remove the direct dependency once `vitest` requires
+`vite >= 8.0.16` on its own.
 
 ---
 
@@ -288,6 +293,12 @@ ignored too. So `pnpm format:check` failures are never about docs.
 Running record of problems hit and calls made, newest first. (PR numbers are
 the paper trail; see git history for the full diffs.)
 
+- **2026-07 · Audit gate flipped to blocking** — removed
+  `continue-on-error: true` from the `pnpm audit` step so a high/critical
+  advisory now fails the PR. Required clearing GHSA-fx2h-pf6j-xcff first: pnpm
+  `overrides` can't move an **auto-installed peer** (vite via vitest), so vite
+  was pinned to `^8.0.16` as a **direct `devDependency`** instead. See the
+  dependency-gate section above.
 - **2026-07 · Playwright smoke test wired into CI** — the existing
   `smoke.spec.ts` now runs as a parallel `e2e` job in `ci.yml`, closing the
   "builds but crashes on boot" gap (`next build` proved compilation only).
@@ -311,8 +322,9 @@ the paper trail; see git history for the full diffs.)
   unnecessary `security-events` permission removed (commits `009f249`,
   `a3234e6`).
 - **2026-07 · vite advisory GHSA-fx2h-pf6j-xcff** — dev-only, transitive via
-  vitest; the reason the audit gate started non-blocking. Cleared by
-  `vite >= 8.0.16`.
+  vitest; the reason the audit gate started non-blocking. Cleared by pinning
+  `vite ^8.0.16` as a direct devDependency (peer overrides don't work), which
+  unblocked the flip to blocking above.
 - **2026-07 · gitleaks hardening** — first CI run needed `pull-requests: read`;
   the allowlist regex was anchored; the pre-commit hook made fail-safe
   (PR #41).
