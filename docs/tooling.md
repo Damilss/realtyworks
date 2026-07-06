@@ -11,12 +11,12 @@ the [README](../README.md#quality-gates); this is the detail.
 | lint-staged (ESLint + Prettier) | `.husky/pre-commit` | every commit |
 | gitleaks staged scan | `.husky/pre-commit` | every commit (best-effort) |
 | commitlint | `.husky/commit-msg` | every commit |
-| Lint → format → typecheck → test → build | `.github/workflows/ci.yml` | PRs + pushes to `main` |
-| `pnpm audit` dependency gate | `.github/workflows/ci.yml` | PRs + pushes to `main` |
-| Playwright E2E smoke test | `.github/workflows/ci.yml` | PRs + pushes to `main` |
-| gitleaks full-history scan | `.github/workflows/security.yml` | PRs + pushes to `main` |
-| Semgrep SAST scan | `.github/workflows/security.yml` | PRs + pushes to `main` |
-| osv-scanner lockfile CVE scan | `.github/workflows/osv-scanner.yml` | weekly + manual |
+| Lint → format → typecheck → test → build | `.github/workflows/ci.yml` | PRs + pushes to `main`/`dev` |
+| `pnpm audit` dependency gate | `.github/workflows/ci.yml` | PRs + pushes to `main`/`dev` |
+| Playwright E2E smoke test | `.github/workflows/ci.yml` | PRs + pushes to `main`/`dev` |
+| gitleaks full-history scan | `.github/workflows/security.yml` | PRs + pushes to `main`/`dev` |
+| Semgrep SAST scan | `.github/workflows/security.yml` | PRs + pushes to `main`/`dev` |
+| osv-scanner lockfile CVE scan | `.github/workflows/osv-scanner.yml` | weekly + PRs into `main` + manual |
 | Dependabot version updates | `.github/dependabot.yml` | weekly |
 
 Local hooks are convenience; for linting, formatting, and secret scanning,
@@ -78,7 +78,8 @@ The config uses a named (not anonymous) default export to keep ESLint's
 
 ## CI — `.github/workflows/ci.yml`
 
-Runs on PRs targeting `main` and pushes to `main`.
+Runs on PRs targeting `main`/`dev` and pushes to `main`/`dev` (the `dev → main`
+integration flow — see the "Extend triggers to `dev`" note below).
 
 - **Concurrency** — a newer push to the same ref cancels the in-progress run.
 - **Permissions** — least privilege: `contents: read` only.
@@ -186,7 +187,7 @@ fix; scrubbing history is cosmetic. Rotate first, always.
 ## SAST (Semgrep OSS)
 
 `semgrep` job in `.github/workflows/security.yml` (issue #24) — static
-analysis on every PR and push to `main`, using the official `semgrep/semgrep`
+analysis on every PR and push to `main`/`dev`, using the official `semgrep/semgrep`
 container and four registry rulesets: `p/typescript`, `p/react`, `p/nextjs`,
 `p/owasp-top-ten`.
 
@@ -232,9 +233,12 @@ pipx run semgrep scan --config p/typescript --config p/react \
 ## Lockfile CVE scan (osv-scanner)
 
 `.github/workflows/osv-scanner.yml` — weekly scheduled scan (Mondays 12:30
-UTC) of the lockfile against the [OSV](https://osv.dev) database, plus
-`workflow_dispatch` for manual runs. Both triggers only work from the copy on
-`main` (a GitHub scheduling rule — branch copies don't run).
+UTC) of the lockfile against the [OSV](https://osv.dev) database, plus a scan on
+every **PR into `main`** (so lockfile changes accumulating on `dev` get an OSV
+pass before they merge) and `workflow_dispatch` for manual runs. The schedule +
+dispatch triggers only work from the copy on `main` (a GitHub scheduling rule —
+branch copies don't run); the `pull_request` trigger likewise reads its config
+from the base branch (`main`).
 
 - Uses Google's **reusable workflow**, pinned to a full release tag
   (`osv-scanner-reusable.yml@v2.3.8`); Dependabot's `github-actions` ecosystem
