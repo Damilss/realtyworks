@@ -12,6 +12,9 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Triple-slash reference shim (like next-env.d.ts); the TS triple-slash
+    // lint rule would otherwise flag it.
+    "vitest.d.ts",
   ]),
 ]);
 
