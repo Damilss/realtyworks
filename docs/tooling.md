@@ -101,6 +101,10 @@ step doesn't stop the rest — **one run reports every problem**, not just the
 first. Any failed step fails the job (and the PR check) — including the audit
 step, now that it is blocking (next section).
 
+The **unit tests** step runs Vitest under a **happy-dom** DOM environment with
+React Testing Library (jest-dom matchers + `user-event`), so components — not
+just plain TS — are testable. Setup rationale is in the decisions log below.
+
 Reproduce the gate locally (everything but the audit step):
 
 ```bash
@@ -297,6 +301,14 @@ ignored too. So `pnpm format:check` failures are never about docs.
 Running record of problems hit and calls made, newest first. (PR numbers are
 the paper trail; see git history for the full diffs.)
 
+- **2026-07 · Unit-test DOM harness** — added **happy-dom** + React Testing
+  Library (`@testing-library/react` + its `@testing-library/dom` peer +
+  `jest-dom` + `user-event`) so components are testable, not just plain TS.
+  `vitest.config.ts` uses Vite 8's **native** `resolve.tsconfigPaths` for the
+  `@/*` alias — dropped the `vite-tsconfig-paths` plugin the backlog first
+  specced, since Vite 8 resolves tsconfig paths in core. `globals: true` for
+  RTL's auto-cleanup; `vitest.d.ts` types the globals (ESLint-ignored like
+  `next-env.d.ts`). Rides the existing `verify` steps — no `ci.yml` change.
 - **2026-07 · Audit gate flipped to blocking** — removed
   `continue-on-error: true` from the `pnpm audit` step so a high/critical
   advisory now fails the PR. Required clearing GHSA-fx2h-pf6j-xcff first: pnpm
