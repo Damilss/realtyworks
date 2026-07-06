@@ -13,6 +13,7 @@ the [README](../README.md#quality-gates); this is the detail.
 | commitlint | `.husky/commit-msg` | every commit |
 | Lint → format → typecheck → test → build | `.github/workflows/ci.yml` | PRs + pushes to `main` |
 | `pnpm audit` dependency gate | `.github/workflows/ci.yml` | PRs + pushes to `main` |
+| Playwright E2E smoke test | `.github/workflows/ci.yml` | PRs + pushes to `main` |
 | gitleaks full-history scan | `.github/workflows/security.yml` | PRs + pushes to `main` |
 | Semgrep SAST scan | `.github/workflows/security.yml` | PRs + pushes to `main` |
 | osv-scanner lockfile CVE scan | `.github/workflows/osv-scanner.yml` | weekly + manual |
@@ -106,6 +107,17 @@ pnpm lint && pnpm format:check && pnpm typecheck && pnpm test && pnpm build
 ```
 
 Add `pnpm audit --audit-level=high` to preview the audit step too.
+
+### E2E smoke test (`e2e` job)
+
+A second job runs **in parallel** with `verify`, on the same triggers. It boots
+the app (`pnpm dev`, via `playwright.config.ts`'s `webServer`) and runs the
+single Playwright smoke spec (`tests/e2e/smoke.spec.ts`) — so CI proves the app
+*runs*, not just that `next build` compiles it. Chromium is installed with
+`playwright install --with-deps chromium` and cached on `~/.cache/ms-playwright`
+(keyed on the lockfile), and the HTML report uploads as a `playwright-report`
+artifact (`if: !cancelled()`) for debugging. Only the smoke spec runs here; real
+flows arrive with the Phase 3 vertical slice. Details: [playwright.md](playwright.md).
 
 ### Dependency vulnerability gate (`pnpm audit`)
 
@@ -276,6 +288,15 @@ ignored too. So `pnpm format:check` failures are never about docs.
 Running record of problems hit and calls made, newest first. (PR numbers are
 the paper trail; see git history for the full diffs.)
 
+- **2026-07 · Playwright smoke test wired into CI** — the existing
+  `smoke.spec.ts` now runs as a parallel `e2e` job in `ci.yml`, closing the
+  "builds but crashes on boot" gap (`next build` proved compilation only).
+  Foundations work, pulled forward from the Phase 3/4 slot in CLAUDE.md §4;
+  test scope unchanged (one spec, Chromium only). Ran against the dev server
+  (Option A) — the prod-build variant (`next build && next start`) is deferred.
+  New `uses:` refs are SHA-pinned per the Semgrep `github-actions-mutable-action-tag`
+  gate. Making it a *required* check on `main` is a manual branch-protection
+  edit (the check must run once before it's selectable).
 - **2026-07 · Semgrep SAST gate added** (issue #24) — four registry rulesets
   on every PR/push, blocking from day one; findings render as PR annotations
   via workflow commands because SARIF upload is GHAS-gated. Its first run
