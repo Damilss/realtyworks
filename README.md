@@ -154,13 +154,14 @@ for the rationale and cleared advisory details.
 ### Security scanning
 
 - **gitleaks** (`.github/workflows/security.yml`) — secret scan of the full
-  git history on every PR and push to `main`. Config: `.gitleaks.toml`
+  git history on every PR and push to `main`/`dev`. Config: `.gitleaks.toml`
   (default rules + an allowlist for `pnpm-lock.yaml` false positives).
 - **Semgrep OSS** (`.github/workflows/security.yml`) — SAST scan on every PR
-  and push to `main` (`p/typescript`, `p/react`, `p/nextjs`,
+  and push to `main`/`dev` (`p/typescript`, `p/react`, `p/nextjs`,
   `p/owasp-top-ten`). Blocking; findings render as PR annotations.
 - **osv-scanner** (`.github/workflows/osv-scanner.yml`) — weekly lockfile CVE
-  scan (Mondays 12:30 UTC, plus manual `workflow_dispatch`).
+  scan (Mondays 12:30 UTC), plus a scan on every PR into `main` and manual
+  `workflow_dispatch`.
 - **Dependabot** — weekly version updates for npm packages and GitHub Actions.
 
 Details, decisions, and known issues: [docs/tooling.md](docs/tooling.md).

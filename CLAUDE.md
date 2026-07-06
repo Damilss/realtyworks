@@ -41,7 +41,7 @@ Vitest only collects `src/**/*.{test,spec}.{ts,tsx}` and
 `tests/unit/**/*.{test,spec}.{ts,tsx}` (see `vitest.config.ts`). Import app code
 via the `@/*` alias (`@/* → ./src/*`, `tsconfig.json`).
 
-**CI** (`.github/workflows/ci.yml`, on PR + push to `main`): the `verify` job
+**CI** (`.github/workflows/ci.yml`, on PR + push to `main`/`dev`): the `verify` job
 runs lint → format:check → typecheck → test → build → audit. Each check step
 after the first uses `if: !cancelled()` so one run reports *every* failure, not
 just the first. A parallel `e2e` job runs the Playwright smoke test (boots the
@@ -49,9 +49,10 @@ app, Chromium only, HTML report uploaded as an artifact) — proving the app
 *runs*, not just that it compiles.
 The audit step (`pnpm audit --audit-level=high`) is blocking — CI fails on any
 high/critical advisory. Two more workflows: gitleaks secret scan + Semgrep
-SAST (`security.yml`, PR + push; semgrep is blocking, findings render as PR
-annotations) and a weekly osv-scanner lockfile CVE scan
-(`osv-scanner.yml`). Details + decisions: `docs/tooling.md`. Reproduce the
+SAST (`security.yml`, PR + push to `main`/`dev`; semgrep is blocking, findings
+render as PR annotations) and a weekly osv-scanner lockfile CVE scan (plus a
+scan on every PR into `main`) (`osv-scanner.yml`). Details + decisions:
+`docs/tooling.md`. Reproduce the
 main gate locally by running lint/format:check/typecheck/test/build in order
 before pushing.
 
