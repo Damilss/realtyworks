@@ -163,6 +163,20 @@ the house `deps` type; the open `@types/node → 26` bump leads your Node 24 run
 upload the HTML report artifact. Gate it to the branch/paths where the slice lives.
 **Done when:** the smoke test (and first real flow) runs green in CI.
 
+### 🟡 Extend CI/security triggers to `dev` (when the dev→main flow goes live)
+**Why:** `ci.yml` and the gitleaks/Semgrep gates (`security.yml`) only trigger on
+`branches: [main]`; `osv-scanner.yml` is `schedule` + `workflow_dispatch` only, and
+scheduled runs execute **only on the default branch** — so nothing scans `dev`. Once the
+`dev → main` PR flow is in use, work on `dev` gets no CI/scan until it reaches `main`.
+**Do:**
+- Add `dev` to the `push`/`pull_request` `branches:` lists in `ci.yml` and `security.yml`.
+- Give `osv-scanner.yml` a path to scan pre-`main` work: either a `pull_request: [main]`
+  trigger (scan every PR into `main`) or push/PR triggers on `dev`; keep the weekly cron on `main`.
+- Re-check `main` branch-protection required-check names after any trigger change.
+**Done when:** CI + gitleaks + Semgrep run on `dev` pushes/PRs, and `dev` lockfiles get
+OSV-scanned before merging to `main`.
+**Not urgent:** `dev` isn't actively used yet — reminder for when the branch flow starts.
+
 ### 🟡 Optional hygiene: `knip`
 **Why:** Catches dead deps/exports early — cheap signal for a solo dev.
 **Do:** `pnpm add -D knip`; add a `knip` script; run occasionally (not a CI gate yet).
