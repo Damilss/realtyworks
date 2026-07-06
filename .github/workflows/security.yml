@@ -42,13 +42,12 @@ jobs:
   semgrep:
     name: SAST (Semgrep OSS)
     runs-on: ubuntu-latest
-    # Official image, deliberately unpinned: Dependabot's github-actions
-    # ecosystem only bumps `uses:` references, not `container:` images, so a
-    # pin here would go stale silently — and the rulesets are fetched from the
-    # registry at scan time anyway, so pinning the CLI buys little
-    # reproducibility.
+    # Pinned to an immutable image digest (tags are mutable). Dependabot's
+    # github-actions ecosystem does NOT track `container:` images, so this digest
+    # won't auto-bump — refresh it manually when bumping Semgrep. Rulesets are
+    # still fetched from the registry at scan time, so they stay current.
     container:
-      image: semgrep/semgrep
+      image: semgrep/semgrep@sha256:59fbed6127ea7c5dde3ba6a85142733bb20ea9aaa36120c953904f1539aaf66e # v1.168.0
     steps:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
