@@ -1,7 +1,9 @@
 import { defineConfig, devices } from "@playwright/test";
 
-// E2E config. Phase 1: install + one smoke test only. Real specs and a CI job
-// come in Phase 3/4 once the vertical slice exists to drive (see CLAUDE.md §4).
+// E2E config. Phase 1: one smoke test, which runs in CI (the `e2e` job in
+// .github/workflows/ci.yml). Real specs come in Phase 3/4 once the vertical
+// slice exists to drive them (see CLAUDE.md §4). CI mode keys off process.env.CI
+// below (forbidOnly, retries, reuseExistingServer), set automatically by Actions.
 export default defineConfig({
   testDir: "./tests/e2e",
   fullyParallel: true,
