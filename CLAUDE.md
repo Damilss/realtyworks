@@ -47,8 +47,8 @@ after the first uses `if: !cancelled()` so one run reports *every* failure, not
 just the first. A parallel `e2e` job runs the Playwright smoke test (boots the
 app, Chromium only, HTML report uploaded as an artifact) — proving the app
 *runs*, not just that it compiles.
-The audit step (`pnpm audit --audit-level=high`) is currently non-blocking
-pending advisory triage. Two more workflows: gitleaks secret scan + Semgrep
+The audit step (`pnpm audit --audit-level=high`) is blocking — CI fails on any
+high/critical advisory. Two more workflows: gitleaks secret scan + Semgrep
 SAST (`security.yml`, PR + push; semgrep is blocking, findings render as PR
 annotations) and a weekly osv-scanner lockfile CVE scan
 (`osv-scanner.yml`). Details + decisions: `docs/tooling.md`. Reproduce the

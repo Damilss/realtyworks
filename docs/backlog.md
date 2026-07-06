@@ -20,8 +20,8 @@ Pick them off at your discretion.
 - `next 16.2.6` / `react 19.2.4` / `pnpm@9.15.9`, Node pinned to 24 (`.nvmrc`).
 - CI runs `lint → format:check → typecheck → test → build → audit` — with
   `!cancelled()`, concurrency-cancel, `permissions: contents: read`, and
-  pnpm + Next build caching. The audit step is non-blocking pending triage
-  (see `docs/tooling.md`).
+  pnpm + Next build caching. The audit step is **blocking** (fails on any
+  high/critical advisory; see `docs/tooling.md`).
 - Security workflows live: **gitleaks** on PR/push (+ pre-commit layer),
   weekly **osv-scanner** lockfile scan.
 - Dependabot on (npm + github-actions, weekly) — still untuned (see 🟠 below).
@@ -53,13 +53,20 @@ in `.husky/pre-commit` (fail-safe when the binary is missing), committed
 Follow-up hardening: `pull-requests: read` permission for the action.
 
 ### ✅ Dependency vulnerability gate — issue #20, PR #43
-`pnpm audit --audit-level=high` in CI (**non-blocking** until existing
-advisories are triaged — the flip to blocking is a deliberate manual edit, not
-date-based) + weekly `osv-scanner` reusable workflow (SARIF upload off:
-GHAS-gated on private repos). Known finding: `vite@8.0.13`
-(GHSA-fx2h-pf6j-xcff, dev-only via vitest, patched ≥ 8.0.16).
+`pnpm audit --audit-level=high` in CI + weekly `osv-scanner` reusable workflow
+(SARIF upload off: GHAS-gated on private repos). Landed **non-blocking** to
+triage pre-existing advisories, then flipped to **blocking** (deliberate manual
+edit, not date-based) once the one high finding — GHSA-fx2h-pf6j-xcff
+(`vite`, dev-only peer of vitest) — was cleared by pinning `vite ^8.0.16` as a
+direct devDependency (pnpm overrides don't move auto-installed peers).
 Web-UI half (enable Dependabot **alerts** + **security updates** in Settings →
 Security) — verify it's on.
+
+### ✅ Flip the `pnpm audit` gate to blocking
+Removed `continue-on-error: true` from the **Audit dependencies** step; a
+high/critical advisory now fails CI. Cleared the blocking `vite` advisory
+(GHSA-fx2h-pf6j-xcff) first by pinning `vite ^8.0.16` as a direct devDependency
+(pnpm `overrides` don't move auto-installed peers). Comment de-staled.
 
 ### ✅ Enforce conventional commits (commitlint + commit-msg hook) — PR #40
 `@commitlint/cli` + `config-conventional`, `commitlint.config.mjs` with the
@@ -69,15 +76,6 @@ decided type list (standard set + `deps`; `CI/CD` retired in favor of `ci`),
 ---
 
 ## 🔴 Critical
-
-### 🔴 Flip the `pnpm audit` gate to blocking
-**Why:** The gate exists (PR #43) but is `continue-on-error: true`; until flipped,
-a high/critical CVE surfaces in the log without failing the PR.
-**Do:**
-- Clear/accept the known `vite@8.0.13` advisory (bump so vite ≥ 8.0.16 resolves).
-- Delete the `continue-on-error: true` line from the **Audit dependencies** step;
-  update the stale "non-blocking until" comment.
-**Done when:** a seeded high/critical advisory fails CI.
 
 ### 🔴 Branch protection on `main` (verify/enable — web UI)
 **Why:** `CLAUDE.md` §4/§5 make this a Phase-1 requirement and the paper trail depends on it.
@@ -258,13 +256,12 @@ and the `supabase` CLI (Phase 2).
 
 ## Recommended order for the next few sessions
 
-*(Done so far: commitlint → gitleaks → `pnpm audit` gate + osv-scanner.)*
+*(Done so far: commitlint → gitleaks → `pnpm audit` gate + osv-scanner → Semgrep
+→ audit gate flipped to blocking.)*
 
 1. **Dependabot tuning** (High) — grouping cuts the open-PR noise, and the
    `deps` commit prefix aligns bot commits with the house type.
-2. **Flip the audit gate to blocking** (Critical) — clear the vite advisory first.
-3. **Semgrep** (High) — the remaining SAST layer.
-4. **Branch protection** (Critical) — last of this batch, so you can require every
+2. **Branch protection** (Critical) — last of this batch, so you can require every
    check that now exists (CI, gitleaks, Semgrep).
 
 That gets the full security + CI + commit-hygiene foundation green before any Supabase code.
