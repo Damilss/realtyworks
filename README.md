@@ -175,7 +175,7 @@ realtyworks/
 │   ├── workflows/          # ci.yml · security.yml (gitleaks + semgrep) · osv-scanner.yml
 │   └── dependabot.yml
 ├── .husky/                 # pre-commit (lint-staged + gitleaks) · commit-msg (commitlint)
-├── docs/                   # project docs (see index below)
+├── docs/                   # project docs (see index below) · docs/reports/ = roadbump postmortems
 ├── public/
 ├── src/
 │   └── app/                # Next.js App Router (near-empty scaffold — Phase 1)
@@ -202,6 +202,7 @@ land — not speculatively.
 | [`docs/playwright.md`](docs/playwright.md) | E2E testing: install, run, troubleshoot |
 | [`docs/backlog.md`](docs/backlog.md) | Ranked foundation & development backlog (issue-ready blocks) |
 | [`docs/dependency-version-management.md`](docs/dependency-version-management.md) | Field manual for dependency/version debugging |
+| [`docs/reports/`](docs/reports/) | Roadbump reports — postmortems of notable dependency/CI/build snags |
 
 ---
 
