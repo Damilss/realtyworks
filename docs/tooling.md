@@ -271,20 +271,23 @@ Both ecosystems set `cooldown.default-days: 7`: Dependabot waits a week before
 proposing a newly published version, so a compromised release has time to be
 caught and yanked first (flagged by the Semgrep gate — issue #24).
 
-### Known gaps (tracked in [docs/backlog.md](backlog.md), not yet done)
+Tuning applied (issue #23):
 
-- **Ungrouped PRs** — every bump is its own PR (~11 open at last count).
-  Fix: `groups:` to bundle minor+patch.
-- **Commit prefix vs house convention** — Dependabot currently emits
-  `chore(deps)` / `chore(deps-dev)` prefixes (valid conventional commits, and
-  `chore` passes the type list) rather than the house `deps` type. Fix:
-  `commit-message: { prefix: "deps" }` to align. (Note commitlint is hook-only,
-  so bot commits are never actually linted — this is about consistency, not a
-  failing check.)
-- **`@types/node` leads the runtime** — an open Dependabot PR bumps
-  `@types/node` to 26 while the runtime is pinned to Node 24 (and the manifest
-  still says `^20`). Types should **track** the runtime major, not lead it:
-  pin to `^24` and `ignore:` majors beyond it.
+- **Grouped PRs** — bumps collapse into a couple of PRs per run instead of one
+  per dependency (~11 at last count). npm splits into `npm-production` /
+  `npm-development` groups, github-actions into one; each group bundles
+  major+minor+patch. A breaking major can hold its group PR red — accepted for
+  this small solo dep set, and the prod/dev split keeps a sensitive prod major
+  (React/Next) out of the dev-tooling PR.
+- **House commit prefix** — `commit-message.prefix` (and `prefix-development`
+  for npm) is `deps`, so bots emit `deps: …` rather than the default
+  `chore(deps)`. commitlint is hook-only, so bot commits are never actually
+  linted — this is about a consistent history, not a failing check.
+- **`dependencies` label** on every Dependabot PR.
+- **`@types/node` tracks the runtime, never leads it** — the manifest pins
+  `^24` (matching Node 24 in `.nvmrc`) and the npm `ignore:` rule drops any
+  `@types/node` major beyond 24.x. When the runtime major moves, bump the pin
+  and the ignore together.
 
 ---
 
