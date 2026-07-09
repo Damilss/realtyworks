@@ -360,7 +360,7 @@ the paper trail; see git history for the full diffs.)
 - **2026-07 · Native GitHub security features are GHAS-gated** on private
   repos (CodeQL, push protection, dependency review) — the stack standardizes
   on free OSS tools instead (gitleaks, osv-scanner, Semgrep planned), which
-  also keeps the Phase 6 self-host option mechanical.
+  also keeps the Phase 7 self-host option mechanical.
 - **2026-06 · Playwright installed without `npm init playwright`** — the init
   command writes a `package-lock.json`, example tests, and its own CI workflow;
   installed manually instead (see [docs/playwright.md](playwright.md)).

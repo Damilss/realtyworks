@@ -35,7 +35,7 @@ Pick them off at your discretion.
 - Native GitHub security features (CodeQL, secret-scanning push-protection,
   dependency-review) are **GHAS-gated on private repos**. Security issues below default
   to **OSS CI tools** (gitleaks, Semgrep, osv-scanner) — free, vendor-neutral, and they
-  keep Phase 6 self-host mechanical per `CLAUDE.md` §5.
+  keep Phase 7 self-host mechanical per `CLAUDE.md` §5.
 
 ---
 
@@ -217,6 +217,13 @@ Work-order state transitions + permission checks — the "test what matters" tar
 ### 🟢 Phase 4 — Observability & deploy
 `@sentry/nextjs`, Vercel PR preview deploys, prod deploys only from `main`. Keep a working
 Dockerfile so self-host stays `docker run` away (`CLAUDE.md` §5/§7).
+
+### 🟢 Phase 6 — Accounting & rent tracking (late stage, not a non-goal)
+Promoted out of the MVP non-goals list (2026-07-09): rent roll, payments/expense ledger, cost
+rollups. Gated behind Phase 5 breadth — don't start it early, and don't design it out either.
+Money is the §2 trust rule at its strictest: amounts and balances computed server-side, ledger
+append-only with reversing entries, never mutated history. Rent **collection** (payment rails,
+PCI surface) is a separate go/no-go at the start of the phase.
 
 ---
 

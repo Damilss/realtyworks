@@ -33,11 +33,17 @@ Typical workflow:
 - **Vendor contacts** — assign vendors + store contact details
 - **Basic reporting** — open work, aging work orders, cost summaries (minimal)
 
+### Deferred (planned, not MVP)
+
+**Accounting & rent tracking** — rent roll, payments/expense ledger, cost
+rollups. On the roadmap as Phase 6, after the maintenance product is real.
+Whether it includes rent *collection* (payment rails) is decided then.
+
 ### Non-goals (for MVP)
 
-Full accounting / rent collection · tenant portal / messaging suite · full
-leasing pipeline · deep third-party integrations · mobile app / second
-surface · dashboards beyond the minimal reporting above.
+Tenant portal / messaging suite · full leasing pipeline · deep third-party
+integrations · mobile app / second surface · dashboards beyond the minimal
+reporting above.
 
 ---
 
@@ -215,8 +221,9 @@ land — not speculatively.
 | 2 — Supabase | Local stack, migrations (RLS from day one), seed data | Next |
 | 3 — Vertical slice | One full path: manager → work order → vendor → activity log | Planned |
 | 4 — Hosted deploy | Vercel + Supabase Cloud, PR previews, Sentry | Planned |
-| 5 — Breadth | More features, minimal reports, SMS/notifications | Planned |
-| 6 — Self-host (optional) | Docker Compose migration — kept mechanical by design | Eventual |
+| 5 — Breadth | More features, minimal reports, SMS/notifications, PWA install layer | Planned |
+| 6 — Accounting & rent tracking | Rent roll, ledger, cost rollups — server-side, append-only | Late stage |
+| 7 — Self-host (optional) | Docker Compose migration — kept mechanical by design | Eventual |
 
 Full definitions in `CLAUDE.md` §4.
 
