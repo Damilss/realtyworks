@@ -6,15 +6,46 @@ updates:
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 10
+    labels:
+      - "dependencies"
+    # Use the house `deps` conventional-commit type (see commitlint.config.mjs)
+    # instead of Dependabot's default `chore`. commitlint is hook-only, so bot
+    # commits are never linted — this is for a consistent history, not a check.
+    commit-message:
+      prefix: "deps"
+      prefix-development: "deps"
     # Wait a week before proposing a newly published version — a compromised
     # release is usually caught within days (semgrep dependabot-missing-cooldown).
     cooldown:
       default-days: 7
+    # @types/node must track the Node 24 runtime (.nvmrc), never lead it. The
+    # manifest pins ^24; ignore any major bump beyond 24.x here.
+    ignore:
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
+    # Collapse bumps into two PRs (prod / dev) to cut noise. Groups include
+    # majors — a breaking major can hold its group PR red, accepted for this
+    # small solo dep set. The prod/dev split keeps a sensitive prod major
+    # (React/Next) out of the dev-tooling PR.
+    groups:
+      npm-production:
+        dependency-type: "production"
+        update-types: ["major", "minor", "patch"]
+      npm-development:
+        dependency-type: "development"
+        update-types: ["major", "minor", "patch"]
 
-  # GitHub Actions (if you use workflows)
+  # GitHub Actions (workflow version pins — the osv-scanner tag + SHA-pinned steps)
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
       interval: "weekly"
+    labels:
+      - "dependencies"
+    commit-message:
+      prefix: "deps"
     cooldown:
       default-days: 7
+    groups:
+      github-actions:
+        update-types: ["major", "minor", "patch"]
