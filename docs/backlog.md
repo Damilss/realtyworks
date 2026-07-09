@@ -24,19 +24,14 @@ Pick them off at your discretion.
   high/critical advisory; see `docs/tooling.md`).
 - Security workflows live: **gitleaks** on PR/push (+ pre-commit layer),
   weekly **osv-scanner** lockfile scan.
-- Dependabot on (npm + github-actions, weekly) — still untuned (see 🟠 below).
+- Dependabot on (npm + github-actions, weekly), **tuned** — grouped, `deps`
+  prefix, `dependencies` label, `@types/node` pinned to `^24` (issue #23; see ✅).
 - Husky **pre-commit** (lint-staged + gitleaks) **and `commit-msg`**
   (commitlint, conventional types + `deps`, `CI/CD` retired → `ci`).
 - Playwright + one smoke test, **local-only by design** (`docs/playwright.md`).
 - Prettier configured (markdown intentionally ignored).
 
 ### Sharp edges these issues address
-- **~11 open Dependabot branches** (ungrouped). Dependabot emits
-  `chore(deps)` / `chore(deps-dev)` prefixes — valid conventional commits, but
-  not the house `deps` type (and commitlint is hook-only, so bot commits are
-  never linted anyway). The open `@types/node → 26` bump **leads** the Node 24
-  runtime; types should track the runtime major (24), not lead it.
-  `@types/node` is currently `^20`.
 - Native GitHub security features (CodeQL, secret-scanning push-protection,
   dependency-review) are **GHAS-gated on private repos**. Security issues below default
   to **OSS CI tools** (gitleaks, Semgrep, osv-scanner) — free, vendor-neutral, and they
@@ -45,6 +40,17 @@ Pick them off at your discretion.
 ---
 
 ## ✅ Done (kept for the paper trail)
+
+### ✅ Tune Dependabot + pin `@types/node` to Node 24 (2026-07-08, issue #23)
+`.github/dependabot.yml`: both ecosystems now **group** bumps (npm splits into
+`npm-production` / `npm-development`, github-actions into one; each bundles
+major+minor+patch), carry the house `deps` commit prefix (`prefix` +
+`prefix-development` on npm) instead of `chore(deps)`, and get a `dependencies`
+label. `@types/node` is pinned to `^24` in `package.json` (matches Node 24 in
+`.nvmrc`) and an npm `ignore:` rule drops any `@types/node` major beyond 24.x,
+so the types track the runtime instead of leading it. `open-pull-requests-limit`
+kept at 10 (grouping already cuts the real PR count). `pnpm typecheck` +
+`pnpm build` green on `@types/node@24`. Rationale: `docs/tooling.md` §Dependabot.
 
 ### ✅ Untrack the committed pnpm store (2026-07-07)
 `.pnpm-store/v11/index.db` (pnpm's local content-addressable store index) had
@@ -122,16 +128,6 @@ required-check names are unchanged; the OSV scan surfaces as a non-required
 
 ## 🟠 High
 
-### 🟠 Tune Dependabot: group, prefix, and pin @types/node to Node 24
-**Why:** ~11 ungrouped PRs is noise; Dependabot's `chore(deps)` prefix doesn't match
-the house `deps` type; the open `@types/node → 26` bump leads your Node 24 runtime.
-**Do:** in `.github/dependabot.yml`:
-- `groups:` — bundle minor+patch (e.g. one `dev-minor` group) to cut PR count.
-- `commit-message: { prefix: "deps", prefix-development: "deps" }` to match the house type.
-- `ignore:` a major bump on `@types/node` beyond `24.x` (types track runtime, not lead it).
-- Add `labels: ["dependencies"]`; consider dropping `open-pull-requests-limit` back down.
-**Done when:** next Dependabot run opens grouped PRs with `deps(...)` messages that pass CI.
-
 ### 🟠 SAST in CI (Semgrep OSS)
 **Why:** Static analysis catches injection/authz bugs before they ship; CodeQL needs GHAS on private.
 **Do:** add a `semgrep ci` job (`returntocorp/semgrep`) with `p/typescript`, `p/react`,
@@ -143,11 +139,6 @@ the house `deps` type; the open `@types/node → 26` bump leads your Node 24 run
 **Do:** pin every `uses:` to a full commit SHA (with a `# v4.x.x` comment). Add least-privilege
 `permissions:` to each new workflow. Dependabot's `github-actions` updates will bump the SHAs for you.
 **Done when:** no floating tags remain in `.github/workflows/`.
-
-### 🟠 Fix `@types/node` to match the runtime
-**Why:** `@types/node: ^20` lags Node 24; type surface won't match what you run.
-**Do:** bump to `^24` (do **not** accept the `26` PR while on Node 24).
-**Done when:** `pnpm typecheck` passes on `^24`.
 
 ---
 
@@ -250,11 +241,9 @@ and the `supabase` CLI (Phase 2).
 ## Recommended order for the next few sessions
 
 *(Done so far: commitlint → gitleaks → `pnpm audit` gate + osv-scanner → Semgrep
-→ audit gate flipped to blocking.)*
+→ audit gate flipped to blocking → Dependabot tuning + `@types/node` pin.)*
 
-1. **Dependabot tuning** (High) — grouping cuts the open-PR noise, and the
-   `deps` commit prefix aligns bot commits with the house type.
-2. **Branch protection** (Critical) — last of this batch, so you can require every
+1. **Branch protection** (Critical) — last of this batch, so you can require every
    check that now exists (CI, gitleaks, Semgrep).
 
 That gets the full security + CI + commit-hygiene foundation green before any Supabase code.
