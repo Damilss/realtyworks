@@ -285,9 +285,12 @@ Tuning applied (issue #23):
   linted — this is about a consistent history, not a failing check.
 - **`dependencies` label** on every Dependabot PR.
 - **`@types/node` tracks the runtime, never leads it** — the manifest pins
-  `^24` (matching Node 24 in `.nvmrc`) and the npm `ignore:` rule drops any
-  `@types/node` major beyond 24.x. When the runtime major moves, bump the pin
-  and the ignore together.
+  `^24` (matching Node 24 in `.nvmrc`) and the npm `ignore:` rule
+  (`update-types: ["version-update:semver-major"]`) drops *any* `@types/node`
+  major bump, so Dependabot never crosses a major on its own — it's
+  version-agnostic, not tied to `24`. To move the runtime later, just bump the
+  `package.json` pin (e.g. `^24` → `^26`) and run `pnpm install`; the ignore
+  rule needs no edit.
 
 ---
 
