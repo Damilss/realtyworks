@@ -106,7 +106,7 @@ work orders, vendor coordination, documentation, and audit-ready records.
 - Tenant portal / messaging suite
 - Full leasing pipeline
 - Deep third-party integrations
-- Mobile app / second surface
+- Mobile app / second surface (the responsive PWA is the mobile story — see §2)
 - Dashboards beyond the minimal reporting above
 
 Holding this scope line is the single biggest predictor of shipping. If a
@@ -143,6 +143,13 @@ price, permission, or ownership check.
 - **BaaS:** Supabase (Postgres, Auth, Storage, Realtime, RLS). Open source and
   self-hostable.
 - **Frontend:** Next.js (App Router) + TypeScript (strict) + Tailwind + shadcn/ui.
+  One **responsive** web app — not a desktop site plus a separate mobile site.
+  Layout adapts by breakpoint (dense tables for managers on desktop; stacked,
+  touch-friendly views for vendors on phones). It becomes **PWA-installable**
+  in Phase 5 (manifest + service worker added to the *same* app — never a second
+  codebase, never an `m.` subdomain). No native app; this is the whole mobile
+  story. Build responsive-first from day one so the PWA is a bolt-on, not a
+  retrofit.
 - **Server-side auth:** `@supabase/ssr`.
 - **Hosting (current):** Vercel + Supabase Cloud, free tier. Live early.
 - **Hosting (eventual, optional):** self-host. See §7.
@@ -251,7 +258,10 @@ deploys only from `main`.
 
 **Phase 5 — Breadth**
 Copy the vertical-slice pattern outward: more pages, features, minimal reports.
-SMS/notifications added here (see §6) — not earlier.
+SMS/notifications added here (see §6) — not earlier. The PWA install layer
+(manifest + service worker) also lands here — a bolt-on to the already-responsive
+app, per §2. Read the Next.js 16 manifest/metadata + service-worker guides in
+`node_modules/next/dist/docs/` before building it; the APIs have breaking changes.
 
 **Phase 6 — Self-host migration (eventual, optional)**
 See §7. Should be a weekend job, not a rewrite, if §5/§7 rules are followed.
