@@ -194,7 +194,9 @@ known-good state. Stay within self-hostable features only (`CLAUDE.md` §5).
 
 ### 🟢 Phase 2 — First migrations (RLS in the same file as each table)
 Numbered SQL for: properties, units, work_orders, vendors, activity_log, attachments. Every table
-ships its RLS policy in the same migration. No dashboard click-ops.
+ships its RLS policy in the same migration. No dashboard click-ops. Design each table with the
+process in `docs/schema-brainstorming.md` (workflows → tables → security questions → Zod), which
+also lists the open questions to settle first (vendor contacts vs. auth users; landlord rights).
 
 ### 🟢 Phase 2 — Seed data
 3 users (landlord / manager / vendor), sample properties + a vendor, work orders in varied states.

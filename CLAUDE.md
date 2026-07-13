@@ -179,7 +179,7 @@ realtyworks/
 │   ├── workflows/                  # ci.yml (main gate — see §0) · security.yml · osv-scanner.yml
 │   └── dependabot.yml              # weekly npm + github-actions updates
 ├── .husky/                         # pre-commit (lint-staged + gitleaks), commit-msg (commitlint)
-├── docs/                           # tooling.md · playwright.md · backlog.md · dependency-version-management.md · reports/
+├── docs/                           # tooling.md · playwright.md · backlog.md · commit-messages.md · dependency-version-management.md · schema-brainstorming.md · reports/
 ├── public/
 ├── src/
 │   ├── app/                        # App Router
