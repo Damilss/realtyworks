@@ -101,8 +101,19 @@ work orders, vendor coordination, documentation, and audit-ready records.
 - Vendor contacts (assign vendors + store contact details)
 - Basic reporting (open work, aging work orders, cost summaries — minimal)
 
+### Deferred — planned, but not for MVP
+- **Accounting & rent tracking** (Phase 6, see §4) — rent roll, a payments/
+  expense ledger, and cost rollups past the minimal cost summaries above.
+  Deliberately *not* a non-goal: it is on the roadmap, just after the
+  maintenance product is real. Actual rent **collection** (card/ACH rails, a
+  payments provider, PCI surface) is a separate decision to make when Phase 6
+  starts — tracking money is not the same as moving it.
+
+Deferred means don't build it now. It also means don't design it out: prefer
+schema and structure that leave room for a ledger later, without paying for it
+today (no speculative tables, columns, or abstractions — §8).
+
 ### Explicit non-goals for MVP (do NOT build these)
-- Full accounting / rent collection
 - Tenant portal / messaging suite
 - Full leasing pipeline
 - Deep third-party integrations
@@ -110,7 +121,8 @@ work orders, vendor coordination, documentation, and audit-ready records.
 - Dashboards beyond the minimal reporting above
 
 Holding this scope line is the single biggest predictor of shipping. If a
-request would expand into a non-goal, flag it instead of building it.
+request would expand into a non-goal — or pull a deferred item earlier than its
+phase — flag it instead of building it.
 
 ---
 
@@ -149,7 +161,10 @@ price, permission, or ownership check.
   in Phase 5 (manifest + service worker added to the *same* app — never a second
   codebase, never an `m.` subdomain). No native app; this is the whole mobile
   story. Build responsive-first from day one so the PWA is a bolt-on, not a
-  retrofit.
+  retrofit. Per-platform reality (Android vs iOS/iPadOS install + push), offline
+  scope, and the open decisions: `docs/pwa.md`. The load-bearing constraint:
+  **iOS web push only works for users who manually installed the app**, so SMS
+  (§6) stays the default notification channel.
 - **Server-side auth:** `@supabase/ssr`.
 - **Hosting (current):** Vercel + Supabase Cloud, free tier. Live early.
 - **Hosting (eventual, optional):** self-host. See §7.
@@ -167,7 +182,7 @@ realtyworks/
 │   ├── workflows/                  # ci.yml (main gate — see §0) · security.yml · osv-scanner.yml
 │   └── dependabot.yml              # weekly npm + github-actions updates
 ├── .husky/                         # pre-commit (lint-staged + gitleaks), commit-msg (commitlint)
-├── docs/                           # tooling.md · playwright.md · backlog.md · dependency-version-management.md · reports/
+├── docs/                           # tooling.md · playwright.md · backlog.md · commit-messages.md · dependency-version-management.md · pwa.md · schema/schema-brainstorming.md · reports/
 ├── public/
 ├── src/
 │   ├── app/                        # App Router
@@ -260,11 +275,23 @@ deploys only from `main`.
 Copy the vertical-slice pattern outward: more pages, features, minimal reports.
 SMS/notifications added here (see §6) — not earlier. The PWA install layer
 (manifest + service worker) also lands here — a bolt-on to the already-responsive
-app, per §2. Read the Next.js 16 manifest/metadata + service-worker guides in
-`node_modules/next/dist/docs/` before building it; the APIs have breaking changes.
+app, per §2. Read `docs/pwa.md` first (platform matrix + open decisions), then the
+Next.js 16 manifest/metadata + service-worker guides in
+`node_modules/next/dist/docs/`; the APIs have breaking changes.
 
-**Phase 6 — Self-host migration (eventual, optional)**
+**Phase 6 — Accounting & rent tracking (late stage)**
+Only once Phase 5 breadth is real and in use. Rent roll, a payments/expense
+ledger, and cost rollups on top of the existing work-order costs. Money is a §2
+trust-rule maximum: amounts, balances, and postings are computed and enforced
+server-side (DB constraints + server actions), never client-side. Ledger rows
+are append-only with an audit trail — correct by reversing entries, never by
+mutating history. Whether to add rent **collection** (a payments provider, card/
+ACH rails, and the PCI surface that comes with them) is decided at the start of
+this phase, not assumed by it.
+
+**Phase 7 — Self-host migration (eventual, optional)**
 See §7. Should be a weekend job, not a rewrite, if §5/§7 rules are followed.
+(Was "Phase 6" before accounting was promoted from a non-goal to Phase 6.)
 
 ---
 
@@ -277,7 +304,7 @@ See §7. Should be a weekend job, not a rewrite, if §5/§7 rules are followed.
 - **Everything via env vars.** No hardcoded URLs, keys, or config. `.env.example`
   documents every required var; `.env.local` holds real values and is gitignored.
 - **Stay within self-hostable Supabase features.** Avoid cloud-only features so
-  Phase 6 stays mechanical.
+  Phase 7 stays mechanical.
 - **No Vercel lock-in beyond Next.js itself.** `next start` must work anywhere.
   Keep a working Dockerfile for the app so self-host is `docker run` away.
 - **TypeScript strict.** No `any` without a written reason. Generated DB types
@@ -339,7 +366,7 @@ degradation + fast recovery, never for "100%."
    power/network/hardware. Recommended over home hardware if cost allows.
 3. Self-host on home hardware — cheapest in $, most expensive in time/resilience.
 
-Nothing in Phases 1–5 changes for self-host: the §5 rules already make Phase 6
+Nothing in Phases 1–6 changes for self-host: the §5 rules already make Phase 7
 mechanical. Re-decide hosting on the merits when the time comes, not by default.
 
 ---
@@ -348,7 +375,9 @@ mechanical. Re-decide hosting on the merits when the time comes, not by default.
 
 - Do not introduce a backend service, a `/backend` folder, or a second
   deployable.
-- Do not expand into §1 non-goals; flag scope creep instead.
+- Do not expand into §1 non-goals; flag scope creep instead. §1's *deferred*
+  items (accounting / rent tracking) are the same answer before their phase —
+  "not yet," not "never."
 - Do not put security/money/integrity logic client-side.
 - Do not click-ops schema; produce migration files with RLS in the same file.
 - Do not hand-edit `database.types.ts`; regenerate it.
@@ -356,5 +385,5 @@ mechanical. Re-decide hosting on the merits when the time comes, not by default.
   unfinished, say so and confirm before proceeding.
 - Prefer the smallest change that satisfies the requirement. No speculative
   folders, abstractions, or dependencies.
-- When a decision is ambiguous, prefer the option that keeps Phase 6 (self-host)
+- When a decision is ambiguous, prefer the option that keeps Phase 7 (self-host)
   mechanical and operational burden low.

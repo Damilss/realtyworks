@@ -285,9 +285,31 @@ Tuning applied (issue #23):
   linted — this is about a consistent history, not a failing check.
 - **`dependencies` label** on every Dependabot PR.
 - **`@types/node` tracks the runtime, never leads it** — the manifest pins
-  `^24` (matching Node 24 in `.nvmrc`) and the npm `ignore:` rule drops any
-  `@types/node` major beyond 24.x. When the runtime major moves, bump the pin
-  and the ignore together.
+  `^24` (matching Node 24 in `.nvmrc`) and the npm `ignore:` rule
+  (`update-types: ["version-update:semver-major"]`) drops *any* `@types/node`
+  major bump, so Dependabot never crosses a major on its own — it's
+  version-agnostic, not tied to `24`.
+
+### Moving Node to a new major (do it in this order)
+
+The runtime pin and the types pin are two different files. Bump the **runtime
+first**, then the types — bumping only `@types/node` recreates the exact
+mismatch this rule exists to prevent.
+
+1. **`.nvmrc`** → the new major (e.g. `24` → `26`). This is the runtime, and
+   it is the *only* runtime pin in the repo: CI reads it via
+   `node-version-file: .nvmrc` in **both** the `verify` and `e2e` jobs
+   (`ci.yml`), and `nvm use` reads it locally. There is no `engines` field in
+   `package.json` and no Dockerfile yet — if either is added later, they become
+   runtime pins too and belong in this step.
+2. **`package.json`** → `@types/node` to the matching major (`^24` → `^26`),
+   then `pnpm install`.
+3. **Leave the Dependabot `ignore:` rule alone.** It drops any `@types/node`
+   major regardless of number, so it keeps working on the new major with no
+   edit. Removing it would let the types start leading the runtime again.
+
+Verify with `pnpm typecheck` + `pnpm build` on the new major before pushing —
+that pair is what caught the `^20`-types-on-Node-24 skew in the first place.
 
 ---
 
@@ -357,7 +379,7 @@ the paper trail; see git history for the full diffs.)
 - **2026-07 · Native GitHub security features are GHAS-gated** on private
   repos (CodeQL, push protection, dependency review) — the stack standardizes
   on free OSS tools instead (gitleaks, osv-scanner, Semgrep planned), which
-  also keeps the Phase 6 self-host option mechanical.
+  also keeps the Phase 7 self-host option mechanical.
 - **2026-06 · Playwright installed without `npm init playwright`** — the init
   command writes a `package-lock.json`, example tests, and its own CI workflow;
   installed manually instead (see [docs/playwright.md](playwright.md)).

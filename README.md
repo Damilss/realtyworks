@@ -33,11 +33,17 @@ Typical workflow:
 - **Vendor contacts** — assign vendors + store contact details
 - **Basic reporting** — open work, aging work orders, cost summaries (minimal)
 
+### Deferred (planned, not MVP)
+
+**Accounting & rent tracking** — rent roll, payments/expense ledger, cost
+rollups. On the roadmap as Phase 6, after the maintenance product is real.
+Whether it includes rent *collection* (payment rails) is decided then.
+
 ### Non-goals (for MVP)
 
-Full accounting / rent collection · tenant portal / messaging suite · full
-leasing pipeline · deep third-party integrations · mobile app / second
-surface · dashboards beyond the minimal reporting above.
+Tenant portal / messaging suite · full leasing pipeline · deep third-party
+integrations · mobile app / second surface · dashboards beyond the minimal
+reporting above.
 
 ---
 
@@ -202,6 +208,9 @@ land — not speculatively.
 | [`docs/tooling.md`](docs/tooling.md) | CI, security scanning, git hooks — how it works, decisions, known issues |
 | [`docs/playwright.md`](docs/playwright.md) | E2E testing: install, run, troubleshoot |
 | [`docs/backlog.md`](docs/backlog.md) | Ranked foundation & development backlog (issue-ready blocks) |
+| [`docs/schema/schema-brainstorming.md`](docs/schema/schema-brainstorming.md) | Schema design process: workflows → tables → security/RLS → Zod (Phase 2+) |
+| [`docs/pwa.md`](docs/pwa.md) | PWA: per-platform install/push reality (Android vs iOS/iPadOS), offline scope (Phase 5) |
+| [`docs/commit-messages.md`](docs/commit-messages.md) | Commit message cheat sheet — format + allowed types (commitlint) |
 | [`docs/dependency-version-management.md`](docs/dependency-version-management.md) | Field manual for dependency/version debugging |
 | [`docs/reports/`](docs/reports/) | Roadbump reports — postmortems of notable dependency/CI/build snags |
 
@@ -215,8 +224,9 @@ land — not speculatively.
 | 2 — Supabase | Local stack, migrations (RLS from day one), seed data | Next |
 | 3 — Vertical slice | One full path: manager → work order → vendor → activity log | Planned |
 | 4 — Hosted deploy | Vercel + Supabase Cloud, PR previews, Sentry | Planned |
-| 5 — Breadth | More features, minimal reports, SMS/notifications | Planned |
-| 6 — Self-host (optional) | Docker Compose migration — kept mechanical by design | Eventual |
+| 5 — Breadth | More features, minimal reports, SMS/notifications, PWA install layer | Planned |
+| 6 — Accounting & rent tracking | Rent roll, ledger, cost rollups — server-side, append-only | Late stage |
+| 7 — Self-host (optional) | Docker Compose migration — kept mechanical by design | Eventual |
 
 Full definitions in `CLAUDE.md` §4.
 
