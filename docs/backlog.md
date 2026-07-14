@@ -193,10 +193,15 @@ upload the HTML report artifact. Gate it to the branch/paths where the slice liv
 known-good state. Stay within self-hostable features only (`CLAUDE.md` §5).
 
 ### 🟢 Phase 2 — First migrations (RLS in the same file as each table)
-Numbered SQL for: properties, units, work_orders, vendors, activity_log, attachments. Every table
-ships its RLS policy in the same migration. No dashboard click-ops. Design each table with the
-process in `docs/schema/schema-brainstorming.md` (workflows → tables → security questions → Zod), which
+Numbered SQL for the MVP vertical slice: `profiles`, `properties`, `units`, `vendors`,
+`work_orders`, `work_order_activity`, `work_order_attachments`. Every table ships its RLS policy in
+the same migration. No dashboard click-ops. Design each table with the process in
+`docs/schema/schema-brainstorming.md` (workflows → tables → security questions → Zod), which
 also lists the open questions to settle first (vendor contacts vs. auth users; landlord rights).
+
+**`docs/schema/schema-brainstorming.md` §7 is the source of truth for the table list and names** —
+if the two ever disagree, it wins. (An earlier version of this line said `activity_log` /
+`attachments` and omitted `profiles`; the names above supersede it.)
 
 ### 🟢 Phase 2 — Seed data
 3 users (landlord / manager / vendor), sample properties + a vendor, work orders in varied states.
