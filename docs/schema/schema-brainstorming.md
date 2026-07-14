@@ -169,6 +169,68 @@ These answers do not turn into RLS policies "later" — in this repo they are
 written as RLS **in the same migration as the table** (§5). The client may
 mirror them for UX; the database enforces them (§2).
 
+### RLS picks rows, not columns — the last answer needs more than a policy
+
+Read that last line again: *vendor can update status/notes/photos, but not cost
+approval, assignment, or ownership.* **RLS alone cannot enforce that**, and
+assuming it does is the easiest authorization bypass to ship in Phase 2.
+
+An `UPDATE` policy decides *which rows* a caller may touch. Its `USING` clause
+sees the existing row and `WITH CHECK` sees the proposed row, but a policy
+**cannot compare the two** — there is no `OLD` to reference. So "`assigned_vendor_id`
+must not change" is not expressible in RLS. A vendor who passes the row check to
+update `status` can, in the same `PATCH`, rewrite every other updatable column on
+that row — including who it's assigned to and what it costs. The Supabase client
+talks to PostgREST directly; nothing stops the request from carrying extra columns.
+
+Two mechanisms actually enforce column rules, and you need to know which one a
+given rule requires:
+
+**1. Column-level privileges — for rules true of _every_ logged-in user.**
+
+```sql
+revoke update on work_orders from authenticated;
+grant  update (status, notes) on work_orders to authenticated;
+```
+
+Use this for columns no client may *ever* write: `id`, `created_by`,
+`created_at`, ownership/tenancy keys. The trap: in Supabase **every logged-in
+user shares the same Postgres `authenticated` role**. Column grants cannot tell
+a manager from a vendor, so they cannot express "managers may reassign, vendors
+may not." Reaching for grants alone to solve a role-dependent rule silently
+gives *everyone* the loosest column set.
+
+**2. A `BEFORE UPDATE` trigger, or a server action — for role-dependent rules.**
+
+Because manager and vendor are the same DB role, "vendor may not reassign" has
+to be checked against the caller's app role at write time:
+
+```sql
+create function guard_work_order_update() returns trigger as $$
+begin
+  if current_app_role() = 'vendor'
+     and (new.assigned_vendor_id is distinct from old.assigned_vendor_id
+          or new.cost_approved   is distinct from old.cost_approved) then
+    raise exception 'vendors may not change assignment or cost approval';
+  end if;
+  return new;
+end;
+$$ language plpgsql security definer;
+```
+
+(Sketch, not final — `current_app_role()` is whatever role lookup Phase 2
+settles on, and the column list follows the table.)
+
+**The default for this repo:** privileged mutations go through a **server
+action** (§2's trust boundary), which writes an explicit column allowlist, with
+a trigger as the backstop for anything reachable by a direct client write. The
+guarantee to aim for is that *no raw client `.update()` on `work_orders` can
+change assignment, cost, or ownership* — enforced in the database, not by the
+shape of the request the UI happens to send.
+
+Carry this into §6's per-table checklist: for every table, "who can update it"
+has a second half — **which columns, and enforced how.**
+
 ## 5. Brainstorm Zod schemas around actions, not tables
 
 The part that is easy to miss: the DB table and the Zod schema are related,
@@ -236,6 +298,7 @@ What fields are optional?
 What values should be restricted?
 Who can see it?
 Who can modify it?
+Which columns may each role modify — and enforced how?
 What needs to be audited?
 What should never come from the client?
 ```
@@ -260,6 +323,17 @@ status and priority should be enums/check constraints.
 
 Who can see it?
 Managers for that property; assigned vendor.
+
+Who can modify it?
+Managers for their properties; the assigned vendor, narrowly.
+
+Which columns may each role modify — and enforced how?
+Manager: status, priority, due date, assignment, cost fields.
+Vendor:  status, notes, photos — and nothing else.
+Enforced by a server action with an explicit column allowlist, plus a
+BEFORE UPDATE trigger as the backstop. NOT by RLS alone: a policy picks
+rows, not columns, and column GRANTs can't split manager from vendor
+because both are the `authenticated` role (§4).
 
 What needs to be audited?
 Creation, assignment, status changes, note additions, uploads.

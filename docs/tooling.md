@@ -288,9 +288,28 @@ Tuning applied (issue #23):
   `^24` (matching Node 24 in `.nvmrc`) and the npm `ignore:` rule
   (`update-types: ["version-update:semver-major"]`) drops *any* `@types/node`
   major bump, so Dependabot never crosses a major on its own — it's
-  version-agnostic, not tied to `24`. To move the runtime later, just bump the
-  `package.json` pin (e.g. `^24` → `^26`) and run `pnpm install`; the ignore
-  rule needs no edit.
+  version-agnostic, not tied to `24`.
+
+### Moving Node to a new major (do it in this order)
+
+The runtime pin and the types pin are two different files. Bump the **runtime
+first**, then the types — bumping only `@types/node` recreates the exact
+mismatch this rule exists to prevent.
+
+1. **`.nvmrc`** → the new major (e.g. `24` → `26`). This is the runtime, and
+   it is the *only* runtime pin in the repo: CI reads it via
+   `node-version-file: .nvmrc` in **both** the `verify` and `e2e` jobs
+   (`ci.yml`), and `nvm use` reads it locally. There is no `engines` field in
+   `package.json` and no Dockerfile yet — if either is added later, they become
+   runtime pins too and belong in this step.
+2. **`package.json`** → `@types/node` to the matching major (`^24` → `^26`),
+   then `pnpm install`.
+3. **Leave the Dependabot `ignore:` rule alone.** It drops any `@types/node`
+   major regardless of number, so it keeps working on the new major with no
+   edit. Removing it would let the types start leading the runtime again.
+
+Verify with `pnpm typecheck` + `pnpm build` on the new major before pushing —
+that pair is what caught the `^20`-types-on-Node-24 skew in the first place.
 
 ---
 
