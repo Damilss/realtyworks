@@ -195,7 +195,7 @@ known-good state. Stay within self-hostable features only (`CLAUDE.md` §5).
 ### 🟢 Phase 2 — First migrations (RLS in the same file as each table)
 Numbered SQL for: properties, units, work_orders, vendors, activity_log, attachments. Every table
 ships its RLS policy in the same migration. No dashboard click-ops. Design each table with the
-process in `docs/schema-brainstorming.md` (workflows → tables → security questions → Zod), which
+process in `docs/schema/schema-brainstorming.md` (workflows → tables → security questions → Zod), which
 also lists the open questions to settle first (vendor contacts vs. auth users; landlord rights).
 
 ### 🟢 Phase 2 — Seed data
@@ -219,6 +219,19 @@ Work-order state transitions + permission checks — the "test what matters" tar
 ### 🟢 Phase 4 — Observability & deploy
 `@sentry/nextjs`, Vercel PR preview deploys, prod deploys only from `main`. Keep a working
 Dockerfile so self-host stays `docker run` away (`CLAUDE.md` §5/§7).
+
+### 🟢 Phase 5 — PWA install layer (manifest + service worker)
+Bolt-on to the already-responsive app — never a second codebase (`CLAUDE.md` §2). `src/app/manifest.ts`
+(`MetadataRoute.Manifest`) + `public/sw.js` + icons; HTTPS required (`next dev --experimental-https`
+locally). Platform constraints, per-OS install/push matrix, and the open decisions live in
+`docs/pwa.md` — read it before building.
+**Two decisions to settle first:** (1) do we need **web push** at all, given SMS already covers vendor
+notification (§6) and iOS push only reaches users who *manually* installed the app? If yes, it's a §6
+channel — logs to `messages`, respects `notification_preferences`, and needs a **push-subscriptions
+table** (design it with the Phase 2 schema, not later). (2) **Offline** support means Serwist, which
+per the Next.js guide needs **webpack** — but Next 16 defaults to **Turbopack**. Verify compatibility
+before assuming offline is cheap; default is to skip offline writes entirely.
+**Done when:** the app installs to an Android and an iOS home screen and launches standalone.
 
 ### 🟢 Phase 6 — Accounting & rent tracking (late stage, not a non-goal)
 Promoted out of the MVP non-goals list (2026-07-09): rent roll, payments/expense ledger, cost

@@ -161,7 +161,10 @@ price, permission, or ownership check.
   in Phase 5 (manifest + service worker added to the *same* app — never a second
   codebase, never an `m.` subdomain). No native app; this is the whole mobile
   story. Build responsive-first from day one so the PWA is a bolt-on, not a
-  retrofit.
+  retrofit. Per-platform reality (Android vs iOS/iPadOS install + push), offline
+  scope, and the open decisions: `docs/pwa.md`. The load-bearing constraint:
+  **iOS web push only works for users who manually installed the app**, so SMS
+  (§6) stays the default notification channel.
 - **Server-side auth:** `@supabase/ssr`.
 - **Hosting (current):** Vercel + Supabase Cloud, free tier. Live early.
 - **Hosting (eventual, optional):** self-host. See §7.
@@ -179,7 +182,7 @@ realtyworks/
 │   ├── workflows/                  # ci.yml (main gate — see §0) · security.yml · osv-scanner.yml
 │   └── dependabot.yml              # weekly npm + github-actions updates
 ├── .husky/                         # pre-commit (lint-staged + gitleaks), commit-msg (commitlint)
-├── docs/                           # tooling.md · playwright.md · backlog.md · commit-messages.md · dependency-version-management.md · schema-brainstorming.md · reports/
+├── docs/                           # tooling.md · playwright.md · backlog.md · commit-messages.md · dependency-version-management.md · pwa.md · schema/schema-brainstorming.md · reports/
 ├── public/
 ├── src/
 │   ├── app/                        # App Router
@@ -272,8 +275,9 @@ deploys only from `main`.
 Copy the vertical-slice pattern outward: more pages, features, minimal reports.
 SMS/notifications added here (see §6) — not earlier. The PWA install layer
 (manifest + service worker) also lands here — a bolt-on to the already-responsive
-app, per §2. Read the Next.js 16 manifest/metadata + service-worker guides in
-`node_modules/next/dist/docs/` before building it; the APIs have breaking changes.
+app, per §2. Read `docs/pwa.md` first (platform matrix + open decisions), then the
+Next.js 16 manifest/metadata + service-worker guides in
+`node_modules/next/dist/docs/`; the APIs have breaking changes.
 
 **Phase 6 — Accounting & rent tracking (late stage)**
 Only once Phase 5 breadth is real and in use. Rent roll, a payments/expense
