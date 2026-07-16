@@ -9,7 +9,7 @@ Read this fully before generating code, scaffolding, or migrations.
 
 ## 0. Quick reference
 
-**Package manager is `pnpm` (`pnpm@9.15.9`), not npm.** Node is pinned to
+**Package manager is `pnpm` (`pnpm@11.13.1`), not npm.** Node is pinned to
 **24** (`.nvmrc`, matched by CI). Stack versions are new and have breaking
 changes: **Next.js 16.2.6**, **React 19.2.4**. Per `AGENTS.md`, read the
 relevant guide in `node_modules/next/dist/docs/` (`01-app`, `02-pages`,

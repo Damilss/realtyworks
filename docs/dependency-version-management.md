@@ -117,7 +117,7 @@ package layer:
 ┌─────────────────────────────────────────┐
 │  Your packages         (npm/pip/pods)    │  ← easy: lockfile + ranges
 ├─────────────────────────────────────────┤
-│  Package manager       (pnpm 9 / pip 24) │
+│  Package manager      (pnpm 11 / pip 24) │
 ├─────────────────────────────────────────┤
 │  Language runtime      (Node 24 / Py 3.12)│ ← medium: version managers
 ├─────────────────────────────────────────┤

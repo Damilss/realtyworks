@@ -17,7 +17,7 @@ Pick them off at your discretion.
 
 ## State verified (2026-07-04)
 
-- `next 16.2.6` / `react 19.2.4` / `pnpm@9.15.9`, Node pinned to 24 (`.nvmrc`).
+- `next 16.2.6` / `react 19.2.4` / `pnpm@11.13.1`, Node pinned to 24 (`.nvmrc`).
 - CI runs `lint → format:check → typecheck → test → build → audit` — with
   `!cancelled()`, concurrency-cancel, `permissions: contents: read`, and
   pnpm + Next build caching. The audit step is **blocking** (fails on any

@@ -29,3 +29,4 @@ row below.
 | Date | Report | Area | One-liner |
 | --- | --- | --- | --- |
 | 2026-07-06 | [vite audit-gate peer-dep](2026-07-06-vite-audit-gate-peer-dep.md) | deps / CI | pnpm `overrides` don't move an auto-installed peer — declare it as a direct dep |
+| 2026-07-16 | [pnpm audit endpoint retired](2026-07-16-pnpm-audit-endpoint-retired.md) | deps / CI | npm killed the audit endpoint; the fix ships in pnpm 11 only — and a green local run proved nothing |
