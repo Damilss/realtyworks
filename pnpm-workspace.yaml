@@ -9,3 +9,5 @@ allowBuilds:
   sharp: true
   # eslint-config-next's import resolver; native binding, `pnpm lint` needs it.
   unrs-resolver: true
+  # Supabase CLI; postinstall fetches the platform binary (Phase 2 local stack).
+  supabase: true

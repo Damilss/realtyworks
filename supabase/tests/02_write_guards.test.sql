@@ -1,0 +1,257 @@
+-- Write-path enforcement: vendor column guard, role-change machinery,
+-- append-only activity, landlord-only deletes, history-preserving RESTRICTs.
+-- Run: supabase test db
+
+begin;
+
+create extension if not exists pgtap with schema extensions;
+set search_path to public, extensions;
+
+select plan(27);
+
+-- ── vendor write surface ────────────────────────────────────────────────────
+do $$
+begin
+  perform set_config('request.jwt.claims',
+    '{"sub": "00000000-0000-0000-0000-000000000003", "role": "authenticated"}', true);
+end $$;
+set local role authenticated;
+
+select lives_ok(
+  $$update public.work_orders set status = 'completed'
+    where id = '40000000-0000-0000-0000-000000000003'$$,
+  'vendor may move an assigned work order to completed'
+);
+
+select is(
+  (select status from public.work_orders
+   where id = '40000000-0000-0000-0000-000000000003'),
+  'completed'::public.work_order_status,
+  'the vendor status update took effect'
+);
+
+select throws_ok(
+  $$update public.work_orders set title = 'hijacked'
+    where id = '40000000-0000-0000-0000-000000000003'$$,
+  '42501', null,
+  'vendor cannot change any column but status (guard trigger)'
+);
+
+select throws_ok(
+  $$update public.work_orders set status = 'cancelled'
+    where id = '40000000-0000-0000-0000-000000000002'$$,
+  '42501', null,
+  'vendor cannot cancel a work order (allowed targets: in_progress, completed)'
+);
+
+select throws_ok(
+  $$update public.work_orders set vendor_id = null
+    where id = '40000000-0000-0000-0000-000000000002'$$,
+  '42501', null,
+  'vendor cannot change assignment (guard trigger)'
+);
+
+select lives_ok(
+  $$update public.work_orders set status = 'in_progress'
+    where id = '40000000-0000-0000-0000-000000000001'$$,
+  'vendor update on an unassigned work order matches zero rows (no error, no effect)'
+);
+
+reset role;
+
+select is(
+  (select status from public.work_orders
+   where id = '40000000-0000-0000-0000-000000000001'),
+  'open'::public.work_order_status,
+  'the unassigned work order was untouched'
+);
+
+-- ── privilege escalation & audit forgery ────────────────────────────────────
+set local role authenticated;
+
+select throws_ok(
+  $$update public.profiles set role = 'landlord'
+    where id = '00000000-0000-0000-0000-000000000003'$$,
+  '42501', null,
+  'vendor cannot self-escalate: role column has no update grant'
+);
+
+select throws_ok(
+  $$insert into public.work_order_activity (work_order_id, actor_id, note)
+    values ('40000000-0000-0000-0000-000000000003',
+            '00000000-0000-0000-0000-000000000002', 'forged as manager')$$,
+  '42501', null,
+  'vendor cannot write actor_id (no insert grant on the column)'
+);
+
+select throws_ok(
+  $$insert into public.work_order_activity (work_order_id, action, note)
+    values ('40000000-0000-0000-0000-000000000003', 'status_changed', 'fake system row')$$,
+  '42501', null,
+  'vendor cannot author system-kind activity entries'
+);
+
+select lives_ok(
+  $$insert into public.work_order_activity (work_order_id, note)
+    values ('40000000-0000-0000-0000-000000000003', 'vendor note via client path')$$,
+  'vendor may add a note to an assigned work order'
+);
+
+select throws_ok(
+  $$insert into public.work_order_activity (work_order_id, note)
+    values ('40000000-0000-0000-0000-000000000001', 'note on someone else''s job')$$,
+  '42501', null,
+  'vendor cannot note an unassigned work order (RLS with check)'
+);
+
+reset role;
+
+-- ── append-only activity ────────────────────────────────────────────────────
+do $$
+begin
+  perform set_config('request.jwt.claims',
+    '{"sub": "00000000-0000-0000-0000-000000000002", "role": "authenticated"}', true);
+end $$;
+set local role authenticated;
+
+select throws_ok(
+  $$update public.work_order_activity set note = 'rewritten' where id = 1$$,
+  '42501', null,
+  'manager cannot edit activity (no update grant)'
+);
+
+reset role;
+
+select throws_ok(
+  $$update public.work_order_activity set note = 'rewritten' where id = 1$$,
+  '42501', null,
+  'even the table owner cannot edit activity (forbid trigger)'
+);
+
+-- ── deletes: landlord-only, history-preserving ──────────────────────────────
+set local role authenticated;
+
+select lives_ok(
+  $$delete from public.work_orders where id = '40000000-0000-0000-0000-000000000001'$$,
+  'manager delete matches zero rows (no error, no effect)'
+);
+
+reset role;
+
+select is(
+  (select count(*) from public.work_orders)::int, 5,
+  'no work order was deleted by the manager'
+);
+
+-- ── role management ─────────────────────────────────────────────────────────
+set local role authenticated;
+
+select throws_ok(
+  $$select public.set_user_role('00000000-0000-0000-0000-000000000003'::uuid,
+                                'manager'::public.app_role)$$,
+  '42501', null,
+  'manager cannot change roles'
+);
+
+reset role;
+
+do $$
+begin
+  perform set_config('request.jwt.claims',
+    '{"sub": "00000000-0000-0000-0000-000000000001", "role": "authenticated"}', true);
+end $$;
+set local role authenticated;
+
+select throws_ok(
+  $$select public.set_user_role('00000000-0000-0000-0000-000000000001'::uuid,
+                                'manager'::public.app_role)$$,
+  '42501', null,
+  'landlord cannot change their own role (lock-out guard)'
+);
+
+select lives_ok(
+  $$select public.set_user_role('00000000-0000-0000-0000-000000000003'::uuid,
+                                'manager'::public.app_role)$$,
+  'landlord can change another user''s role'
+);
+
+reset role;
+
+select is(
+  (select role from public.profiles
+   where id = '00000000-0000-0000-0000-000000000003'),
+  'manager'::public.app_role,
+  'the role change took effect'
+);
+
+do $$
+begin
+  perform set_config('request.jwt.claims', '', true);
+end $$;
+
+select throws_ok(
+  $$update public.profiles set role = 'manager'
+    where id = '00000000-0000-0000-0000-000000000001'$$,
+  '42501', null,
+  'the last landlord cannot be demoted (guard trigger, any write path)'
+);
+
+-- ── landlord delete: cascade for work orders, RESTRICT where history lives ──
+do $$
+begin
+  perform set_config('request.jwt.claims',
+    '{"sub": "00000000-0000-0000-0000-000000000001", "role": "authenticated"}', true);
+end $$;
+set local role authenticated;
+
+select lives_ok(
+  $$delete from public.work_orders where id = '40000000-0000-0000-0000-000000000005'$$,
+  'landlord can hard-delete a work order (mistake cleanup)'
+);
+
+reset role;
+
+select is(
+  (select count(*) from public.work_orders)::int, 4,
+  'the work order is gone'
+);
+
+select is(
+  (select count(*) from public.work_order_activity
+   where work_order_id = '40000000-0000-0000-0000-000000000005')::int, 0,
+  'its activity cascaded away (documented tradeoff of hard delete)'
+);
+
+set local role authenticated;
+
+select throws_ok(
+  $$delete from public.properties where id = '10000000-0000-0000-0000-000000000001'$$,
+  '23503', null,
+  'a property whose units carry work-order history cannot be deleted (RESTRICT)'
+);
+
+reset role;
+
+-- manager cannot delete a property at all
+do $$
+begin
+  perform set_config('request.jwt.claims',
+    '{"sub": "00000000-0000-0000-0000-000000000002", "role": "authenticated"}', true);
+end $$;
+set local role authenticated;
+
+select lives_ok(
+  $$delete from public.properties where id = '10000000-0000-0000-0000-000000000002'$$,
+  'manager property delete matches zero rows (no error, no effect)'
+);
+
+reset role;
+
+select is(
+  (select count(*) from public.properties)::int, 2,
+  'no property was deleted by the manager'
+);
+
+select * from finish();
+
+rollback;
