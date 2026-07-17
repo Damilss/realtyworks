@@ -53,7 +53,7 @@ reporting above.
 | --- | --- |
 | Framework | [Next.js](https://nextjs.org) 16 (App Router) |
 | Language | TypeScript (strict) on React 19 |
-| Package manager | **pnpm** `9.15.9` (pinned via `packageManager`) |
+| Package manager | **pnpm** `11.13.1` (pinned via `packageManager`) |
 | Runtime | Node **24** (pinned in `.nvmrc`, matched by CI) |
 | Unit tests | Vitest |
 | E2E tests | Playwright (local-only for now — see [docs/playwright.md](docs/playwright.md)) |
@@ -72,7 +72,7 @@ server actions/route handlers, and Supabase Edge Functions. See `CLAUDE.md` §2.
 ### Prerequisites
 
 - **Node 24** — `nvm use` reads `.nvmrc`
-- **pnpm 9.15.9** — easiest via [corepack](https://nodejs.org/api/corepack.html)
+- **pnpm 11.13.1** — easiest via [corepack](https://nodejs.org/api/corepack.html)
   (`corepack enable`), which reads the `packageManager` field; **do not use npm**
 - **gitleaks** *(optional but recommended)* — the pre-commit hook runs a local
   secret scan when it's installed, and skips it with a warning when it isn't
@@ -83,7 +83,7 @@ server actions/route handlers, and Supabase Edge Functions. See `CLAUDE.md` §2.
 ```bash
 git clone <repo-url> && cd realtyworks
 nvm use               # Node 24
-corepack enable       # activates pnpm 9.15.9 from package.json
+corepack enable       # activates pnpm 11.13.1 from package.json
 pnpm install          # also installs the git hooks (husky) via "prepare"
 pnpm dev              # http://localhost:3000
 ```

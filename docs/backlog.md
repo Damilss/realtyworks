@@ -17,7 +17,7 @@ Pick them off at your discretion.
 
 ## State verified (2026-07-04)
 
-- `next 16.2.6` / `react 19.2.4` / `pnpm@9.15.9`, Node pinned to 24 (`.nvmrc`).
+- `next 16.2.6` / `react 19.2.4` / `pnpm@11.13.1`, Node pinned to 24 (`.nvmrc`).
 - CI runs `lint → format:check → typecheck → test → build → audit` — with
   `!cancelled()`, concurrency-cancel, `permissions: contents: read`, and
   pnpm + Next build caching. The audit step is **blocking** (fails on any
@@ -196,8 +196,9 @@ known-good state. Stay within self-hostable features only (`CLAUDE.md` §5).
 Numbered SQL for the MVP vertical slice: `profiles`, `properties`, `units`, `vendors`,
 `work_orders`, `work_order_activity`, `work_order_attachments`. Every table ships its RLS policy in
 the same migration. No dashboard click-ops. Design each table with the process in
-`docs/schema/schema-brainstorming.md` (workflows → tables → security questions → Zod), which
-also lists the open questions to settle first (vendor contacts vs. auth users; landlord rights).
+`docs/schema/schema-brainstorming.md` (workflows → tables → security questions → Zod). The vendor
+contacts-vs-auth-users question is now **resolved** — vendors are contact rows linked to a real
+auth user reached by magic-link (`docs/vendor-access.md`); landlord-vs-manager rights remain open.
 
 **`docs/schema/schema-brainstorming.md` §7 is the source of truth for the table list and names** —
 if the two ever disagree, it wins. (An earlier version of this line said `activity_log` /
@@ -217,6 +218,9 @@ init shadcn/ui into `src/components/ui/`.
 ### 🟢 Phase 3 — The one vertical slice
 manager logs in → creates work order → assigns vendor → vendor updates status + uploads photo →
 activity log reflects it → manager sees it. Exercises auth, RLS, mutations, storage, audit once.
+The vendor half is **magic-link, not a signup** — vendors get a real auth user reached by a unique
+link (a "Copy vendor link" button in Phase 3; delivered over SMS in Phase 5). Design per
+`docs/vendor-access.md`.
 
 ### 🟢 Phase 3 — First real unit tests
 Work-order state transitions + permission checks — the "test what matters" targets (`CLAUDE.md` §5).

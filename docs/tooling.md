@@ -153,6 +153,42 @@ old version). Declaring vite directly is the mechanism that actually controls
 the resolved version. Remove the direct dependency once `vitest` requires
 `vite >= 8.0.16` on its own.
 
+### Why the gate requires pnpm 11 (`packageManager` pin)
+
+npm retired the legacy audit endpoints (`/-/npm/v1/security/audits` and
+`…/audits/quick`), which now return **410 Gone** — a brownout from 2026-04-15,
+fully retired 2026-07-15. The endpoints flap during a brownout, so a green run
+proves nothing; the failure mode is an intermittently red PR, not a clean break.
+pnpm ≤ 10 only ever calls the retired endpoints, so `pnpm audit` on the old pin
+was unfixable — no flag, no config. The replacement is
+`/-/npm/v1/security/advisories/bulk`, adopted in
+[pnpm#11268](https://github.com/pnpm/pnpm/pull/11268) and shipped in **pnpm 11**
+only: the bulk response drops fields the old contract returned, so it was a
+breaking change and was **never backported to 9.x or 10.x**
+([pnpm#11265](https://github.com/pnpm/pnpm/issues/11265)). Hence the jump
+`pnpm@9.15.9 → pnpm@11.13.1`. Do not pin back below 11 without also replacing
+this gate — the lockfile itself is unaffected (still `lockfileVersion: 9.0`).
+
+**Decision:** upgrade rather than `--ignore-registry-errors`. That flag greens
+the step on *any* registry error, which converts a blocking security gate into
+one that silently passes exactly when it fails to check anything — strictly
+worse than no gate, because it still reads green. Dropping `pnpm audit` for
+osv-scanner alone was the other option; kept both per the belt-and-suspenders
+rationale above, and the upgrade is cheapest now (Phase 1, three runtime deps).
+
+**Fallout — dependency build scripts are now opt-in.** pnpm 10 stopped running
+dependency install scripts by default and pnpm 11 made an unreviewed build a
+hard **error**, so this is not cosmetic: `sharp` (unbuilt → `pnpm build` fails)
+and `unrs-resolver` (unbuilt → `pnpm lint` fails) must be allowed explicitly.
+pnpm 11 also **stopped reading the `pnpm` field in package.json**; settings moved
+to `pnpm-workspace.yaml` (present at the repo root for exactly this reason, and
+its `allowBuilds` replaces v10's `onlyBuiltDependencies`). Anything not listed
+there is blocked by default — that default is the supply-chain win, so add
+entries deliberately, one reviewed package at a time.
+
+Long form — including why a *passing* local `pnpm audit` proved nothing during
+the brownout: [`reports/2026-07-16-pnpm-audit-endpoint-retired.md`](reports/2026-07-16-pnpm-audit-endpoint-retired.md).
+
 ---
 
 ## Secret scanning (gitleaks)

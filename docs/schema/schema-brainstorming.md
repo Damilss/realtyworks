@@ -448,11 +448,14 @@ Security:
 
 ## Open questions to settle when Phase 2 starts
 
-- **Vendors: contact rows, auth users, or both?** The brainstorm lists both
-  `profiles` and `vendors`; §1 MVP scope says "vendor contacts", but the
-  Phase 3 slice has a vendor *logging in*. Likely a `vendors` contact table
-  with an optional link to a `profiles` row once that vendor gets a login —
-  decide in the first migrations.
+- **Vendors: contact rows, auth users, or both?** — **resolved
+  (2026-07-14), see `docs/vendor-access.md`.** Both: a `vendors` contact table
+  with an optional link to a `profiles`/auth user, set when the vendor is
+  invited. Vendors get a **real auth user** (created silently) reached by a
+  **magic-link over SMS**, not a bearer token — so `auth.uid()`, RLS, and the
+  `current_app_role()` machinery in §4 all apply to them unchanged. Exact
+  magic-link mechanism and token/expiry details are settled at Phase 3 in that
+  doc.
 - **Landlord vs. manager permissions.** The original discussion only specced
   manager and vendor; the seed has three roles. Same rights at MVP, or a
   read-only landlord? Decide before writing RLS for `properties` /

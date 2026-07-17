@@ -12,7 +12,7 @@ vertical slice — see `CLAUDE.md` §4.
 ## Prerequisites
 
 - Node **24** (`nvm use` — reads `.nvmrc`)
-- **pnpm** (`pnpm@9.15.9`). Do **not** use `npm init playwright` — it writes a
+- **pnpm** (`pnpm@11.13.1`). Do **not** use `npm init playwright` — it writes a
   `package-lock.json`, adds example tests, and drops in its own GitHub Actions
   workflow, none of which we want.
 

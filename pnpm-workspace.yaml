@@ -1,0 +1,11 @@
+# pnpm settings. As of pnpm 11 the "pnpm" field in package.json is no longer
+# read — settings live here (https://pnpm.io/settings).
+#
+# Dependency build scripts are opt-in (pnpm 10+) and an unreviewed build is a
+# hard error, not a warning. Each entry below is a reviewed decision to let that
+# package run its install script; anything unlisted is blocked by default.
+allowBuilds:
+  # Next.js image optimization; native binary, `next build` needs it.
+  sharp: true
+  # eslint-config-next's import resolver; native binding, `pnpm lint` needs it.
+  unrs-resolver: true
