@@ -8,8 +8,12 @@
 --
 -- Phase 3 upload flow: generate attachment id -> upload object -> insert
 -- metadata row. A crash between the two leaves an orphaned object that nothing
--- renders (the app lists from metadata) — acceptable MVP debt. The work-order
--- delete server action removes objects first; the DB cascade handles metadata.
+-- renders (the app lists from metadata) — acceptable MVP debt. Deletes are
+-- coordinated in the DB: removing a metadata row (directly, or via work-order
+-- cascade) fires revoke_attachment_object(), which deletes the storage.objects
+-- row in the same transaction — API access dies with the metadata. The Phase 3
+-- delete flow still does the API-side object delete first to reclaim the
+-- physical backing-store bytes; the trigger is the revocation backstop.
 
 insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
 values (
@@ -44,12 +48,9 @@ create policy wo_attachments_insert on storage.objects
     and public.can_access_work_order(((storage.foldername(name))[1])::uuid)
   );
 
-create policy wo_attachments_delete_landlord on storage.objects
-  for delete to authenticated
-  using (
-    bucket_id = 'work-order-attachments'
-    and (select public.is_landlord())
-  );
-
--- Deliberately NO update policy: objects are immutable — no overwrites or
--- upserts; a new version is a new attachment id.
+-- Deliberately NO update policy (objects are immutable — no overwrites or
+-- upserts; a new version is a new attachment id) and NO delete policy: object
+-- deletes are service-role-only via the Phase 3 server action, coordinated
+-- with the metadata row (see the coordinated-delete note in the attachments
+-- migration). A client-side object delete would strand metadata pointing at
+-- a 404 — the mirror image of the unlisted-but-fetchable hole.

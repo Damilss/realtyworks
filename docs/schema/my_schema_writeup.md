@@ -205,7 +205,7 @@ history can't be deleted; work-order children (activity, attachments) CASCADE
 | vendors | full + **delete** | create/read/update contact fields | own row only |
 | work_orders | full + **delete** | create/read/update (no delete) | read assigned; update **status only** → in_progress/completed |
 | activity | read all; add notes | read all; add notes | read assigned; add notes as self |
-| attachments | read/upload + **delete**; fix `kind` | read/upload; fix `kind` | read/upload on assigned |
+| attachments | read/upload; fix `kind`; delete **only via the Phase 3 server action** | read/upload; fix `kind` | read/upload on assigned |
 | profiles | read all; change others' roles | read all | own row; staff **names only** via `staff_directory` view |
 
 How each rule is enforced (brainstorming §4 — RLS picks rows, not columns):
@@ -232,7 +232,12 @@ How each rule is enforced (brainstorming §4 — RLS picks rows, not columns):
 - **Storage** → object policies re-derive access from the path
   (uuid-shaped single folder = the work order id + `can_access_work_order()`);
   metadata and storage are independently enforced — neither trusts the other.
-  No object overwrites (no UPDATE policy); landlord-only object deletes.
+  No object overwrites (no UPDATE policy) and **no client deletes on either
+  layer**: Postgres can't remove a storage object transactionally
+  (`storage.protect_delete()` forbids SQL deletes — Storage API only), so a
+  one-sided delete would leave an unlisted-but-fetchable file or metadata
+  pointing at a 404. Both deletes belong to the Phase 3 server action
+  (object via storage API first, then the row via service role).
 - **Signup** → `enable_signup = false` in config.toml (invite-only; magic-link
   *login* unaffected). Belt: even if re-enabled, a stranger lands as an
   unlinked vendor and can see nothing.
