@@ -195,8 +195,9 @@ rationale above, and the upgrade is cheapest now (Phase 1, three runtime deps).
 
 **Fallout — dependency build scripts are now opt-in.** pnpm 10 stopped running
 dependency install scripts by default and pnpm 11 made an unreviewed build a
-hard **error**, so this is not cosmetic: `sharp` (unbuilt → `pnpm build` fails)
-and `unrs-resolver` (unbuilt → `pnpm lint` fails) must be allowed explicitly.
+hard **error**, so this is not cosmetic: `sharp` (unbuilt → `pnpm build` fails),
+`unrs-resolver` (unbuilt → `pnpm lint` fails), and `supabase` (its postinstall
+fetches the platform CLI binary — Phase 2) must be allowed explicitly.
 pnpm 11 also **stopped reading the `pnpm` field in package.json**; settings moved
 to `pnpm-workspace.yaml` (present at the repo root for exactly this reason, and
 its `allowBuilds` replaces v10's `onlyBuiltDependencies`). Anything not listed
@@ -214,9 +215,9 @@ Two layers (issue #19, PR #41):
 
 1. **Pre-commit** (above) — catches a secret before it ever enters history.
    Best-effort: skipped when the binary is missing.
-2. **CI** (`.github/workflows/security.yml`) — `gitleaks/gitleaks-action@v2`
-   scans the **full git history** (`fetch-depth: 0`) on every PR and push to
-   `main`. This is the authoritative layer.
+2. **CI** (`.github/workflows/security.yml`) — `gitleaks/gitleaks-action`
+   (SHA-pinned, v2.3.9) scans the **full git history** (`fetch-depth: 0`) on
+   every PR and push to `main`/`dev`. This is the authoritative layer.
 
 Permissions are least-privilege: the workflow grants `contents: read`, and the
 gitleaks **job** adds `pull-requests: read` because on PR events the action
@@ -262,10 +263,12 @@ container and four registry rulesets: `p/typescript`, `p/react`, `p/nextjs`,
   renders as annotations for free. The annotate step runs
   `if: ${{ !cancelled() }}` so it still runs when the scan step fails — which
   is exactly when there are findings to annotate.
-- **Container image is deliberately unpinned** (`semgrep/semgrep`, latest):
-  Dependabot only bumps `uses:` references, not `container:` images, so a pin
-  would go stale silently — and rulesets are fetched from the registry at scan
-  time anyway, so pinning the CLI buys little reproducibility.
+- **Container image is digest-pinned** (`semgrep/semgrep@sha256:…` with a
+  version comment). This reverses the original "deliberately unpinned" call:
+  the mutable-tag risk won. The tradeoff is real — Dependabot only bumps
+  `uses:` references, not `container:` images, so this pin is bumped
+  **manually** when upgrading Semgrep; rulesets are still fetched from the
+  registry at scan time either way.
 
 **The first scan flagged our own CI config** (8 findings, all fixed in the
 same PR):

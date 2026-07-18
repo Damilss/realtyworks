@@ -37,6 +37,17 @@ pnpm exec vitest run -t "name of test"            # filter by test name
 pnpm exec vitest src/path/to/file.test.ts         # watch a single file
 ```
 
+Supabase local stack (CLI is a pinned devDependency; Docker must be running):
+```bash
+pnpm exec supabase start        # boot the local stack
+pnpm exec supabase stop         # stop it (config.toml changes need stop+start)
+pnpm exec supabase db reset     # rebuild from migrations + seed — known-good state
+pnpm exec supabase test db      # pgTAP suite in supabase/tests/
+pnpm exec supabase gen types typescript --local > src/lib/database.types.ts
+                                # regenerate after EVERY migration change,
+                                # then `pnpm format` (generated file must pass format:check)
+```
+
 Vitest only collects `src/**/*.{test,spec}.{ts,tsx}` and
 `tests/unit/**/*.{test,spec}.{ts,tsx}` (see `vitest.config.ts`). Import app code
 via the `@/*` alias (`@/* → ./src/*`, `tsconfig.json`).
@@ -63,23 +74,33 @@ old `CI/CD` type is retired in favor of `ci` — see `commitlint.config.mjs`).
 
 ### Current state vs. the target in §3
 
-The repo is at **Phase 1 (Foundations)** — tooling/CI/security gates are in
-place around a near-empty Next.js scaffold (`src/app/{layout,page}.tsx` +
-globals, one Playwright smoke test). Most of §3's *application* tree and some
-§5 tools are the **target**, not yet present. Verify before assuming they
-exist:
+The repo is at **Phase 2 (Supabase local + schema + RLS)** — the schema
+shipped 2026-07-17. Parts of §3's *application* tree are still the **target**,
+not yet present. Verify before assuming they exist:
 
-- **Not yet created:** `supabase/` (no migrations/seed/config), `src/server/`,
-  `src/lib/`, `src/schemas/`, `src/components/`, `tests/unit/`, `.env.example`.
-- **Not yet installed:** `@supabase/ssr` / Supabase client, Tailwind,
-  shadcn/ui. `database.types.ts` does not exist until the first migration is
-  generated.
-- **Already in place:** Husky (pre-commit + commit-msg), commitlint,
-  lint-staged, Playwright (+ `tests/e2e/smoke.spec.ts`), gitleaks
-  (CI + pre-commit), Semgrep SAST (CI), `pnpm audit` gate, weekly osv-scanner,
-  Dependabot.
-- When you add the first missing piece, follow §3/§5 exactly (e.g. RLS in the
-  same migration as its table; `src/server/` as the trust boundary).
+- **In place — schema layer:** `supabase/` with 9 migrations (all 7 tables,
+  RLS + grants + triggers in the same file as each table), `seed.sql`
+  (3 login-able users, sample properties/units/vendor, work orders in all 5
+  statuses — `pnpm exec supabase db reset` is the one-command known-good
+  state), `supabase/tests/` (pgTAP RLS/guard suite), and the generated
+  `src/lib/database.types.ts`. Supabase CLI pinned as a devDependency.
+  Settled 2026-07-17: landlord = manager superset (deletes + role
+  management); all staff see all properties; vendors scoped to assigned work
+  orders (columns guarded by trigger); work-order hard delete cascades its
+  activity/attachments. Signup is invite-only (`[auth] enable_signup =
+  false`; `[auth.email].enable_signup` must STAY true — off kills logins,
+  see config.toml).
+- **In place — foundations:** Husky (pre-commit + commit-msg), commitlint,
+  lint-staged, Vitest DOM harness (`tests/unit/`), Playwright
+  (+ `tests/e2e/smoke.spec.ts`), gitleaks (CI + pre-commit), Semgrep SAST
+  (CI), `pnpm audit` gate, weekly osv-scanner, Dependabot.
+- **Not yet created:** `src/server/`, `src/schemas/`, `src/components/`,
+  `src/lib/supabase/` (clients), `supabase/functions/`, `.env.example`.
+- **Not yet installed:** `@supabase/ssr` / `@supabase/supabase-js`, Tailwind,
+  shadcn/ui.
+- When you add the next missing piece, follow §3/§5 exactly (e.g.
+  `src/server/` as the trust boundary; schema changes only as new migrations
+  with RLS alongside).
 
 ---
 
@@ -205,7 +226,8 @@ realtyworks/
 │   ├── workflows/                  # ci.yml (main gate — see §0) · security.yml · osv-scanner.yml
 │   └── dependabot.yml              # weekly npm + github-actions updates
 ├── .husky/                         # pre-commit (lint-staged + gitleaks), commit-msg (commitlint)
-├── docs/                           # tooling.md · playwright.md · backlog.md · commit-messages.md · dependency-version-management.md · pwa.md · vendor-access.md · schema/schema-brainstorming.md · reports/
+├── docs/                           # tooling.md · playwright.md · backlog.md · commit-messages.md · dependency-version-management.md · pwa.md · vendor-access.md · reports/
+│   └── schema/                     # schema-brainstorming.md (the method) · my_schema_writeup.md (workflows → design → Phase 2 plan)
 ├── public/
 ├── src/
 │   ├── app/                        # App Router
@@ -230,9 +252,10 @@ realtyworks/
 │   │   └── queries/                # data-fetching helpers
 │   └── schemas/                    # zod schemas (shared client+server validation)
 ├── supabase/
-│   ├── migrations/                 # numbered SQL — SOURCE OF TRUTH
-│   ├── functions/                  # edge functions (empty until needed)
-│   ├── seed.sql                    # test users + sample data
+│   ├── migrations/                 # timestamped SQL — SOURCE OF TRUTH (RLS ships with its table)
+│   ├── functions/                  # edge functions (not created until needed)
+│   ├── tests/                      # pgTAP RLS/guard suite — `pnpm exec supabase test db`
+│   ├── seed.sql                    # 3 test users + sample data (db reset loads it)
 │   └── config.toml
 ├── tests/
 │   ├── unit/                       # vitest
@@ -249,6 +272,7 @@ realtyworks/
 ├── tsconfig.json                   # strict: true
 ├── vitest.config.ts
 ├── package.json
+├── pnpm-workspace.yaml             # pnpm settings (allowBuilds — reviewed install scripts)
 └── README.md
 ```
 

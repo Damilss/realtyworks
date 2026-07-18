@@ -15,7 +15,7 @@
 create table public.work_orders (
   id uuid primary key default gen_random_uuid(),
   property_id uuid not null references public.properties (id) on delete restrict,
-  unit_id uuid references public.units (id) on delete restrict,
+  unit_id uuid,
   vendor_id uuid references public.vendors (id) on delete restrict,
   title text not null check (char_length(title) between 1 and 120),
   description text check (description is null or char_length(description) <= 2000),
@@ -27,7 +27,13 @@ create table public.work_orders (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   constraint work_orders_assigned_has_vendor
-    check (status <> 'assigned' or vendor_id is not null)
+    check (status <> 'assigned' or vendor_id is not null),
+  -- Composite FK: a non-null unit must belong to THIS work order's property
+  -- (a bare units(id) FK would only prove the unit exists somewhere). NULL
+  -- unit_id passes (MATCH SIMPLE), so property-level work orders are fine.
+  constraint work_orders_unit_in_property
+    foreign key (unit_id, property_id)
+    references public.units (id, property_id) on delete restrict
 );
 
 create index work_orders_property_id_idx on public.work_orders (property_id);

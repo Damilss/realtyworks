@@ -8,7 +8,7 @@ begin;
 create extension if not exists pgtap with schema extensions;
 set search_path to public, extensions;
 
-select plan(11);
+select plan(12);
 
 -- landlord sees everything
 do $$
@@ -81,8 +81,13 @@ select is(
 );
 
 select is(
-  (select count(*) from public.profiles)::int, 3,
-  'linked vendor sees own profile + the two staff profiles (actor names)'
+  (select count(*) from public.profiles)::int, 1,
+  'vendor sees only their own profiles row (no whole-row staff access)'
+);
+
+select is(
+  (select count(*) from public.staff_directory)::int, 2,
+  'linked vendor resolves staff names via staff_directory (id + full_name only)'
 );
 
 reset role;

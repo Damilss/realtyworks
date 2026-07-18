@@ -106,6 +106,13 @@ export type Database = {
             referencedRelation: "profiles";
             referencedColumns: ["id"];
           },
+          {
+            foreignKeyName: "properties_created_by_fkey";
+            columns: ["created_by"];
+            isOneToOne: false;
+            referencedRelation: "staff_directory";
+            referencedColumns: ["id"];
+          },
         ];
       };
       units: {
@@ -139,6 +146,13 @@ export type Database = {
             columns: ["created_by"];
             isOneToOne: false;
             referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "units_created_by_fkey";
+            columns: ["created_by"];
+            isOneToOne: false;
+            referencedRelation: "staff_directory";
             referencedColumns: ["id"];
           },
           {
@@ -190,10 +204,24 @@ export type Database = {
             referencedColumns: ["id"];
           },
           {
+            foreignKeyName: "vendors_created_by_fkey";
+            columns: ["created_by"];
+            isOneToOne: false;
+            referencedRelation: "staff_directory";
+            referencedColumns: ["id"];
+          },
+          {
             foreignKeyName: "vendors_profile_id_fkey";
             columns: ["profile_id"];
             isOneToOne: false;
             referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "vendors_profile_id_fkey";
+            columns: ["profile_id"];
+            isOneToOne: false;
+            referencedRelation: "staff_directory";
             referencedColumns: ["id"];
           },
         ];
@@ -235,6 +263,13 @@ export type Database = {
             columns: ["actor_id"];
             isOneToOne: false;
             referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "work_order_activity_actor_id_fkey";
+            columns: ["actor_id"];
+            isOneToOne: false;
+            referencedRelation: "staff_directory";
             referencedColumns: ["id"];
           },
           {
@@ -286,6 +321,13 @@ export type Database = {
             columns: ["uploaded_by"];
             isOneToOne: false;
             referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "work_order_attachments_uploaded_by_fkey";
+            columns: ["uploaded_by"];
+            isOneToOne: false;
+            referencedRelation: "staff_directory";
             referencedColumns: ["id"];
           },
           {
@@ -352,6 +394,13 @@ export type Database = {
             referencedColumns: ["id"];
           },
           {
+            foreignKeyName: "work_orders_created_by_fkey";
+            columns: ["created_by"];
+            isOneToOne: false;
+            referencedRelation: "staff_directory";
+            referencedColumns: ["id"];
+          },
+          {
             foreignKeyName: "work_orders_property_id_fkey";
             columns: ["property_id"];
             isOneToOne: false;
@@ -359,11 +408,11 @@ export type Database = {
             referencedColumns: ["id"];
           },
           {
-            foreignKeyName: "work_orders_unit_id_fkey";
-            columns: ["unit_id"];
+            foreignKeyName: "work_orders_unit_in_property";
+            columns: ["unit_id", "property_id"];
             isOneToOne: false;
             referencedRelation: "units";
-            referencedColumns: ["id"];
+            referencedColumns: ["id", "property_id"];
           },
           {
             foreignKeyName: "work_orders_vendor_id_fkey";
@@ -376,7 +425,21 @@ export type Database = {
       };
     };
     Views: {
-      [_ in never]: never;
+      staff_directory: {
+        Row: {
+          full_name: string | null;
+          id: string | null;
+        };
+        Insert: {
+          full_name?: string | null;
+          id?: string | null;
+        };
+        Update: {
+          full_name?: string | null;
+          id?: string | null;
+        };
+        Relationships: [];
+      };
     };
     Functions: {
       can_access_work_order: {

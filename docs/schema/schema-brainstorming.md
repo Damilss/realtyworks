@@ -3,8 +3,8 @@
 The repeatable process for designing schema in this repo: how to get from a
 user workflow to Postgres tables (as Supabase migrations), RLS answers, and
 Zod input schemas. Captured from a design discussion (2026-07-13) and
-reconciled with `CLAUDE.md` §§1–6 so it can be applied directly — first at
-the start of Phase 2, then again for every feature after.
+reconciled with `CLAUDE.md` §§1–6 so it can be applied directly — first for
+the Phase 2 schema (shipped 2026-07-17), and again for every feature after.
 
 **The method in one line: brainstorm from workflows first, not tables first.**
 
@@ -139,7 +139,9 @@ priority: low | medium | high | urgent
 
 The status *transitions* (who may move a work order between which states)
 are business logic — the first real unit-test target in Phase 3
-(`docs/backlog.md`).
+(`docs/backlog.md`). The vendor floor — vendors may only move a work order to
+`in_progress`/`completed` — is already DB-enforced by
+`guard_work_order_update()`; Phase 3 owns everything beyond it.
 
 ## 4. Ask the security questions early — they are the RLS policy
 
@@ -218,8 +220,13 @@ end;
 $$ language plpgsql security definer;
 ```
 
-(Sketch, not final — `current_app_role()` is whatever role lookup Phase 2
-settles on, and the column list follows the table.)
+(Sketch, not final — and now superseded by the shipped version: Phase 2
+landed `guard_work_order_update()` in
+`supabase/migrations/20260717120500_create_work_orders.sql`, where the real
+columns are `vendor_id`/`cost_cents` and the guard is a **fail-closed jsonb
+diff** — vendors may change only `status` — rather than a per-column
+blocklist like this sketch. `current_app_role()` landed under exactly that
+name.)
 
 **The default for this repo:** privileged mutations go through a **server
 action** (§2's trust boundary), which writes an explicit column allowlist, with
@@ -446,7 +453,7 @@ Security:
 - All important changes create activity log entries.
 ```
 
-## Open questions to settle when Phase 2 starts
+## Open questions — both now resolved (Phase 2 schema shipped 2026-07-17)
 
 - **Vendors: contact rows, auth users, or both?** — **resolved
   (2026-07-14), see `docs/vendor-access.md`.** Both: a `vendors` contact table
@@ -456,10 +463,12 @@ Security:
   `current_app_role()` machinery in §4 all apply to them unchanged. Exact
   magic-link mechanism and token/expiry details are settled at Phase 3 in that
   doc.
-- **Landlord vs. manager permissions.** The original discussion only specced
-  manager and vendor; the seed has three roles. Same rights at MVP, or a
-  read-only landlord? Decide before writing RLS for `properties` /
-  `work_orders`.
+- **Landlord vs. manager permissions.** — **resolved (2026-07-17):** landlord
+  = **manager superset** — everything a manager does, plus deletes
+  (properties, units, vendors, work orders) and role management
+  (`set_user_role()`, landlord-only). Encoded in the shipped RLS (the
+  `*_delete_landlord` policies) in `supabase/migrations/`; decision recorded
+  in `my_schema_writeup.md`.
 
 ---
 

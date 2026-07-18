@@ -15,21 +15,27 @@ Pick them off at your discretion.
 
 ---
 
-## State verified (2026-07-04)
+## State verified (2026-07-17)
 
 - `next 16.2.6` / `react 19.2.4` / `pnpm@11.13.1`, Node pinned to 24 (`.nvmrc`).
 - CI runs `lint → format:check → typecheck → test → build → audit` — with
   `!cancelled()`, concurrency-cancel, `permissions: contents: read`, and
   pnpm + Next build caching. The audit step is **blocking** (fails on any
-  high/critical advisory; see `docs/tooling.md`).
-- Security workflows live: **gitleaks** on PR/push (+ pre-commit layer),
-  weekly **osv-scanner** lockfile scan.
+  high/critical advisory; see `docs/tooling.md`). A parallel **`e2e` job** runs
+  the Playwright smoke test on every PR/push to `main`/`dev` (Chromium only,
+  HTML report artifact).
+- Security workflows live: **gitleaks** on PR/push to `main`/`dev`
+  (+ pre-commit layer), **Semgrep SAST** (blocking, PR annotations), weekly
+  **osv-scanner** lockfile scan (+ a scan on every PR into `main`). Every
+  `uses:` is SHA-pinned; the semgrep container is digest-pinned.
 - Dependabot on (npm + github-actions, weekly), **tuned** — grouped, `deps`
   prefix, `dependencies` label, `@types/node` pinned to `^24` (issue #23; see ✅).
 - Husky **pre-commit** (lint-staged + gitleaks) **and `commit-msg`**
   (commitlint, conventional types + `deps`, `CI/CD` retired → `ci`).
-- Playwright + one smoke test, **local-only by design** (`docs/playwright.md`).
 - Prettier configured (markdown intentionally ignored).
+- **Phase 2 schema live locally** — `supabase/` (9 migrations, seed, pgTAP
+  suite via `pnpm exec supabase test db`), generated
+  `src/lib/database.types.ts`, supabase CLI pinned as a devDependency. See ✅.
 
 ### Sharp edges these issues address
 - Native GitHub security features (CodeQL, secret-scanning push-protection,
@@ -40,6 +46,46 @@ Pick them off at your discretion.
 ---
 
 ## ✅ Done (kept for the paper trail)
+
+### ✅ Phase 2 — Supabase local + schema + RLS + seed + pgTAP (2026-07-17)
+Supabase CLI pinned as a devDependency (`supabase` ^2.109.1, install script
+allow-listed in `pnpm-workspace.yaml`). Nine migrations create the seven §7
+tables — RLS + grants + triggers in the **same file** as each table: landlord =
+manager superset (deletes + role management via `set_user_role()`); all staff
+see all properties; vendors scoped to assigned work orders with a fail-closed
+column-guard trigger (status only → `in_progress`/`completed`); append-only
+`work_order_activity` auto-logged from work-order changes; private
+`work-order-attachments` bucket with path-derived object policies. `seed.sql`:
+3 login-able users (`landlord|manager|vendor@realtyworks.test`), 2 properties,
+3 units, a linked vendor, 5 work orders covering every status —
+`pnpm exec supabase db reset` = one-command known-good state. 41 pgTAP tests in
+`supabase/tests/` (`pnpm exec supabase test db`). `database.types.ts`
+generated. Post-review hardening (same day): composite FK ties a work order's
+unit to its property; `staff_directory` view gives vendors staff **names
+only** (no whole-row profile reads); attachment `storage_path` CHECK enforces
+the exact `<work_order_id>/<attachment_id>.<ext>` shape. Signup is invite-only (`[auth] enable_signup = false`) — gotcha:
+`[auth.email].enable_signup` must stay `true`, turning it off disables the
+whole email provider including logins (documented in `config.toml`). Full
+design + decisions: `docs/schema/my_schema_writeup.md`.
+
+### ✅ SAST in CI (Semgrep OSS) — verified in place 2026-07-17
+`security.yml` runs a blocking `semgrep` job (digest-pinned container,
+`p/typescript` + `p/react` + `p/nextjs` + `p/owasp-top-ten`) on PR/push to
+`main`/`dev`, findings rendered as PR annotations. Was still listed as an open
+🟠 item long after landing — the "Recommended order" footer already counted it
+done.
+
+### ✅ Harden GitHub Actions supply chain — verified in place 2026-07-17
+Every `uses:` in `ci.yml` / `security.yml` / `osv-scanner.yml` is pinned to a
+full commit SHA with a version comment; workflows carry least-privilege
+`permissions:`; the semgrep `container:` image is digest-pinned (Dependabot
+bumps `uses:` SHAs; the container pin is bumped manually — `docs/tooling.md`).
+
+### ✅ Wire Playwright into CI — verified in place 2026-07-17
+`ci.yml` has the parallel `e2e` job exactly as specced: installs Chromium,
+caches the browser, runs `pnpm test:e2e`, uploads the HTML report artifact, on
+every PR/push to `main`/`dev`. (Supersedes the old "local-only by design"
+note.)
 
 ### ✅ Tune Dependabot + pin `@types/node` to Node 24 (2026-07-08, issue #23)
 `.github/dependabot.yml`: both ecosystems now **group** bumps (npm splits into
@@ -119,7 +165,7 @@ required-check names are unchanged; the OSV scan surfaces as a non-required
 ### 🔴 Branch protection on `main` (verify/enable — web UI)
 **Why:** `CLAUDE.md` §4/§5 make this a Phase-1 requirement and the paper trail depends on it.
 **Do:** Settings → Branches → protect `main`:
-- Require PR before merge; require the **CI** check (and gitleaks/Semgrep once added) to pass.
+- Require PR before merge; require the **CI**, gitleaks, and Semgrep checks to pass.
 - Dismiss stale approvals; require conversation resolution.
 - Block force-push and deletion; include administrators.
 **Done when:** a direct push to `main` is rejected; PRs need green checks to merge.
@@ -128,17 +174,8 @@ required-check names are unchanged; the OSV scan surfaces as a non-required
 
 ## 🟠 High
 
-### 🟠 SAST in CI (Semgrep OSS)
-**Why:** Static analysis catches injection/authz bugs before they ship; CodeQL needs GHAS on private.
-**Do:** add a `semgrep ci` job (`returntocorp/semgrep`) with `p/typescript`, `p/react`,
-`p/nextjs`, `p/owasp-top-ten` rulesets. (Swap to CodeQL later if you go public or buy GHAS.)
-**Done when:** Semgrep runs on every PR and reports findings as annotations.
-
-### 🟠 Harden GitHub Actions supply chain
-**Why:** `@v4` tags are mutable; a compromised tag runs in your CI.
-**Do:** pin every `uses:` to a full commit SHA (with a `# v4.x.x` comment). Add least-privilege
-`permissions:` to each new workflow. Dependabot's `github-actions` updates will bump the SHAs for you.
-**Done when:** no floating tags remain in `.github/workflows/`.
+*(Both former High items — Semgrep SAST and Actions supply-chain hardening —
+shipped; see ✅ Done.)*
 
 ---
 
@@ -173,12 +210,6 @@ required-check names are unchanged; the OSV scan surfaces as a non-required
 `packageManager` for pnpm.
 **Done when:** wrong-Node installs warn; editors respect the config.
 
-### 🟡 Wire Playwright into CI (when the Phase 3 slice lands)
-**Why:** `docs/playwright.md` intentionally defers E2E to Phase 3/4 — this issue is the "when."
-**Do:** add a separate `e2e` job: install `chromium`, cache the browser, run `pnpm test:e2e`,
-upload the HTML report artifact. Gate it to the branch/paths where the slice lives.
-**Done when:** the smoke test (and first real flow) runs green in CI.
-
 ### 🟡 Optional hygiene: `knip`
 **Why:** Catches dead deps/exports early — cheap signal for a solo dev.
 **Do:** `pnpm add -D knip`; add a `knip` script; run occasionally (not a CI gate yet).
@@ -188,28 +219,10 @@ upload the HTML report artifact. Gate it to the branch/paths where the slice liv
 
 ## 🟢 Low — general-development runway (Phase 2+, phase-gated)
 
-### 🟢 Phase 2 — Supabase local
-`supabase init`, commit `config.toml`, `supabase start` (Docker). One `db reset` command to a
-known-good state. Stay within self-hostable features only (`CLAUDE.md` §5).
-
-### 🟢 Phase 2 — First migrations (RLS in the same file as each table)
-Numbered SQL for the MVP vertical slice: `profiles`, `properties`, `units`, `vendors`,
-`work_orders`, `work_order_activity`, `work_order_attachments`. Every table ships its RLS policy in
-the same migration. No dashboard click-ops. Design each table with the process in
-`docs/schema/schema-brainstorming.md` (workflows → tables → security questions → Zod). The vendor
-contacts-vs-auth-users question is now **resolved** — vendors are contact rows linked to a real
-auth user reached by magic-link (`docs/vendor-access.md`); landlord-vs-manager rights remain open.
-
-**`docs/schema/schema-brainstorming.md` §7 is the source of truth for the table list and names** —
-if the two ever disagree, it wins. (An earlier version of this line said `activity_log` /
-`attachments` and omitted `profiles`; the names above supersede it.)
-
-### 🟢 Phase 2 — Seed data
-3 users (landlord / manager / vendor), sample properties + a vendor, work orders in varied states.
-
-### 🟢 Phase 2 — Supabase clients + generated types
-`@supabase/ssr` → `client.ts` / `server.ts` / `middleware.ts`; generate `database.types.ts`
-(`supabase gen types` — never hand-edit).
+### 🟢 Phase 2 — Supabase clients (`@supabase/ssr`)
+`@supabase/ssr` → `src/lib/supabase/{client,server,middleware}.ts`. The rest of the Phase 2
+runway (local stack, migrations + RLS, seed, `database.types.ts`) shipped 2026-07-17 — see ✅.
+Regenerate types after every migration change, then `pnpm format`.
 
 ### 🟢 Phase 2/3 — Tailwind + shadcn/ui (not yet installed)
 Stack is decided (`CLAUDE.md` §2) but absent. Install Tailwind + `prettier-plugin-tailwindcss`,
@@ -264,8 +277,8 @@ PCI surface) is a separate go/no-go at the start of the phase.
 | `tailwindcss` + `prettier-plugin-tailwindcss` + shadcn/ui | Decided UI stack, not yet installed | Phase 2/3 |
 | `@sentry/nextjs` | Error monitoring | Phase 4 |
 
-*Not npm packages, but part of the plan:* `gitleaks`, `semgrep`, `osv-scanner` (CI actions),
-and the `supabase` CLI (Phase 2).
+*Not npm packages, but part of the plan:* `gitleaks`, `semgrep`, `osv-scanner` (CI actions).
+The `supabase` CLI is ✅ installed as a pinned devDependency (2026-07-17).
 
 ---
 

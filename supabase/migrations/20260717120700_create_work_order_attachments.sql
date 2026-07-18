@@ -17,8 +17,12 @@ create table public.work_order_attachments (
   size_bytes bigint check (size_bytes is null or size_bytes >= 0),
   uploaded_by uuid not null default auth.uid() references public.profiles (id) on delete restrict,
   created_at timestamptz not null default now(),
-  constraint attachments_path_matches_work_order
-    check (storage_path like work_order_id::text || '/%')
+  -- Enforce the exact documented invariant <work_order_id>/<attachment_id>.<ext>
+  -- — not just the prefix. Blocks nested paths and rows whose object name
+  -- doesn't match their own id, so metadata can never point at another row's
+  -- (or another work order's) object.
+  constraint attachments_path_matches_row
+    check (storage_path ~ ('^' || work_order_id::text || '/' || id::text || '\.[a-zA-Z0-9]+$'))
 );
 
 create index work_order_attachments_wo_idx on public.work_order_attachments (work_order_id);

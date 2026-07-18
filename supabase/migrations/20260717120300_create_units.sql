@@ -10,7 +10,10 @@ create table public.units (
   created_by uuid not null default auth.uid() references public.profiles (id) on delete restrict,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
-  unique (property_id, label)
+  unique (property_id, label),
+  -- Superkey for the composite FK from work_orders: lets a work order prove
+  -- its unit actually belongs to its property.
+  unique (id, property_id)
 );
 
 alter table public.units enable row level security;
