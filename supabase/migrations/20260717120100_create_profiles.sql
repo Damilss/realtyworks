@@ -63,7 +63,12 @@ security definer
 set search_path = ''
 as $$
 begin
-  if not public.is_landlord() then
+  -- Fail closed: is_landlord() is NULL for an authenticated caller with no
+  -- profiles row (an imported or partially-repaired account). `not null` is
+  -- NULL, which PL/pgSQL treats as false, so a `not is_landlord()` guard would
+  -- fall through and let that caller change another user's role. `is not true`
+  -- denies NULL and false alike.
+  if public.is_landlord() is not true then
     raise exception 'only landlords may change roles' using errcode = '42501';
   end if;
   if target_user_id = (select auth.uid()) then
@@ -89,7 +94,9 @@ begin
   end if;
 
   if new.role is distinct from old.role then
-    if (select auth.uid()) is not null and not public.is_landlord() then
+    -- `is not true` (not `not ...`) so a caller whose is_landlord() is NULL —
+    -- no profiles row — fails closed here too, matching set_user_role().
+    if (select auth.uid()) is not null and public.is_landlord() is not true then
       raise exception 'only a landlord may change roles' using errcode = '42501';
     end if;
     if old.role = 'landlord' and new.role <> 'landlord' then

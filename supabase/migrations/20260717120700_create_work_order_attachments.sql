@@ -5,10 +5,15 @@
 --
 -- id is generated client-side BEFORE upload and becomes the object name, so
 -- the path CHECK below ties every metadata row to its own work order's storage
--- prefix — a row can never point at another work order's object.
+-- prefix — a row can never point at another work order's object. It has NO
+-- database default on purpose: a server-generated id would never match the
+-- UUID already baked into the client's storage_path, so the metadata insert
+-- would fail the path CHECK *after* the object was uploaded and orphan it. With
+-- no default the generated Insert type marks id required, surfacing the
+-- contract at compile time instead of at runtime.
 
 create table public.work_order_attachments (
-  id uuid primary key default gen_random_uuid(),
+  id uuid primary key,
   work_order_id uuid not null references public.work_orders (id) on delete cascade,
   kind public.attachment_kind not null default 'photo',
   storage_path text not null unique,
