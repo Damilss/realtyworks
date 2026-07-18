@@ -92,12 +92,18 @@ begin
     if (select auth.uid()) is not null and not public.is_landlord() then
       raise exception 'only a landlord may change roles' using errcode = '42501';
     end if;
-    if old.role = 'landlord' and new.role <> 'landlord'
-       and not exists (
-         select 1 from public.profiles p
-         where p.role = 'landlord' and p.id <> old.id
-       ) then
-      raise exception 'cannot demote the last landlord' using errcode = '42501';
+    if old.role = 'landlord' and new.role <> 'landlord' then
+      -- Serialize demotions before checking. Without the lock, two concurrent
+      -- demotions of DIFFERENT landlords each see the other as still-landlord
+      -- (READ COMMITTED) and both commit — leaving zero landlords. The second
+      -- waiter re-reads after the first commits and correctly raises.
+      perform pg_advisory_xact_lock(hashtext('profiles.landlord_demotion'));
+      if not exists (
+        select 1 from public.profiles p
+        where p.role = 'landlord' and p.id <> old.id
+      ) then
+        raise exception 'cannot demote the last landlord' using errcode = '42501';
+      end if;
     end if;
   end if;
 

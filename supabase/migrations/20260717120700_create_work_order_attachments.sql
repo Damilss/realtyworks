@@ -70,12 +70,21 @@ create policy attachments_update_staff on public.work_order_attachments
   using ((select public.is_staff()))
   with check ((select public.is_staff()));
 
-create policy attachments_delete_landlord on public.work_order_attachments
-  for delete to authenticated
-  using ((select public.is_landlord()));
+-- NO client DELETE surface — not even landlord. A client-side metadata delete
+-- can't be coordinated with the object: Postgres cannot remove the object row
+-- transactionally (storage.protect_delete() forbids direct SQL deletes on
+-- storage.objects — Storage API only), so deleting metadata alone would
+-- unlist the attachment while the file stayed fetchable by path for anyone
+-- with work-order access. Deletes are therefore the Phase 3 server action's
+-- job: storage-API object delete first (service key), then the metadata row
+-- (service_role bypasses RLS — no policy needed). Work-order hard deletes
+-- still cascade these rows; those objects become unfetchable immediately
+-- (path authorization derives from the now-deleted work order) and the
+-- WO-delete server action sweeps the physical objects.
 
-grant select, delete on public.work_order_attachments to authenticated;
+grant select on public.work_order_attachments to authenticated;
 grant insert (id, work_order_id, kind, storage_path, file_name, mime_type, size_bytes)
   on public.work_order_attachments to authenticated;
 grant update (kind) on public.work_order_attachments to authenticated;
+-- deliberately NO delete grant — see the coordinated-delete note above.
 grant all on public.work_order_attachments to service_role;

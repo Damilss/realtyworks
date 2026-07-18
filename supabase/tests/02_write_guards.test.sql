@@ -7,7 +7,7 @@ begin;
 create extension if not exists pgtap with schema extensions;
 set search_path to public, extensions;
 
-select plan(29);
+select plan(32);
 
 -- ── vendor write surface ────────────────────────────────────────────────────
 do $$
@@ -270,6 +270,56 @@ reset role;
 select is(
   (select count(*) from public.properties)::int, 2,
   'no property was deleted by the manager'
+);
+
+-- ── attachment deletes are coordinated-only (no client surface) ─────────────
+-- A client-side delete of either layer alone would desynchronize metadata and
+-- object (unlisted-but-fetchable file, or metadata pointing at a 404); both
+-- deletes belong to the Phase 3 server action. Even a landlord is denied.
+do $$
+begin
+  perform set_config('request.jwt.claims',
+    '{"sub": "00000000-0000-0000-0000-000000000001", "role": "authenticated"}', true);
+end $$;
+
+insert into storage.objects (bucket_id, name)
+values ('work-order-attachments',
+        '40000000-0000-0000-0000-000000000004/50000000-0000-0000-0000-000000000001.jpg');
+
+set local role authenticated;
+
+select throws_ok(
+  $$delete from public.work_order_attachments
+    where id = '50000000-0000-0000-0000-000000000001'$$,
+  '42501', null,
+  'not even a landlord can delete attachment metadata directly (no grant)'
+);
+
+-- Direct object delete: swallow whichever denial fires (missing grant vs. no
+-- policy = zero rows) — the assertion is that the object survives.
+do $$
+begin
+  begin
+    delete from storage.objects
+    where bucket_id = 'work-order-attachments'
+      and name = '40000000-0000-0000-0000-000000000004/50000000-0000-0000-0000-000000000001.jpg';
+  exception when others then null;
+  end;
+end $$;
+
+reset role;
+
+select is(
+  (select count(*) from public.work_order_attachments
+   where id = '50000000-0000-0000-0000-000000000001')::int, 1,
+  'the metadata row survives a direct client delete attempt'
+);
+
+select is(
+  (select count(*) from storage.objects
+   where bucket_id = 'work-order-attachments'
+     and name = '40000000-0000-0000-0000-000000000004/50000000-0000-0000-0000-000000000001.jpg')::int, 1,
+  'the storage object survives a direct client delete attempt'
 );
 
 select * from finish();

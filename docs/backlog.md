@@ -58,12 +58,17 @@ column-guard trigger (status only → `in_progress`/`completed`); append-only
 `work-order-attachments` bucket with path-derived object policies. `seed.sql`:
 3 login-able users (`landlord|manager|vendor@realtyworks.test`), 2 properties,
 3 units, a linked vendor, 5 work orders covering every status —
-`pnpm exec supabase db reset` = one-command known-good state. 41 pgTAP tests in
+`pnpm exec supabase db reset` = one-command known-good state. pgTAP suite in
 `supabase/tests/` (`pnpm exec supabase test db`). `database.types.ts`
-generated. Post-review hardening (same day): composite FK ties a work order's
-unit to its property; `staff_directory` view gives vendors staff **names
-only** (no whole-row profile reads); attachment `storage_path` CHECK enforces
-the exact `<work_order_id>/<attachment_id>.<ext>` shape. Signup is invite-only (`[auth] enable_signup = false`) — gotcha:
+generated. Post-review hardening (same day, two rounds — 44 pgTAP tests
+final): composite FK ties a work order's unit to its property;
+`staff_directory` view gives vendors staff **names only** (no whole-row
+profile reads); attachment `storage_path` CHECK enforces the exact
+`<work_order_id>/<attachment_id>.<ext>` shape; last-landlord demotions
+serialize on an advisory lock (concurrent-demotion race); attachment deletes
+have **no client surface** on either layer — coordinated Phase 3 server
+action only (`storage.protect_delete()` makes a transactional DB-side revoke
+impossible, so one-sided deletes are simply removed). Signup is invite-only (`[auth] enable_signup = false`) — gotcha:
 `[auth.email].enable_signup` must stay `true`, turning it off disables the
 whole email provider including logins (documented in `config.toml`). Full
 design + decisions: `docs/schema/my_schema_writeup.md`.
