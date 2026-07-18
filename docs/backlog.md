@@ -179,8 +179,19 @@ required-check names are unchanged; the OSV scan surfaces as a non-required
 
 ## 🟠 High
 
-*(Both former High items — Semgrep SAST and Actions supply-chain hardening —
-shipped; see ✅ Done.)*
+### 🟠 Run the pgTAP database suite in GitHub Actions (issue #72)
+**Why:** The RLS and write-guard suite in `supabase/tests/` protects the
+database authorization boundary, but it currently runs only when invoked
+locally. A migration or policy regression can therefore merge while the Node
+and E2E checks remain green.
+**Do:** Add a parallel `db` job to `.github/workflows/ci.yml`, using the same
+Node 24 + pnpm setup as `verify`, the pinned local CLI (`pnpm exec supabase`),
+and read-only workflow permissions. Install dependencies, run `pnpm exec
+supabase start`, reset to the seeded state with `pnpm exec supabase db reset`,
+then run `pnpm exec supabase test db`. Run it on the existing PR/push triggers
+without path filtering unless its required-check behavior is defined first.
+**Done when:** every PR and push to `main`/`dev` reports a blocking database
+test job, and a deliberately failing pgTAP assertion fails that job.
 
 ---
 
