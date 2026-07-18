@@ -2,8 +2,8 @@
 --
 -- Append-only stack: no UPDATE/DELETE policies, no UPDATE/DELETE grants, and a
 -- BEFORE UPDATE forbid trigger that binds owner/service paths too. Deliberately
--- NO delete trigger: landlord hard-delete of a work order cascades its trail —
--- the documented mistake-cleanup tradeoff (settled 2026-07-17).
+-- NO delete trigger: the coordinated service-role work-order delete cascades
+-- its trail after attachment objects have been removed through the Storage API.
 --
 -- Identity PK (not uuid): totally orders entries within one transaction, where
 -- created_at ties; identity columns need no sequence grant for inserts.

@@ -1,5 +1,6 @@
 -- Write-path enforcement: vendor column guard, role-change machinery,
--- append-only activity, landlord-only deletes, history-preserving RESTRICTs.
+-- append-only activity, coordinated-only work-order/attachment deletes, and
+-- history-preserving RESTRICTs.
 -- Run: supabase test db
 
 begin;
@@ -139,7 +140,7 @@ select throws_ok(
   'even the table owner cannot edit activity (forbid trigger)'
 );
 
--- ── deletes: landlord-only, history-preserving ──────────────────────────────
+-- ── deletes: coordinated-only work orders, history-preserving FKs ──────────
 set local role authenticated;
 
 select throws_ok(
@@ -151,9 +152,10 @@ select throws_ok(
   'a work order cannot pair a unit with a property it does not belong to'
 );
 
-select lives_ok(
+select throws_ok(
   $$delete from public.work_orders where id = '40000000-0000-0000-0000-000000000001'$$,
-  'manager delete matches zero rows (no error, no effect)'
+  '42501', null,
+  'manager cannot delete a work order directly (no grant)'
 );
 
 reset role;
@@ -216,7 +218,7 @@ select throws_ok(
   'the last landlord cannot be demoted (guard trigger, any write path)'
 );
 
--- ── landlord delete: cascade for work orders, RESTRICT where history lives ──
+-- ── landlord delete: work orders require coordinated server action ─────────
 do $$
 begin
   perform set_config('request.jwt.claims',
@@ -224,22 +226,23 @@ begin
 end $$;
 set local role authenticated;
 
-select lives_ok(
+select throws_ok(
   $$delete from public.work_orders where id = '40000000-0000-0000-0000-000000000005'$$,
-  'landlord can hard-delete a work order (mistake cleanup)'
+  '42501', null,
+  'landlord cannot bypass coordinated work-order deletion (no grant)'
 );
 
 reset role;
 
 select is(
-  (select count(*) from public.work_orders)::int, 4,
-  'the work order is gone'
+  (select count(*) from public.work_orders)::int, 5,
+  'the direct landlord delete did not remove a work order'
 );
 
 select is(
   (select count(*) from public.work_order_activity
-   where work_order_id = '40000000-0000-0000-0000-000000000005')::int, 0,
-  'its activity cascaded away (documented tradeoff of hard delete)'
+   where work_order_id = '40000000-0000-0000-0000-000000000005') > 0, true,
+  'the denied delete preserves the work order activity trail'
 );
 
 set local role authenticated;

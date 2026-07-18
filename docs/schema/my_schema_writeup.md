@@ -118,13 +118,19 @@ the "Future phases" section and stays part of the roadmap.
 **Decisions settled today (2026-07-17)**
 
 1. **No tenant tables at MVP** — staff create work orders; tenant ideas parked below.
-2. **Landlord = manager superset**: everything a manager does + deletes
-   (properties, units, vendors, work orders) + role management.
+2. **Landlord = manager superset**: everything a manager does + direct deletes
+   for properties, units, and vendors + role management. Work-order deletion is
+   landlord-only through the coordinated Phase 3 server action, never the Data
+   API, because attachment objects must be removed through the Storage API first.
 3. **All staff see all properties** (single-operation instance, no join table);
    vendors are scoped to assigned work orders.
-4. **Work-order delete = cascade**: landlord-only mistake cleanup removes the
-   order and its activity/attachments. Activity is append-only against edits
-   (UPDATE forbidden by trigger); delete-by-cascade is the documented tradeoff.
+4. **Work-order delete = coordinated cascade**: landlord-only mistake cleanup
+   removes attachment objects first through the Storage API, then the server
+   action deletes the order with the service role and cascades its activity and
+   attachment metadata. Authenticated clients have no direct work-order DELETE
+   grant, preventing Data API calls from orphaning storage objects. Activity is
+   append-only against edits (UPDATE forbidden by trigger); the coordinated
+   delete-by-cascade is the documented tradeoff.
 
 # Future phases — designed for, not built
 
@@ -203,7 +209,7 @@ history can't be deleted; work-order children (activity, attachments) CASCADE
 | --- | --- | --- | --- |
 | properties / units | full + **delete** | create/read/update | read address of assigned jobs' property/unit |
 | vendors | full + **delete** | create/read/update contact fields | own row only |
-| work_orders | full + **delete** | create/read/update (no delete) | read assigned; update **status only** → in_progress/completed |
+| work_orders | create/read/update; **delete via server action** | create/read/update (no delete) | read assigned; update **status only** → in_progress/completed |
 | activity | read all; add notes | read all; add notes | read assigned; add notes as self |
 | attachments | read/upload; fix `kind`; delete **only via the Phase 3 server action** | read/upload; fix `kind` | read/upload on assigned |
 | profiles | read all; change others' roles | read all | own row; staff **names only** via `staff_directory` view |

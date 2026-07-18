@@ -84,10 +84,12 @@ not yet present. Verify before assuming they exist:
   statuses — `pnpm exec supabase db reset` is the one-command known-good
   state), `supabase/tests/` (pgTAP RLS/guard suite), and the generated
   `src/lib/database.types.ts`. Supabase CLI pinned as a devDependency.
-  Settled 2026-07-17: landlord = manager superset (deletes + role
-  management); all staff see all properties; vendors scoped to assigned work
-  orders (columns guarded by trigger); work-order hard delete cascades its
-  activity/attachments. Signup is invite-only (`[auth] enable_signup =
+  Settled 2026-07-17: landlord = manager superset (direct property/unit/vendor
+  deletes + role management; work-order delete only through the coordinated
+  server action); all staff see all properties; vendors scoped to assigned work
+  orders (columns guarded by trigger); coordinated work-order hard delete
+  removes Storage objects before cascading activity/attachment metadata. Signup
+  is invite-only (`[auth] enable_signup =
   false`; `[auth.email].enable_signup` must STAY true — off kills logins,
   see config.toml).
 - **In place — foundations:** Husky (pre-commit + commit-msg), commitlint,
