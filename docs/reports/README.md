@@ -30,4 +30,4 @@ row below.
 | --- | --- | --- | --- |
 | 2026-07-06 | [vite audit-gate peer-dep](2026-07-06-vite-audit-gate-peer-dep.md) | deps / CI | pnpm `overrides` don't move an auto-installed peer — declare it as a direct dep |
 | 2026-07-16 | [pnpm audit endpoint retired](2026-07-16-pnpm-audit-endpoint-retired.md) | deps / CI | npm killed the audit endpoint; the fix ships in pnpm 11 only — and a green local run proved nothing |
-| 2026-07-17 | [Phase 2 schema review hardening](2026-07-17-phase-2-schema-review-hardening.md) | database / RLS / Storage | End-to-end invariants needed composite constraints, restricted views, serialization, and coordinated deletes |
+| 2026-07-17 | [Phase 2 schema review hardening](2026-07-17-phase-2-schema-review-hardening.md) | database / RLS / Storage | Nine defects over four rounds: cross-layer invariants, then fail-closed authorization and type-contract fixes |
