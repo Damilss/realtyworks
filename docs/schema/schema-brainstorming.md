@@ -464,11 +464,13 @@ Security:
   magic-link mechanism and token/expiry details are settled at Phase 3 in that
   doc.
 - **Landlord vs. manager permissions.** — **resolved (2026-07-17):** landlord
-  = **manager superset** — everything a manager does, plus deletes
-  (properties, units, vendors, work orders) and role management
-  (`set_user_role()`, landlord-only). Encoded in the shipped RLS (the
-  `*_delete_landlord` policies) in `supabase/migrations/`; decision recorded
-  in `my_schema_writeup.md`.
+  = **manager superset** — everything a manager does, plus direct deletes for
+  properties, units, and vendors; coordinated work-order deletion; and role
+  management (`set_user_role()`, landlord-only). Direct deletes use the shipped
+  `*_delete_landlord` policies in `supabase/migrations/`; work-order deletion
+  is intentionally absent from the authenticated Data API and belongs to the
+  Phase 3 server action so it can remove Storage objects first. Decision
+  recorded in `my_schema_writeup.md`.
 
 ---
 

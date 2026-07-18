@@ -80,7 +80,7 @@ create policy attachments_update_staff on public.work_order_attachments
 -- (service_role bypasses RLS — no policy needed). Work-order hard deletes
 -- still cascade these rows; those objects become unfetchable immediately
 -- (path authorization derives from the now-deleted work order) and the
--- WO-delete server action sweeps the physical objects.
+-- WO-delete server action removes the physical objects before deleting the row.
 
 grant select on public.work_order_attachments to authenticated;
 grant insert (id, work_order_id, kind, storage_path, file_name, mime_type, size_bytes)

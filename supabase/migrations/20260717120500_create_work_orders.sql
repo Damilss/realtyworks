@@ -127,11 +127,11 @@ create policy work_orders_update_staff_or_assigned on public.work_orders
     or vendor_id = (select public.current_vendor_id())
   );
 
-create policy work_orders_delete_landlord on public.work_orders
-  for delete to authenticated
-  using ((select public.is_landlord()));
-
-grant select, delete on public.work_orders to authenticated;
+-- NO client DELETE surface — not even landlord. A work-order delete must first
+-- remove every attachment object through the Storage API, then delete the row
+-- with the service role so the metadata/activity cascades cannot orphan files.
+-- The coordinated Phase 3 server action owns that sequence.
+grant select on public.work_orders to authenticated;
 grant insert (property_id, unit_id, title, description, priority, due_date)
   on public.work_orders to authenticated;
 grant update (title, description, status, priority, due_date, vendor_id, unit_id, cost_cents)

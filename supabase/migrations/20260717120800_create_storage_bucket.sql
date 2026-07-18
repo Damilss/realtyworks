@@ -8,12 +8,11 @@
 --
 -- Phase 3 upload flow: generate attachment id -> upload object -> insert
 -- metadata row. A crash between the two leaves an orphaned object that nothing
--- renders (the app lists from metadata) — acceptable MVP debt. Deletes are
--- coordinated in the DB: removing a metadata row (directly, or via work-order
--- cascade) fires revoke_attachment_object(), which deletes the storage.objects
--- row in the same transaction — API access dies with the metadata. The Phase 3
--- delete flow still does the API-side object delete first to reclaim the
--- physical backing-store bytes; the trigger is the revocation backstop.
+-- renders (the app lists from metadata) — acceptable MVP debt. Postgres cannot
+-- delete the physical object transactionally, so the Phase 3 server action
+-- coordinates deletes: remove Storage API objects first, then delete metadata
+-- or the work-order row with the service role. Authenticated clients receive no
+-- direct delete surface on either layer.
 
 insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
 values (
