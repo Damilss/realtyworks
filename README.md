@@ -6,7 +6,7 @@ Modern solutions for property management.
 landlords to run real-estate maintenance and repair operations end-to-end:
 work orders, vendor coordination, documentation, and audit-ready records.
 
-> **Status:** MVP / in active development — Phase 1 (Foundations)
+> **Status:** MVP / in active development — Phase 2 (Supabase local + schema + RLS)
 > **License:** Proprietary (see [`LICENSE.md`](LICENSE.md))
 
 ---
@@ -56,14 +56,15 @@ reporting above.
 | Package manager | **pnpm** `11.13.1` (pinned via `packageManager`) |
 | Runtime | Node **24** (pinned in `.nvmrc`, matched by CI) |
 | Unit tests | Vitest |
-| E2E tests | Playwright (local-only for now — see [docs/playwright.md](docs/playwright.md)) |
+| E2E tests | Playwright (smoke test also runs in CI — see [docs/playwright.md](docs/playwright.md)) |
+| Database | Supabase (Postgres 17, Auth, Storage, RLS) — local stack via the pinned `supabase` CLI; schema lives in `supabase/migrations/` (RLS ships with each table), pgTAP tests in `supabase/tests/` |
 | Lint / format | ESLint (`next/core-web-vitals` + TypeScript) · Prettier |
 | Git hygiene | Husky + lint-staged · commitlint (conventional commits) · gitleaks |
 
-Planned for later phases (decided, not yet installed): Supabase (Postgres,
-Auth, Storage, RLS), Tailwind CSS + shadcn/ui, Sentry. There is **no separate
-backend service** — backend logic lives in Postgres (RLS/constraints), Next.js
-server actions/route handlers, and Supabase Edge Functions. See `CLAUDE.md` §2.
+Planned for later phases (decided, not yet installed): `@supabase/ssr` client
+wiring, Tailwind CSS + shadcn/ui, Sentry. There is **no separate backend
+service** — backend logic lives in Postgres (RLS/constraints), Next.js server
+actions/route handlers, and Supabase Edge Functions. See `CLAUDE.md` §2.
 
 ---
 
@@ -92,12 +93,18 @@ pnpm install          # installs deps + the git hooks (husky) via "prepare"
 pnpm dev              # http://localhost:3000
 ```
 
-Open [http://localhost:3000](http://localhost:3000) — you should see the
-Phase 1 scaffold page.
 
-No environment variables are required yet — Phase 1 has no external services.
-A committed `.env.example` arrives with Supabase in Phase 2 (real values go in
-the gitignored `.env.local`).
+No environment variables are required yet — the local Supabase stack runs on
+well-known local dev keys. A committed `.env.example` arrives with the
+`@supabase/ssr` client wiring (real values go in the gitignored `.env.local`).
+
+The local database (requires Docker):
+
+```bash
+pnpm exec supabase start      # boot the local stack
+pnpm exec supabase db reset   # rebuild from migrations + seed (known-good state)
+pnpm exec supabase test db    # pgTAP RLS/guard suite
+```
 
 ### Additional checkouts (git worktrees)
 

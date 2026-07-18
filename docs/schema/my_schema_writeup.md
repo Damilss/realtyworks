@@ -176,7 +176,9 @@ Plain-English shapes:
 - **work_orders** — property (req), unit (opt), vendor (opt), title,
   description, status, priority, due_date, `cost_cents` (nullable bigint —
   the manually-entered job total for MVP cost summaries; deliberately not a
-  ledger), created_by. Check: `assigned` ⇒ has vendor.
+  ledger), created_by. Check: `assigned` ⇒ has vendor. Composite FK
+  `(unit_id, property_id) → units(id, property_id)`: a non-null unit must
+  belong to this work order's property (NULL unit passes).
 - **work_order_activity** — append-only trail: identity PK (total order),
   `actor_id` (default `auth.uid()`), `action` enum, `old_value`/`new_value`
   jsonb, `note`. Auto-written by triggers on work_orders (created /
@@ -184,8 +186,10 @@ Plain-English shapes:
   attachments (attachment_added); clients may insert **notes only**.
 - **work_order_attachments** — metadata row per file; the file lives in the
   private `work-order-attachments` bucket at
-  `<work_order_id>/<attachment_id>.<ext>`; a CHECK ties `storage_path` to the
-  row's own work order. Receipts = `kind='receipt'`.
+  `<work_order_id>/<attachment_id>.<ext>`; a regex CHECK enforces that exact
+  shape — work-order prefix AND the row's own id as the object name, single
+  level — so metadata can never point at another row's object. Receipts =
+  `kind='receipt'`.
 
 FK rules: attribution FKs (`created_by`, `actor_id`, `uploaded_by`,
 `vendors.profile_id`) RESTRICT — users with history can't be hard-deleted;
@@ -202,7 +206,7 @@ history can't be deleted; work-order children (activity, attachments) CASCADE
 | work_orders | full + **delete** | create/read/update (no delete) | read assigned; update **status only** → in_progress/completed |
 | activity | read all; add notes | read all; add notes | read assigned; add notes as self |
 | attachments | read/upload + **delete**; fix `kind` | read/upload; fix `kind` | read/upload on assigned |
-| profiles | read all; change others' roles | read all | own row + staff names |
+| profiles | read all; change others' roles | read all | own row; staff **names only** via `staff_directory` view |
 
 How each rule is enforced (brainstorming §4 — RLS picks rows, not columns):
 
@@ -242,8 +246,9 @@ How each rule is enforced (brainstorming §4 — RLS picks rows, not columns):
    `handle_new_user()` + auth trigger, RLS, grants
 3. `create_properties` · 4. `create_units` — tables, staff RLS, grants
 5. `create_vendors` — table, partial unique on `profile_id`,
-   `current_vendor_id()`, RLS, grants, + the linked-vendor→staff-profiles
-   SELECT arm on profiles
+   `current_vendor_id()`, RLS, grants, + the `staff_directory` view
+   (names-only staff resolution for linked vendors — a profiles policy arm
+   would expose whole rows, and RLS can't pick columns)
 6. `create_work_orders` — table, checks, indexes, `can_access_work_order()`,
    vendor guard, RLS, grants, + assigned-vendor SELECT arms on
    properties/units (extension, not retrofit — both tables were deny-by-default

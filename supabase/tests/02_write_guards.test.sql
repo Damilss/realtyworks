@@ -7,7 +7,7 @@ begin;
 create extension if not exists pgtap with schema extensions;
 set search_path to public, extensions;
 
-select plan(27);
+select plan(29);
 
 -- ── vendor write surface ────────────────────────────────────────────────────
 do $$
@@ -98,6 +98,17 @@ select lives_ok(
 );
 
 select throws_ok(
+  $$insert into public.work_order_attachments
+      (id, work_order_id, kind, storage_path, file_name, mime_type)
+    values ('50000000-0000-0000-0000-000000000099',
+            '40000000-0000-0000-0000-000000000003', 'photo',
+            '40000000-0000-0000-0000-000000000003/evil/nested.jpg',
+            'nested.jpg', 'image/jpeg')$$,
+  '23514', null,
+  'attachment metadata must match <work_order_id>/<attachment_id>.<ext> exactly'
+);
+
+select throws_ok(
   $$insert into public.work_order_activity (work_order_id, note)
     values ('40000000-0000-0000-0000-000000000001', 'note on someone else''s job')$$,
   '42501', null,
@@ -130,6 +141,15 @@ select throws_ok(
 
 -- ── deletes: landlord-only, history-preserving ──────────────────────────────
 set local role authenticated;
+
+select throws_ok(
+  $$insert into public.work_orders (property_id, unit_id, title, priority)
+    values ('10000000-0000-0000-0000-000000000002',
+            '20000000-0000-0000-0000-000000000001',
+            'unit from the wrong property', 'low')$$,
+  '23503', null,
+  'a work order cannot pair a unit with a property it does not belong to'
+);
 
 select lives_ok(
   $$delete from public.work_orders where id = '40000000-0000-0000-0000-000000000001'$$,

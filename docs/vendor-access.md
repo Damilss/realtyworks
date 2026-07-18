@@ -98,8 +98,11 @@ This resolves `schema-brainstorming.md`'s open question decisively: the `vendors
 table is a **contact row**, and it gains a link to a **`profiles`/auth user**
 once that vendor is invited. Contact-first, auth-on-invite.
 
-Sketch (not final — settle exact columns with the Phase 2 migrations, RLS in the
-same file per §5):
+Sketch — the `vendors` half shipped 2026-07-17 as
+`supabase/migrations/20260717120400_create_vendors.sql` (contact-first,
+auth-on-invite, exactly as below: phone-OR-email required, partial unique on
+`profile_id`, no client grant on the auth link); `vendor_access` remains a
+Phase 3 decision (§6):
 
 ```
 vendors
@@ -162,7 +165,9 @@ don't assume the training-data API.
   `vendor_access` (§4) exists.
 - **Vendor identity: phone-first or synthetic email?** If the mechanism needs an
   email, does each vendor get a placeholder/synthetic one, or do we key auth off
-  phone? Settle with the first migrations.
+  phone? Settle at Phase 3 with the invite flow — the shipped `vendors` table
+  deliberately supports either (phone OR email required, both individually
+  nullable).
 - **Link lifetime & re-issue.** Expiry window; one-time vs. reusable-until-
   revoked; the manager's "re-send link" flow.
 - **Sensitive-field gating (§3a).** Final call on what the vendor view hides,

@@ -63,12 +63,16 @@ grant insert (name, phone, email) on public.vendors to authenticated;
 grant update (name, phone, email) on public.vendors to authenticated;
 grant all on public.vendors to service_role;
 
--- Additive profiles arm (needs current_vendor_id, so it lives here): a LINKED
--- vendor may read staff profiles — the Phase 3 activity trail must resolve
--- staff actor names — but never other vendors' profiles.
-create policy profiles_select_staff_for_vendors on public.profiles
-  for select to authenticated
-  using (
-    role in ('landlord', 'manager')
-    and (select public.current_vendor_id()) is not null
-  );
+-- Staff-name resolution for linked vendors (the Phase 3 activity trail must
+-- show who did what) WITHOUT handing vendors whole profiles rows — a SELECT
+-- policy on profiles would expose every column (phone etc.), and RLS can't
+-- pick columns. This view is postgres-owned, so it reads past profiles RLS by
+-- design (do NOT set security_invoker) and returns ONLY id + full_name, to
+-- staff and linked vendors. Lives here because it needs current_vendor_id().
+create view public.staff_directory as
+  select id, full_name
+  from public.profiles
+  where role in ('landlord', 'manager')
+    and ((select public.is_staff()) or (select public.current_vendor_id()) is not null);
+
+grant select on public.staff_directory to authenticated, service_role;
