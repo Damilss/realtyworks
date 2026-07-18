@@ -296,7 +296,7 @@ export type Database = {
         Insert: {
           created_at?: string;
           file_name: string;
-          id?: string;
+          id: string;
           kind?: Database["public"]["Enums"]["attachment_kind"];
           mime_type: string;
           size_bytes?: number | null;

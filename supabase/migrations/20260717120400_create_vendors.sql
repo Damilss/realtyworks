@@ -12,7 +12,13 @@ create table public.vendors (
   created_by uuid not null default auth.uid() references public.profiles (id) on delete restrict,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
-  constraint vendors_contact_method check (phone is not null or email is not null)
+  -- At least one *usable* contact method (docs/vendor-access.md: phone-OR-email
+  -- required, both individually nullable). nullif(trim(...), '') collapses ''
+  -- and whitespace-only to NULL, so a form posting empty strings can't create a
+  -- vendor with no reachable contact — a plain `is not null` check let '' pass.
+  constraint vendors_contact_method check (
+    nullif(trim(phone), '') is not null or nullif(trim(email), '') is not null
+  )
 );
 
 -- Load-bearing: one vendor row per auth user, or current_vendor_id() below

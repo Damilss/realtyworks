@@ -8,7 +8,7 @@ begin;
 create extension if not exists pgtap with schema extensions;
 set search_path to public, extensions;
 
-select plan(32);
+select plan(36);
 
 -- ── vendor write surface ────────────────────────────────────────────────────
 do $$
@@ -109,6 +109,19 @@ select throws_ok(
   'attachment metadata must match <work_order_id>/<attachment_id>.<ext> exactly'
 );
 
+-- id has no DB default: omitting it is a not-null error (23502), never a
+-- silent server-generated id that mismatches storage_path and orphans the
+-- already-uploaded object.
+select throws_ok(
+  $$insert into public.work_order_attachments
+      (work_order_id, kind, storage_path, file_name, mime_type)
+    values ('40000000-0000-0000-0000-000000000003', 'photo',
+            '40000000-0000-0000-0000-000000000003/50000000-0000-0000-0000-0000000000aa.jpg',
+            'photo.jpg', 'image/jpeg')$$,
+  '23502', null,
+  'attachment insert must supply id — no DB default to silently fill it'
+);
+
 select throws_ok(
   $$insert into public.work_order_activity (work_order_id, note)
     values ('40000000-0000-0000-0000-000000000001', 'note on someone else''s job')$$,
@@ -173,6 +186,25 @@ select throws_ok(
                                 'manager'::public.app_role)$$,
   '42501', null,
   'manager cannot change roles'
+);
+
+reset role;
+
+-- Fail closed for a caller with no profiles row (imported / partially-repaired
+-- account): is_landlord() is NULL there, so a `not is_landlord()` guard would
+-- fall through and let the role change land. `is not true` denies it.
+do $$
+begin
+  perform set_config('request.jwt.claims',
+    '{"sub": "00000000-0000-0000-0000-0000000000ff", "role": "authenticated"}', true);
+end $$;
+set local role authenticated;
+
+select throws_ok(
+  $$select public.set_user_role('00000000-0000-0000-0000-000000000003'::uuid,
+                                'landlord'::public.app_role)$$,
+  '42501', null,
+  'a caller with no profiles row cannot change roles (is_landlord() NULL fails closed)'
 );
 
 reset role;
@@ -324,6 +356,32 @@ select is(
      and name = '40000000-0000-0000-0000-000000000004/50000000-0000-0000-0000-000000000001.jpg')::int, 1,
   'the storage object survives a direct client delete attempt'
 );
+
+-- ── vendor contact method: at least one *usable* value ──────────────────────
+-- The plain `phone is not null or email is not null` accepted '' — a form
+-- posting empty strings could create a vendor with no reachable contact,
+-- breaking the docs/vendor-access.md phone-OR-email invariant.
+do $$
+begin
+  perform set_config('request.jwt.claims',
+    '{"sub": "00000000-0000-0000-0000-000000000002", "role": "authenticated"}', true);
+end $$;
+set local role authenticated;
+
+select throws_ok(
+  $$insert into public.vendors (name, phone, email)
+    values ('Blank Contact Co', '   ', '')$$,
+  '23514', null,
+  'a vendor with only blank/whitespace phone and email is rejected (usable-contact CHECK)'
+);
+
+select lives_ok(
+  $$insert into public.vendors (name, phone, email)
+    values ('Email Only Co', '', 'contact@example.test')$$,
+  'a blank phone is accepted when a real email is present (constraint is not over-tight)'
+);
+
+reset role;
 
 select * from finish();
 
