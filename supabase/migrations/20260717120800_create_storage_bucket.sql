@@ -24,16 +24,25 @@ values (
 )
 on conflict (id) do nothing;
 
--- The uuid-shape regex gives clean denials (instead of cast errors) on junk
--- paths; the single-folder-level check stops burying files where listings
--- miss them; can_access_work_order() requires the folder to name a REAL work
--- order the caller can reach — for a vendor, one currently assigned to them.
+-- Enforce the exact object name <work_order_id>/<attachment_id>.<ext> — the same
+-- shape work_order_attachments.attachments_path_matches_row requires (lowercase-
+-- uuid folder, lowercase-uuid basename, alphanumeric extension, exactly one
+-- folder level). storage.foldername() drops the basename, so checking the folder
+-- alone let <wo-uuid>/photo.jpg — a valid folder with a non-UUID basename —
+-- through, yet no metadata row can ever reference it (its id must equal the
+-- basename UUID). Uploads precede the metadata insert and clients have no object-
+-- delete surface, so such a name would orphan forever. Matching the two regexes
+-- makes an object insertable here IFF a metadata row could reference it, refusing
+-- the orphan up front. The whole-name regex (checked before the ::uuid cast, so
+-- junk paths still get clean denials not cast errors) also fixes the single
+-- folder level, so no separate array_length check is needed;
+-- can_access_work_order() then requires the folder to name a REAL work order the
+-- caller can reach — for a vendor, one currently assigned to them.
 create policy wo_attachments_select on storage.objects
   for select to authenticated
   using (
     bucket_id = 'work-order-attachments'
-    and (storage.foldername(name))[1]
-        ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+    and name ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.[a-zA-Z0-9]+$'
     and public.can_access_work_order(((storage.foldername(name))[1])::uuid)
   );
 
@@ -41,9 +50,7 @@ create policy wo_attachments_insert on storage.objects
   for insert to authenticated
   with check (
     bucket_id = 'work-order-attachments'
-    and array_length(storage.foldername(name), 1) = 1
-    and (storage.foldername(name))[1]
-        ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+    and name ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.[a-zA-Z0-9]+$'
     and public.can_access_work_order(((storage.foldername(name))[1])::uuid)
   );
 

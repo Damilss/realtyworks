@@ -8,7 +8,7 @@ begin;
 create extension if not exists pgtap with schema extensions;
 set search_path to public, extensions;
 
-select plan(36);
+select plan(38);
 
 -- ── vendor write surface ────────────────────────────────────────────────────
 do $$
@@ -120,6 +120,26 @@ select throws_ok(
             'photo.jpg', 'image/jpeg')$$,
   '23502', null,
   'attachment insert must supply id — no DB default to silently fill it'
+);
+
+-- Storage enforces the same <wo>/<attachment_id>.<ext> shape as the metadata
+-- path CHECK, so an object is insertable IFF a metadata row could reference it.
+-- A non-UUID basename that no row can point at (and no client can delete) is
+-- refused, not orphaned. storage.foldername() drops the basename, so the folder
+-- check alone used to let it through.
+select throws_ok(
+  $$insert into storage.objects (bucket_id, name)
+    values ('work-order-attachments',
+            '40000000-0000-0000-0000-000000000003/photo.jpg')$$,
+  '42501', null,
+  'storage rejects a non-UUID object basename (an unreferenceable, undeletable orphan)'
+);
+
+select lives_ok(
+  $$insert into storage.objects (bucket_id, name)
+    values ('work-order-attachments',
+            '40000000-0000-0000-0000-000000000003/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa.jpg')$$,
+  'storage accepts the canonical <work_order_id>/<attachment_id>.<ext> name for an assigned vendor'
 );
 
 select throws_ok(
