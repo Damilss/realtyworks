@@ -9,9 +9,13 @@ create table public.properties (
   name text not null check (char_length(name) between 1 and 120),
   address_line1 text not null check (char_length(address_line1) between 1 and 200),
   address_line2 text,
-  city text not null,
-  state text not null,
-  postal_code text not null,
+  -- Required address components. NOT NULL alone accepted '' and whitespace-only
+  -- (unlike name/address_line1's length checks), letting an unusable address
+  -- through the Data API. char_length(trim(...)) > 0 rejects blank and
+  -- whitespace-only, mirroring the vendors_contact_method trim() collapse.
+  city text not null check (char_length(trim(city)) > 0),
+  state text not null check (char_length(trim(state)) > 0),
+  postal_code text not null check (char_length(trim(postal_code)) > 0),
   created_by uuid not null default auth.uid() references public.profiles (id) on delete restrict,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
