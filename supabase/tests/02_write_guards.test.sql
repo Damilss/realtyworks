@@ -8,7 +8,7 @@ begin;
 create extension if not exists pgtap with schema extensions;
 set search_path to public, extensions;
 
-select plan(39);
+select plan(43);
 
 -- ── vendor write surface ────────────────────────────────────────────────────
 do $$
@@ -427,6 +427,37 @@ select lives_ok(
   $$insert into public.vendors (name, phone, email)
     values ('Email Only Co', '', 'contact@example.test')$$,
   'a blank phone is accepted when a real email is present (constraint is not over-tight)'
+);
+
+-- ── property address components must be non-blank (trimmed) ──────────────────
+-- NOT NULL alone let '' / '   ' through for city/state/postal_code, unlike the
+-- neighboring name/address_line1 length checks — an unusable address via the
+-- Data API. (Still the authenticated manager from the vendor block above.)
+select throws_ok(
+  $$insert into public.properties (name, address_line1, city, state, postal_code)
+    values ('Blank City', '1 Main St', '   ', 'IL', '62704')$$,
+  '23514', null,
+  'a property with a blank/whitespace city is rejected (non-blank CHECK)'
+);
+
+select throws_ok(
+  $$insert into public.properties (name, address_line1, city, state, postal_code)
+    values ('Blank State', '1 Main St', 'Springfield', '', '62704')$$,
+  '23514', null,
+  'a property with a blank state is rejected (non-blank CHECK)'
+);
+
+select throws_ok(
+  $$insert into public.properties (name, address_line1, city, state, postal_code)
+    values ('Blank Postal', '1 Main St', 'Springfield', 'IL', '   ')$$,
+  '23514', null,
+  'a property with a blank/whitespace postal_code is rejected (non-blank CHECK)'
+);
+
+select lives_ok(
+  $$insert into public.properties (name, address_line1, city, state, postal_code)
+    values ('Valid Property', '1 Main St', 'Springfield', 'IL', '62704')$$,
+  'a property with real address components is accepted (constraint is not over-tight)'
 );
 
 reset role;
