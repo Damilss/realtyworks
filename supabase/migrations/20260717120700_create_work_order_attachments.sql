@@ -61,12 +61,20 @@ create policy attachments_select_wo_access on public.work_order_attachments
   for select to authenticated
   using (public.can_access_work_order(work_order_id));
 
-create policy attachments_insert_wo_access on public.work_order_attachments
-  for insert to authenticated
-  with check (
-    uploaded_by = (select auth.uid())
-    and public.can_access_work_order(work_order_id)
-  );
+-- NO client INSERT surface. Attachment metadata is written ONLY by the
+-- coordinated Phase 3 upload server action, using the service_role (which
+-- bypasses RLS — so no insert policy is needed), mirroring the coordinated
+-- delete surface below. The client still uploads the OBJECT itself (the storage
+-- wo_attachments_insert policy in the next migration), but the metadata row is
+-- inserted server-side only AFTER that object is confirmed. A client therefore
+-- can never insert a correctly shaped metadata row with no object behind it —
+-- the orphan that would 404 on download, emit an immutable attachment_added
+-- activity entry, and be undeletable through any client surface. This keeps the
+-- file bytes on the direct-to-storage path (never proxied through the function)
+-- while making the row a server-only write: the "coordinated trusted upload
+-- path." The server action must pass uploaded_by explicitly — under the service
+-- role auth.uid() (the column default) is null; log_attachment_added() already
+-- coalesces to new.uploaded_by, so the activity actor stays correct.
 
 -- Staff may fix a mis-categorized kind — the update grant carries ONLY `kind`,
 -- so this policy can't reach anything else.
@@ -88,8 +96,8 @@ create policy attachments_update_staff on public.work_order_attachments
 -- WO-delete server action removes the physical objects before deleting the row.
 
 grant select on public.work_order_attachments to authenticated;
-grant insert (id, work_order_id, kind, storage_path, file_name, mime_type, size_bytes)
-  on public.work_order_attachments to authenticated;
+-- deliberately NO client insert grant — metadata is a service-role-only write
+-- via the coordinated upload action (see the insert note above).
 grant update (kind) on public.work_order_attachments to authenticated;
 -- deliberately NO delete grant — see the coordinated-delete note above.
 grant all on public.work_order_attachments to service_role;
