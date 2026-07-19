@@ -211,7 +211,7 @@ history can't be deleted; work-order children (activity, attachments) CASCADE
 | vendors | full + **delete** | create/read/update contact fields | own row only |
 | work_orders | create/read/update; **delete via server action** | create/read/update (no delete) | read assigned; update **status only** → in_progress/completed |
 | activity | read all; add notes | read all; add notes | read assigned; add notes as self |
-| attachments | read/upload; fix `kind`; delete **only via the Phase 3 server action** | read/upload; fix `kind` | read/upload on assigned |
+| attachments | read; upload objects; fix `kind`; metadata **insert + delete only via the Phase 3 server action** | read; upload objects; fix `kind` | read; upload objects on assigned |
 | profiles | read all; change others' roles | read all | own row; staff **names only** via `staff_directory` view |
 
 How each rule is enforced (brainstorming §4 — RLS picks rows, not columns):

@@ -8,7 +8,7 @@ begin;
 create extension if not exists pgtap with schema extensions;
 set search_path to public, extensions;
 
-select plan(38);
+select plan(39);
 
 -- ── vendor write surface ────────────────────────────────────────────────────
 do $$
@@ -98,28 +98,21 @@ select lives_ok(
   'vendor may add a note to an assigned work order'
 );
 
+-- Attachment metadata is a service-role-only write via the coordinated upload
+-- action — the client has no insert grant. Even a well-formed row from an
+-- assigned vendor is refused, so a client can never create a metadata row with
+-- no object behind it (the 404-on-download / immutable attachment_added /
+-- undeletable orphan). The path-shape and id-required invariants still guard the
+-- service path — re-tested as service_role below.
 select throws_ok(
   $$insert into public.work_order_attachments
       (id, work_order_id, kind, storage_path, file_name, mime_type)
     values ('50000000-0000-0000-0000-000000000099',
             '40000000-0000-0000-0000-000000000003', 'photo',
-            '40000000-0000-0000-0000-000000000003/evil/nested.jpg',
-            'nested.jpg', 'image/jpeg')$$,
-  '23514', null,
-  'attachment metadata must match <work_order_id>/<attachment_id>.<ext> exactly'
-);
-
--- id has no DB default: omitting it is a not-null error (23502), never a
--- silent server-generated id that mismatches storage_path and orphans the
--- already-uploaded object.
-select throws_ok(
-  $$insert into public.work_order_attachments
-      (work_order_id, kind, storage_path, file_name, mime_type)
-    values ('40000000-0000-0000-0000-000000000003', 'photo',
-            '40000000-0000-0000-0000-000000000003/50000000-0000-0000-0000-0000000000aa.jpg',
+            '40000000-0000-0000-0000-000000000003/50000000-0000-0000-0000-000000000099.jpg',
             'photo.jpg', 'image/jpeg')$$,
-  '23502', null,
-  'attachment insert must supply id — no DB default to silently fill it'
+  '42501', null,
+  'authenticated client cannot insert attachment metadata (no grant — coordinated upload path)'
 );
 
 -- Storage enforces the same <wo>/<attachment_id>.<ext> shape as the metadata
@@ -147,6 +140,41 @@ select throws_ok(
     values ('40000000-0000-0000-0000-000000000001', 'note on someone else''s job')$$,
   '42501', null,
   'vendor cannot note an unassigned work order (RLS with check)'
+);
+
+reset role;
+
+-- ── attachment metadata invariants on the coordinated (service_role) path ────
+-- The client has no insert grant (above); the path-shape CHECK and the
+-- id-required rule now guard the service_role insert the Phase 3 upload action
+-- uses. uploaded_by must be supplied — auth.uid() (the column default) is null
+-- under the service role.
+set local role service_role;
+
+select throws_ok(
+  $$insert into public.work_order_attachments
+      (id, work_order_id, kind, storage_path, file_name, mime_type, uploaded_by)
+    values ('50000000-0000-0000-0000-000000000099',
+            '40000000-0000-0000-0000-000000000003', 'photo',
+            '40000000-0000-0000-0000-000000000003/evil/nested.jpg',
+            'nested.jpg', 'image/jpeg',
+            '00000000-0000-0000-0000-000000000002')$$,
+  '23514', null,
+  'attachment metadata must match <work_order_id>/<attachment_id>.<ext> exactly'
+);
+
+-- id has no DB default: omitting it is a not-null error (23502), never a
+-- silent server-generated id that mismatches storage_path and orphans the
+-- already-uploaded object.
+select throws_ok(
+  $$insert into public.work_order_attachments
+      (work_order_id, kind, storage_path, file_name, mime_type, uploaded_by)
+    values ('40000000-0000-0000-0000-000000000003', 'photo',
+            '40000000-0000-0000-0000-000000000003/50000000-0000-0000-0000-0000000000aa.jpg',
+            'photo.jpg', 'image/jpeg',
+            '00000000-0000-0000-0000-000000000002')$$,
+  '23502', null,
+  'attachment insert must supply id — no DB default to silently fill it'
 );
 
 reset role;
