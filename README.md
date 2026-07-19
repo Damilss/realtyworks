@@ -71,9 +71,13 @@ server actions/route handlers, and Supabase Edge Functions. See `CLAUDE.md` §2.
 
 ### Prerequisites
 
-- **Node 24** — `nvm use` reads `.nvmrc`
+- **Node 24** — pinned in `.nvmrc`. `nvm use` reads it; any Node 24 also works
+  if you manage versions another way (fnm, asdf, Volta, or a manual install).
 - **pnpm 11.13.1** — easiest via [corepack](https://nodejs.org/api/corepack.html)
-  (`corepack enable`), which reads the `packageManager` field; **do not use npm**
+  (`corepack enable`), which reads the `packageManager` field and activates the
+  pinned version on first use; **do not use npm**. The first `pnpm` command may
+  download pnpm — that's expected, not an error.
+- **git** — to clone and for the commit hooks.
 - **gitleaks** *(optional but recommended)* — the pre-commit hook runs a local
   secret scan when it's installed, and skips it with a warning when it isn't
   (CI scans regardless): `brew install gitleaks`
@@ -82,15 +86,40 @@ server actions/route handlers, and Supabase Edge Functions. See `CLAUDE.md` §2.
 
 ```bash
 git clone <repo-url> && cd realtyworks
-nvm use               # Node 24
+nvm use               # Node 24 (or ensure Node 24 another way)
 corepack enable       # activates pnpm 11.13.1 from package.json
-pnpm install          # also installs the git hooks (husky) via "prepare"
+pnpm install          # installs deps + the git hooks (husky) via "prepare"
 pnpm dev              # http://localhost:3000
 ```
+
+Open [http://localhost:3000](http://localhost:3000) — you should see the
+Phase 1 scaffold page.
 
 No environment variables are required yet — Phase 1 has no external services.
 A committed `.env.example` arrives with Supabase in Phase 2 (real values go in
 the gitignored `.env.local`).
+
+### Verify your setup
+
+Run the full check suite once to confirm the toolchain is wired — this is the
+same gauntlet CI runs, and the one to run locally before every push:
+
+```bash
+pnpm lint && pnpm format:check && pnpm typecheck && pnpm test && pnpm build && pnpm audit --audit-level=high
+```
+
+All green means you're good to go.
+
+### Run the tests
+
+```bash
+pnpm test                              # unit (Vitest), one-shot
+pnpm exec playwright install chromium  # one-time per machine: download the E2E browser
+pnpm test:e2e                          # E2E (Playwright boots the dev server itself)
+```
+
+Full detail — what each runner collects and how they stay out of each other's
+way — is in [Testing](#testing) below and [docs/playwright.md](docs/playwright.md).
 
 ### Scripts
 
@@ -105,12 +134,6 @@ the gitignored `.env.local`).
 | `pnpm test` | Vitest, one-shot (`--passWithNoTests`) |
 | `pnpm test:e2e` | Playwright E2E (boots the dev server itself) |
 
-Run the CI gauntlet locally before pushing:
-
-```bash
-pnpm lint && pnpm format:check && pnpm typecheck && pnpm test && pnpm build && pnpm audit --audit-level=high
-```
-
 ---
 
 ## Testing
@@ -121,9 +144,10 @@ pnpm lint && pnpm format:check && pnpm typecheck && pnpm test && pnpm build && p
   `pnpm exec vitest run -t "name of test"`.
 - **E2E (Playwright)** — owns `tests/e2e/`; currently a single smoke test.
   Requires a one-time browser download:
-  `pnpm exec playwright install chromium`. Intentionally **not** wired into CI
-  until the Phase 3 vertical slice exists. Full guide:
-  [docs/playwright.md](docs/playwright.md).
+  `pnpm exec playwright install chromium`. The smoke test **does** run in CI
+  (the parallel `e2e` job in `.github/workflows/ci.yml`) — proving the app
+  boots, not just compiles; only real end-to-end flows wait for the Phase 3
+  vertical slice. Full guide: [docs/playwright.md](docs/playwright.md).
 
 The two runners never collect each other's files.
 
@@ -140,9 +164,10 @@ Everything below must pass before code lands on `main`.
   isn't installed).
 - **commit-msg** — commitlint enforces
   [conventional commits](https://www.conventionalcommits.org). Allowed types:
-  `build chore ci deps docs feat fix perf refactor revert style test`
-  (`deps` is a house addition for dependency bumps; the old `CI/CD` type from
-  early history is retired in favor of `ci`).
+  `build chore ci deps docs feat fix perf refactor revert style test wip`
+  (`deps` is a house addition for dependency bumps and `wip` for local
+  work-in-progress checkpoints; the old `CI/CD` type from early history is
+  retired in favor of `ci`).
 
 ### CI — `.github/workflows/ci.yml` (PRs + pushes to `main`)
 
