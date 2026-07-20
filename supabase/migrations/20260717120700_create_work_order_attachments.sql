@@ -20,7 +20,7 @@ create table public.work_order_attachments (
   file_name text not null check (char_length(file_name) between 1 and 255),
   mime_type text not null check (char_length(mime_type) <= 255),
   size_bytes bigint check (size_bytes is null or size_bytes >= 0),
-  uploaded_by uuid not null default auth.uid() references public.profiles (id) on delete restrict,
+  uploaded_by uuid not null references public.profiles (id) on delete restrict,
   created_at timestamptz not null default now(),
   -- Enforce the exact documented invariant <work_order_id>/<attachment_id>.<ext>
   -- — not just the prefix. Blocks nested paths and rows whose object name
@@ -72,9 +72,14 @@ create policy attachments_select_wo_access on public.work_order_attachments
 -- activity entry, and be undeletable through any client surface. This keeps the
 -- file bytes on the direct-to-storage path (never proxied through the function)
 -- while making the row a server-only write: the "coordinated trusted upload
--- path." The server action must pass uploaded_by explicitly — under the service
--- role auth.uid() (the column default) is null; log_attachment_added() already
--- coalesces to new.uploaded_by, so the activity actor stays correct.
+-- path." The server action must pass uploaded_by explicitly, and the column has
+-- NO database default on purpose (like id above): under the service role
+-- auth.uid() is null, so a default could never supply the actor anyway — it
+-- would only mark the generated Insert.uploaded_by optional, letting a server
+-- action compile without it, fail the not-null with 23502 *after* the object is
+-- uploaded, and orphan it. With no default the generated type marks uploaded_by
+-- required, surfacing the missing actor at compile time. log_attachment_added()
+-- coalesces auth.uid() to new.uploaded_by, so the activity actor stays correct.
 
 -- Staff may fix a mis-categorized kind — the update grant carries ONLY `kind`,
 -- so this policy can't reach anything else.

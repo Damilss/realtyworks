@@ -301,7 +301,7 @@ export type Database = {
           mime_type: string;
           size_bytes?: number | null;
           storage_path: string;
-          uploaded_by?: string;
+          uploaded_by: string;
           work_order_id: string;
         };
         Update: {
