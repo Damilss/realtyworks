@@ -147,8 +147,9 @@ reset role;
 -- ── attachment metadata invariants on the coordinated (service_role) path ────
 -- The client has no insert grant (above); the path-shape CHECK and the
 -- id-required rule now guard the service_role insert the Phase 3 upload action
--- uses. uploaded_by must be supplied — auth.uid() (the column default) is null
--- under the service role.
+-- uses. uploaded_by must be supplied — it has no DB default (like id), so the
+-- generated Insert type marks it required; auth.uid() would be null under the
+-- service role anyway.
 set local role service_role;
 
 select throws_ok(
