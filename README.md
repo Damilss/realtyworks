@@ -287,8 +287,8 @@ land — not speculatively.
 
 | Phase | Scope | Status |
 | --- | --- | --- |
-| 1 — Foundations | Tooling, CI, hooks, security scanning on a near-empty app | 🔷 Nearly done — open: branch protection ([backlog](docs/backlog.md)) |
-| 2 — Supabase | Local stack, migrations (RLS from day one), seed data | Next |
+| 1 — Foundations | Tooling, CI, hooks, security scanning on a near-empty app | ✅ Done |
+| 2 — Supabase | Local stack, migrations (RLS from day one), seed data | 🔷 In progress — schema, RLS, seed, and pgTAP suite landed; `@supabase/ssr` clients open ([backlog](docs/backlog.md)) |
 | 3 — Vertical slice | One full path: manager → work order → vendor → activity log | Planned |
 | 4 — Hosted deploy | Vercel + Supabase Cloud, PR previews, Sentry | Planned |
 | 5 — Breadth | More features, minimal reports, SMS/notifications, PWA install layer | Planned |

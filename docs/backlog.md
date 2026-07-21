@@ -36,6 +36,7 @@ Pick them off at your discretion.
 - **Phase 2 schema live locally** — `supabase/` (9 migrations, seed, pgTAP
   suite via `pnpm exec supabase test db`), generated
   `src/lib/database.types.ts`, supabase CLI pinned as a devDependency. See ✅.
+- **Branch protection on `main`** enabled 2026-07-20 (web UI). See ✅.
 
 ### Sharp edges these issues address
 - Native GitHub security features (CodeQL, secret-scanning push-protection,
@@ -47,7 +48,25 @@ Pick them off at your discretion.
 
 ## ✅ Done (kept for the paper trail)
 
-### ✅ Phase 2 — Supabase local + schema + RLS + seed + pgTAP (2026-07-17)
+### ✅ Branch protection on `main` (2026-07-20)
+Configured in Settings → Branches, closing the `CLAUDE.md` §4/§5 Phase-1
+requirement. GitHub repo settings aren't version-controlled, so this entry is
+the only in-repo record — the authoritative rule (required checks, approvals,
+force-push/deletion blocks, administrator inclusion) is whatever Settings →
+Branches shows. Note for new checks: a job must run **once** before it becomes
+selectable as required, so adding a workflow job does not make it blocking on
+its own (see `docs/tooling.md` on the `e2e` job).
+
+### ✅ Three high-severity advisories cleared (verified 2026-07-20, issues #62/#63/#64)
+`@babel/core` (GHSA-4x5r-pxfx-6jf8), `js-yaml` (GHSA-h67p-54hq-rp68), and
+`postcss` (GHSA-qx2v-qp2m-jg93) are all resolved in the current lockfile —
+`pnpm audit --audit-level=high` exits clean (1 low + 1 moderate remain, both
+below the gate). `js-yaml` sits at 4.3.0, past the 4.2.0 the issue asked for.
+A `postcss@8.4.31` still resolves under Next's own bundled dependency block
+alongside 8.5.16; the audit does not flag it, so it needs no action, but it is
+the thing to re-check if that advisory is ever re-scored.
+
+### ✅ Phase 2 — Supabase local + schema + RLS + seed + pgTAP (2026-07-17, issues #34/#35)
 Supabase CLI pinned as a devDependency (`supabase` ^2.109.1, install script
 allow-listed in `pnpm-workspace.yaml`). Nine migrations create the seven §7
 tables — RLS + grants + triggers in the **same file** as each table: landlord =
@@ -165,18 +184,6 @@ required-check names are unchanged; the OSV scan surfaces as a non-required
 
 ---
 
-## 🔴 Critical
-
-### 🔴 Branch protection on `main` (verify/enable — web UI)
-**Why:** `CLAUDE.md` §4/§5 make this a Phase-1 requirement and the paper trail depends on it.
-**Do:** Settings → Branches → protect `main`:
-- Require PR before merge; require the **CI**, gitleaks, and Semgrep checks to pass.
-- Dismiss stale approvals; require conversation resolution.
-- Block force-push and deletion; include administrators.
-**Done when:** a direct push to `main` is rejected; PRs need green checks to merge.
-
----
-
 ## 🟠 High
 
 ### 🟠 Run the pgTAP database suite in GitHub Actions (issue #72)
@@ -196,6 +203,47 @@ test job, and a deliberately failing pgTAP assertion fails that job.
 ---
 
 ## 🟡 Medium
+
+### 🟡 Trim required text fields before the length CHECK (issues #75, #77)
+**Why:** Round 5 fixed `city`/`state`/`postal_code` with `char_length(trim(...)) > 0`
+but left the neighbouring `between 1 and N` checks untrimmed, so a whitespace-only
+value still satisfies them: `'   '` is length 3. Same root cause as the round 4/5
+empty-string findings — `NOT NULL` is not non-blank
+(`docs/reports/2026-07-17-phase-2-schema-review-hardening.md`).
+**Do:** new migration wrapping the required-text CHECKs in `trim()`:
+`properties.name` / `address_line1`, `units.label`, `vendors.name`,
+`work_orders.title`. Sweep `work_order_attachments.file_name` in the same pass —
+the issue omits it but it carries the identical `between 1 and 255` check (the
+insert is service-role-only, so the exposure is a buggy server action, not a
+client). Add pgTAP coverage per field.
+**Note:** #75 (the defect) and #77 (the fix) describe the same problem — close
+one as a duplicate.
+**Done when:** a whitespace-only value is rejected on every required text column,
+with a pgTAP assertion each.
+
+### 🟡 Reject empty/whitespace notes on the activity trail (issue #76)
+**Why:** `activity_note_requires_text` only checks `note is not null`, and the
+length check is `<= 2000`, so `''` and `'   '` both insert. The trail is
+append-only for **everyone** — no UPDATE/DELETE policy, plus a forbid trigger —
+so a blank note is permanent and unfixable, in the table `CLAUDE.md` §5 calls a
+product feature.
+**Do:** new migration tightening the constraint to require non-blank text on
+`note_added` (`char_length(trim(note)) > 0`), matching the vendor-contact
+`nullif(trim(...), '')` idiom. Mirror it in the Phase 3 zod schema so the client
+rejects it before the round trip.
+**Done when:** inserting a blank or whitespace-only note fails, covered by pgTAP.
+
+### 🟡 Finish the ToS + Privacy Policy drafts (issue #74)
+**Why:** Required before any public or multi-tenant launch; both are currently
+banner-marked **DRAFT — NOT FOR PUBLICATION** and unusable for customer
+acceptance.
+**Do:** the drafts landed as `TOS.md` and `privacy_policy.md`. Remaining: fill
+every `[BRACKETED]` placeholder (effective date, legal email, mailing address),
+verify the described features and subprocessors against what actually ships,
+remove the internal publication checklist, then get qualified U.S./California
+counsel review.
+**Done when:** both documents are placeholder-free, counsel-approved, and linked
+from the app.
 
 ### 🟡 Coverage visibility (not a gate)
 **Why:** See what's tested without chasing a %.
@@ -235,12 +283,12 @@ test job, and a deliberately failing pgTAP assertion fails that job.
 
 ## 🟢 Low — general-development runway (Phase 2+, phase-gated)
 
-### 🟢 Phase 2 — Supabase clients (`@supabase/ssr`)
+### 🟢 Phase 2 — Supabase clients (`@supabase/ssr`) (issue #37)
 `@supabase/ssr` → `src/lib/supabase/{client,server,middleware}.ts`. The rest of the Phase 2
 runway (local stack, migrations + RLS, seed, `database.types.ts`) shipped 2026-07-17 — see ✅.
 Regenerate types after every migration change, then `pnpm format`.
 
-### 🟢 Phase 2/3 — Tailwind + shadcn/ui (not yet installed)
+### 🟢 Phase 2/3 — Tailwind + shadcn/ui (not yet installed) (issue #38)
 Stack is decided (`CLAUDE.md` §2) but absent. Install Tailwind + `prettier-plugin-tailwindcss`,
 init shadcn/ui into `src/components/ui/`.
 
@@ -254,7 +302,7 @@ link (a "Copy vendor link" button in Phase 3; delivered over SMS in Phase 5). De
 ### 🟢 Phase 3 — First real unit tests
 Work-order state transitions + permission checks — the "test what matters" targets (`CLAUDE.md` §5).
 
-### 🟢 Phase 4 — Observability & deploy
+### 🟢 Phase 4 — Observability & deploy (issue #36)
 `@sentry/nextjs`, Vercel PR preview deploys, prod deploys only from `main`. Keep a working
 Dockerfile so self-host stays `docker run` away (`CLAUDE.md` §5/§7).
 
@@ -301,9 +349,13 @@ The `supabase` CLI is ✅ installed as a pinned devDependency (2026-07-17).
 ## Recommended order for the next few sessions
 
 *(Done so far: commitlint → gitleaks → `pnpm audit` gate + osv-scanner → Semgrep
-→ audit gate flipped to blocking → Dependabot tuning + `@types/node` pin.)*
+→ audit gate flipped to blocking → Dependabot tuning + `@types/node` pin →
+branch protection.)*
 
-1. **Branch protection** (Critical) — last of this batch, so you can require every
-   check that now exists (CI, gitleaks, Semgrep).
+1. **pgTAP suite in CI** (High, issue #72) — the database authorization boundary
+   is now the only suite that runs local-only. Remember the second half: the new
+   job has to run once, then be added to `main`'s required checks, before it
+   actually blocks anything.
 
-That gets the full security + CI + commit-hygiene foundation green before any Supabase code.
+The security + CI + commit-hygiene foundation is green and the Phase 2 schema is
+in; everything after this is Phase 2/3 application work.
