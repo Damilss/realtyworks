@@ -1,14 +1,14 @@
-# Report: Phase 2 schema review exposed twelve cross-layer and contract defects
+# Report: Phase 2 schema review exposed thirteen cross-layer and contract defects
 
 | | |
 | --- | --- |
 | **Date** | 2026-07-17 |
 | **Area** | database / RLS / Supabase Storage / testing |
-| **Cost** | ~8h elapsed from the first schema commit through the round-5 pass; 5 review rounds, 12 findings, and 1 formatting detour |
+| **Cost** | ~8h elapsed from the first schema commit through the round-6 pass; 6 review rounds, 13 findings, and 1 formatting detour |
 | **Status** | Resolved for Phase 2. Attachment metadata insertion and deletion, and work-order deletion, are intentionally deferred until Phase 3 supplies the coordinated server action. |
-| **Commits / PRs** | `718f2d6`, `9d7ea45`, `c74a3c6`, `6cdb9e7`, `c835fd8`, `d0e4450`, `8660391`, `3771a49`, `044418c` (round 4), `913f925`, `169fc1e` (round 5) · round 5's non-blank address checks staged for review, not yet committed |
+| **Commits / PRs** | `718f2d6`, `9d7ea45`, `c74a3c6`, `6cdb9e7`, `c835fd8`, `d0e4450`, `8660391`, `3771a49`, `044418c` (round 4), `913f925`, `169fc1e`, `4582a66` (round 5) · `d82af7a` (round-4 type-contract follow-on) · round 6's bucket-convergence fix staged for review, not yet committed |
 | **Issues** | #72 (run pgTAP in CI) |
-| **Tags** | supabase, postgres, rls, foreign-key, concurrency, advisory-lock, storage, coordinated-delete, pgtap, three-valued-logic, fail-closed, type-contract, authorization |
+| **Tags** | supabase, postgres, rls, foreign-key, concurrency, advisory-lock, storage, coordinated-delete, pgtap, three-valued-logic, fail-closed, type-contract, authorization, idempotent-migration, bucket-convergence |
 | **See also** | [`../schema/my_schema_writeup.md`](../schema/my_schema_writeup.md) · [`../backlog.md`](../backlog.md) |
 
 ## TL;DR
@@ -27,8 +27,12 @@ vendor-contact check that accepted empty strings. A fifth round hardened the
 *write* side of the attachment/Storage boundary that rounds two and three had
 closed only for deletes — a storage policy that accepted unreferenceable object
 names, and a metadata insert that accepted a row with no object behind it — and
-extended the empty-string lesson to required property-address components. The
-pgTAP suite grew from 38 to 55 tests.
+extended the empty-string lesson to required property-address components. A
+sixth round then closed an idempotency gap in the Storage bucket migration: `on
+conflict do nothing` would let a pre-existing *public* bucket keep serving every
+attachment over an unauthenticated public URL — bypassing the object SELECT
+policy entirely — so the upsert now reasserts the private, size-, and
+MIME-bounded settings on conflict. The pgTAP suite grew from 38 to 58 tests.
 
 ## What I was doing
 
@@ -57,6 +61,7 @@ business or security invariant:
 | 5 | The Storage INSERT policy checked only the `<work_order_id>/…` folder, so a non-UUID basename (`<wo>/photo.jpg`) uploaded even though no metadata row could reference it — its basename must equal the attachment UUID. Uploads precede metadata and clients can't delete objects, so it orphaned permanently. | Matched the full `<work_order_id>/<attachment_id>.<ext>` regex in the storage policies, mirroring the metadata path CHECK: an object is insertable IFF a metadata row could reference it. |
 | 5 | The attachment metadata INSERT policy accepted any correctly shaped row even when the object upload was skipped or failed — the mirror orphan: a metadata row that 404s on download, emits an immutable `attachment_added` activity entry, and is undeletable through any client surface. | Revoked the client INSERT surface (policy + grant); metadata is now a service-role-only write via the coordinated Phase 3 upload action, matching the coordinated-delete boundary. The client still uploads the object directly; the action confirms it, then inserts the row. |
 | 5 | `city`, `state`, and `postal_code` were `NOT NULL` but carried no non-blank check, so an empty-string or whitespace form post created an unusable address through the Data API — unlike the neighboring `name`/`address_line1` length checks. | Added `char_length(trim(...)) > 0` to each, mirroring the vendor contact idiom's trim() collapse. |
+| 6 | The Storage bucket migration used `on conflict (id) do nothing`, so an environment where the bucket already existed silently kept its settings. A bucket previously created `public = true` (the dashboard's default toggle) stays public — every object downloadable over an unauthenticated public URL that never consults `wo_attachments_select` — and looser size/MIME limits persist. | Switched to `on conflict (id) do update set`, reasserting `public`, `file_size_limit`, and `allowed_mime_types` so re-running the migration converges any drifted bucket back to the private, bounded contract. |
 
 The third finding on deletion corrected an incomplete conclusion from round two:
 making an object unfetchable after its work order disappears is not the same as
@@ -66,6 +71,12 @@ Round four shifted theme. These three were not cross-layer invariants but
 totality defects — SQL's three-valued logic (`not NULL` is not `true`), a column
 default leaking into the generated Insert type, and the empty string standing in
 for a real value. A guard can read as exhaustive and still be partial.
+
+Round six was a third theme again: idempotency. The migration is the source of
+truth, but `do nothing` made it *declare* a private bucket while *guaranteeing*
+only "some bucket with this id exists." A migration that names a security-bearing
+end state has to converge to it, not defer to whatever a conflicting row already
+held.
 
 ## What I tried (and why it didn't work)
 
@@ -100,6 +111,11 @@ for a real value. A guard can read as exhaustive and still be partial.
     systems; only a coordinated server-side write keeps them in step.
 11. **`NOT NULL` on `city`/`state`/`postal_code`** — total-looking, but `''` is
     not NULL, so an empty-string post satisfied it with an unusable address.
+12. **`on conflict (id) do nothing` on the Storage bucket** — idempotent in the
+    "won't error on re-run" sense, but not convergent: a pre-existing `public =
+    true` bucket kept serving every object over an unauthenticated public URL,
+    bypassing the object SELECT policy the rest of this migration builds. `do
+    update` reasserts the private, bounded settings on conflict.
 
 ## Root cause
 
@@ -123,6 +139,12 @@ defect was the round-four empty-string gap on a different table. The pattern: a
 two-system invariant must hold on every write, in the direction the client can
 actually take, and `NOT NULL` never means non-blank.
 
+Round six is the idempotency corollary. `on conflict do nothing` protects a
+re-run from erroring but not from a conflicting row that predates or diverges
+from the migration — and for a Storage bucket the `public` flag is a hard bypass
+of RLS, not merely a looser default. A migration that owns a security-bearing
+setting must reassert it on conflict, not preserve whatever was there.
+
 ## The fix
 
 The constraints and access surfaces were tightened in the migrations, and each
@@ -134,6 +156,7 @@ first review fixes   41 pgTAP tests
 rounds two & three   44 pgTAP tests after a local reset
 round four           48 pgTAP tests
 round five           55 pgTAP tests
+round six            58 pgTAP tests
 ```
 
 Supporting cleanup from the same commit trail:
@@ -146,7 +169,11 @@ Supporting cleanup from the same commit trail:
   only and needs a blocking GitHub Actions job.
 - No remote Supabase project was linked. If these edited migrations were
   applied independently elsewhere, that environment needs equivalent forward
-  migrations to drop the old DELETE policies and grants.
+  migrations to drop the old DELETE policies and grants — and, from round six, to
+  re-upsert the bucket with the private, bounded settings, since editing the
+  migration file does not re-run an already-applied migration (the fix protects
+  fresh `db reset`s automatically, but a live drifted bucket needs the forward
+  upsert run against it).
 
 ## Lesson / next time
 
@@ -166,6 +193,13 @@ Supporting cleanup from the same commit trail:
 > both create-time orphan directions open (object without metadata, metadata
 > without object). And `NOT NULL` is not non-blank: a required text field needs
 > `char_length(trim(...)) > 0`.
+
+> **Rule (round 6):** A migration that owns a security-bearing setting must
+> *converge* to it, not merely avoid erroring. `on conflict do nothing` preserves
+> a drifted or manually-created row; `do update` reasserts the declared state. For
+> a Storage bucket the `public` flag is an RLS bypass, so one stray public bucket
+> silently defeats every object policy — reassert `public`, `file_size_limit`,
+> and `allowed_mime_types` on conflict.
 
 For Storage-backed records, define the deletion owner and order before granting
 any DELETE surface. Until the coordinated server action exists, denying the
@@ -190,5 +224,13 @@ operation is safer than exposing a partial workflow.
   names; +2 pgTAP tests (48 → 50)
 - `169fc1e` — round 5: coordinated service-only attachment metadata insert
   (client INSERT policy and grant removed); +1 pgTAP test (50 → 51)
-- round 5 (staged, uncommitted) — non-blank `char_length(trim(...)) > 0` checks
-  on `city`/`state`/`postal_code`; +4 pgTAP tests (51 → 55)
+- `4582a66` — round 5: non-blank `char_length(trim(...)) > 0` checks on
+  `city`/`state`/`postal_code`; +4 pgTAP tests (51 → 55)
+- `d82af7a` — round-4 type-contract follow-on: dropped the `uploaded_by`
+  `default auth.uid()` (null under the service role anyway) so the generated
+  Insert type requires it, mirroring the `id` fix; tests refactored, count held
+  at 55
+- round 6 (staged, uncommitted) — Storage bucket migration upserts with `on
+  conflict do update`, reasserting `public`/`file_size_limit`/`allowed_mime_types`
+  so a pre-existing public bucket cannot bypass the object SELECT policy;
+  +3 pgTAP tests (55 → 58)
