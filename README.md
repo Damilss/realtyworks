@@ -99,6 +99,39 @@ No environment variables are required yet — Phase 1 has no external services.
 A committed `.env.example` arrives with Supabase in Phase 2 (real values go in
 the gitignored `.env.local`).
 
+### Additional checkouts (git worktrees)
+
+`node_modules/` and `.husky/_/` are gitignored generated state, so they never
+travel with a checkout. A new `git worktree` — or a fresh clone — starts without
+them, and **git treats a missing hooks directory as "no hooks configured."** It
+skips pre-commit and commit-msg silently: no warning, zero exit code, commits
+succeed exactly as normal while lint-staged, gitleaks, and commitlint do
+nothing at all.
+
+`pnpm install` installs the hooks via the `prepare` script — but only when it
+actually installs something. If `node_modules/` is already populated (say by an
+earlier `pnpm update`, which does *not* run `prepare`), install short-circuits
+with `Already up to date` and the hooks are never created. That combination is
+easy to hit and gives no signal.
+
+So in a new worktree or clone, run both:
+
+```bash
+pnpm install       # dependencies
+pnpm run prepare   # git hooks — cheap, idempotent, safe to re-run anytime
+```
+
+To check an existing checkout:
+
+```bash
+ls .husky/_/commit-msg >/dev/null 2>&1 \
+  && echo "hooks installed" \
+  || echo "HOOKS MISSING — run: pnpm run prepare"
+```
+
+CI is unaffected either way — the workflows run the checks directly rather than
+through git hooks. A missing hook costs you fast local feedback, not the gate.
+
 ### Verify your setup
 
 Run the full check suite once to confirm the toolchain is wired — this is the
@@ -168,6 +201,10 @@ Everything below must pass before code lands on `main`.
   (`deps` is a house addition for dependency bumps and `wip` for local
   work-in-progress checkpoints; the old `CI/CD` type from early history is
   retired in favor of `ci`).
+
+Both hooks **fail open**: if `.husky/_/` is missing, git skips them without
+warning and every commit passes unchecked. Common in a fresh worktree or clone —
+see [Additional checkouts](#additional-checkouts-git-worktrees).
 
 ### CI — `.github/workflows/ci.yml` (PRs + pushes to `main`)
 
