@@ -8,7 +8,7 @@ begin;
 create extension if not exists pgtap with schema extensions;
 set search_path to public, extensions;
 
-select plan(43);
+select plan(46);
 
 -- ── vendor write surface ────────────────────────────────────────────────────
 do $$
@@ -462,6 +462,49 @@ select lives_ok(
 );
 
 reset role;
+
+-- ── storage bucket stays private and bounded on conflict ─────────────────────
+-- The bucket migration upserts with `on conflict (id) do update`, so re-running
+-- it over a pre-existing row reconverges the config instead of silently keeping
+-- it. A bucket left public would serve every object over an unauthenticated
+-- public URL, bypassing wo_attachments_select; loosened size/MIME limits would
+-- persist the same way. Simulate the drifted row, replay the migration's upsert,
+-- and assert every security-bearing column is forced back. (Superuser here —
+-- role was reset above; storage.buckets is not client-writable.)
+update storage.buckets
+   set public = true, file_size_limit = null, allowed_mime_types = null
+ where id = 'work-order-attachments';
+
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values (
+  'work-order-attachments',
+  'work-order-attachments',
+  false,
+  10485760,
+  array['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'application/pdf']
+)
+on conflict (id) do update set
+  public = excluded.public,
+  file_size_limit = excluded.file_size_limit,
+  allowed_mime_types = excluded.allowed_mime_types;
+
+select is(
+  (select public from storage.buckets where id = 'work-order-attachments'),
+  false,
+  'a pre-existing public bucket is forced back to private on conflict (no public-URL bypass)'
+);
+
+select is(
+  (select file_size_limit from storage.buckets where id = 'work-order-attachments'),
+  10485760::bigint,
+  'a loosened file_size_limit is reasserted to 10 MiB on conflict'
+);
+
+select is(
+  (select allowed_mime_types from storage.buckets where id = 'work-order-attachments'),
+  array['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'application/pdf'],
+  'a cleared allowed_mime_types allowlist is reasserted on conflict'
+);
 
 select * from finish();
 
