@@ -22,7 +22,18 @@ values (
   10485760, -- 10 MiB per object
   array['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'application/pdf']
 )
-on conflict (id) do nothing;
+-- Converge, don't preserve. `do nothing` would silently keep a pre-existing row
+-- (a manual dashboard bucket — the dashboard defaults the toggle to public — or
+-- an older definition). A bucket left `public = true` serves every object over
+-- an unauthenticated public URL, bypassing wo_attachments_select entirely; looser
+-- size/MIME limits would linger too. Reassert the three security-bearing columns
+-- so re-running this migration forces the private, bounded state regardless of
+-- prior config. `name` is intentionally left alone: it equals `id`, carries no
+-- authorization meaning, and drift there cannot widen access.
+on conflict (id) do update set
+  public = excluded.public,
+  file_size_limit = excluded.file_size_limit,
+  allowed_mime_types = excluded.allowed_mime_types;
 
 -- Enforce the exact object name <work_order_id>/<attachment_id>.<ext> — the same
 -- shape work_order_attachments.attachments_path_matches_row requires (lowercase-
