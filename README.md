@@ -213,10 +213,15 @@ see [Additional checkouts](#additional-checkouts-git-worktrees).
 
 ### CI — `.github/workflows/ci.yml` (PRs + pushes to `main`)
 
-One job runs **lint → format check → typecheck → unit tests → build → audit**.
-Every check step after the first uses `if: ${{ !cancelled() }}`, so a single
-run reports *every* failure rather than stopping at the first. pnpm's store and the Next.js build
-cache are cached between runs.
+Three jobs run in parallel. `verify` runs **lint → format check → typecheck →
+unit tests → build → audit**; every check step after the first uses
+`if: ${{ !cancelled() }}`, so a single run reports *every* failure rather than
+stopping at the first. pnpm's store and the Next.js build cache are cached
+between runs. `e2e` boots the app and runs the Playwright smoke test. `db` boots
+the local Supabase stack and runs the pgTAP suite from `supabase/tests/`, so an
+RLS or write-guard regression fails CI rather than merging green — it's the
+slowest of the three (cold Docker image pulls). Details:
+[docs/tooling.md](docs/tooling.md).
 
 The final step, `pnpm audit --audit-level=high`, is a blocking dependency
 vulnerability gate. Any high/critical advisory fails CI; moderate/low

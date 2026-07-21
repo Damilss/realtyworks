@@ -48,6 +48,16 @@ Pick them off at your discretion.
 
 ## ✅ Done (kept for the paper trail)
 
+### ✅ pgTAP database suite in CI (2026-07-21, issue #72)
+Parallel `db` job in `ci.yml`: pinned CLI devDependency, `supabase start -x …` →
+`db reset` → `test db`, on the existing `main`/`dev` PR/push triggers with no
+path filtering. The `-x` list must never include `db` or `storage` — reasoning,
+and the rest of the design, in `docs/tooling.md`.
+**Two halves — only the first is done.** The job runs; making it *blocking*
+needs it added to `main`'s required checks in Settings → Branches, which GitHub
+only allows once the job has reported at least one run. Until then a red `db`
+job does not stop a merge.
+
 ### ✅ Branch protection on `main` (2026-07-20)
 Configured in Settings → Branches, closing the `CLAUDE.md` §4/§5 Phase-1
 requirement. GitHub repo settings aren't version-controlled, so this entry is
@@ -181,24 +191,6 @@ cron + `workflow_dispatch`. No job renamed, so `main` branch-protection
 required-check names are unchanged; the OSV scan surfaces as a non-required
 (advisory, emails-on-fail) check on `dev → main` PRs. Docs synced: `tooling.md`,
 `README.md`, `CLAUDE.md` §0.
-
----
-
-## 🟠 High
-
-### 🟠 Run the pgTAP database suite in GitHub Actions (issue #72)
-**Why:** The RLS and write-guard suite in `supabase/tests/` protects the
-database authorization boundary, but it currently runs only when invoked
-locally. A migration or policy regression can therefore merge while the Node
-and E2E checks remain green.
-**Do:** Add a parallel `db` job to `.github/workflows/ci.yml`, using the same
-Node 24 + pnpm setup as `verify`, the pinned local CLI (`pnpm exec supabase`),
-and read-only workflow permissions. Install dependencies, run `pnpm exec
-supabase start`, reset to the seeded state with `pnpm exec supabase db reset`,
-then run `pnpm exec supabase test db`. Run it on the existing PR/push triggers
-without path filtering unless its required-check behavior is defined first.
-**Done when:** every PR and push to `main`/`dev` reports a blocking database
-test job, and a deliberately failing pgTAP assertion fails that job.
 
 ---
 
@@ -352,10 +344,10 @@ The `supabase` CLI is ✅ installed as a pinned devDependency (2026-07-17).
 → audit gate flipped to blocking → Dependabot tuning + `@types/node` pin →
 branch protection.)*
 
-1. **pgTAP suite in CI** (High, issue #72) — the database authorization boundary
-   is now the only suite that runs local-only. Remember the second half: the new
-   job has to run once, then be added to `main`'s required checks, before it
-   actually blocks anything.
+1. **Make the `db` job blocking** — it ships in this batch but isn't a required
+   check yet; add it in Settings → Branches once it has reported one run.
+2. **Supabase clients** (`@supabase/ssr`, issue #37) — the last piece of the
+   Phase 2 runway, and the unblocker for the Phase 3 vertical slice.
 
 The security + CI + commit-hygiene foundation is green and the Phase 2 schema is
 in; everything after this is Phase 2/3 application work.

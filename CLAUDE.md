@@ -57,7 +57,9 @@ runs lint → format:check → typecheck → test → build → audit. Each chec
 after the first uses `if: !cancelled()` so one run reports *every* failure, not
 just the first. A parallel `e2e` job runs the Playwright smoke test (boots the
 app, Chromium only, HTML report uploaded as an artifact) — proving the app
-*runs*, not just that it compiles.
+*runs*, not just that it compiles. A parallel `db` job boots the local Supabase
+stack and runs the pgTAP suite (`supabase test db`), so an RLS or write-guard
+regression fails CI instead of merging green.
 The audit step (`pnpm audit --audit-level=high`) is blocking — CI fails on any
 high/critical advisory. Two more workflows: gitleaks secret scan + Semgrep
 SAST (`security.yml`, PR + push to `main`/`dev`; semgrep is blocking, findings

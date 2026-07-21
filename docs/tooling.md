@@ -124,6 +124,41 @@ single Playwright smoke spec (`tests/e2e/smoke.spec.ts`) — so CI proves the ap
 artifact (`if: !cancelled()`) for debugging. Only the smoke spec runs here; real
 flows arrive with the Phase 3 vertical slice. Details: [playwright.md](playwright.md).
 
+### Database suite (`db` job)
+
+A third parallel job (issue #72) boots the local Supabase stack and runs the
+pgTAP suite in `supabase/tests/` — the RLS policies and write guards that are
+the database authorization boundary. Before it existed the suite ran only when
+invoked by hand, so a policy regression could merge with every Node and E2E
+check green.
+
+It reuses `verify`'s Node 24 + pnpm prelude and the **pinned CLI
+devDependency** (`pnpm exec supabase`), so CI runs the same version as local
+rather than a floating action-installed one. Then: `supabase start` →
+`supabase db reset` → `supabase test db`.
+
+Three deliberate choices:
+
+- **`-x` excludes containers the SQL suite never touches**
+  (`studio,imgproxy,edge-runtime,functions,analytics,vector,inbucket`), trading
+  image pulls for wall-clock. **Never exclude `db` or `storage`** — the storage
+  service creates the `storage` schema that
+  `20260717120800_create_storage_bucket.sql` writes its bucket and object
+  policies into, so excluding it fails the migration outright. `kong`, `rest`,
+  `realtime`, and `meta` stay: cheap, and they keep the boot shaped like a real
+  one.
+- **`db reset` is redundant and kept anyway.** `start` already applies
+  migrations and the seed; running reset asserts that the documented
+  one-command known-good state actually works, and costs seconds once the
+  containers are up.
+- **No path filtering.** A policy regression can arrive via a migration, a
+  `config.toml` change, or a CLI bump, so gating on changed paths would miss
+  cases.
+
+Cold image pulls make this the slowest job in the matrix; `timeout-minutes: 20`
+is a backstop against a container that never reaches healthy. A `docker ps -a` +
+`supabase status` step runs `if: failure()` for triage.
+
 ### Dependency vulnerability gate (`pnpm audit`)
 
 The final CI step runs `pnpm audit --audit-level=high` (issue #20, PR #43):

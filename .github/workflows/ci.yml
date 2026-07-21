@@ -130,3 +130,63 @@ jobs:
           name: playwright-report
           path: playwright-report/
           retention-days: 7
+
+  # Boots the local Supabase stack and runs the pgTAP suite — the RLS policies
+  # and write guards in supabase/tests/ are the database authorization boundary,
+  # and until this job existed they ran only when someone remembered to invoke
+  # them locally (issue #72). Parallel to `verify`; same triggers, no path
+  # filtering: a policy regression can be introduced by a migration, a config
+  # change, or a CLI bump, so gating on changed paths would miss cases.
+  db:
+    name: Database (pgTAP RLS + write guards)
+    runs-on: ubuntu-latest
+    # The stack is ~8 containers pulled cold on every run; this is the slowest
+    # job in the matrix. The cap is a backstop against a container that never
+    # reaches healthy — without it a hung boot burns the default 6h.
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
+        # pnpm version is read from the "packageManager" field in package.json.
+
+      - name: Set up Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      # Installs the pinned `supabase` CLI devDependency (its postinstall fetches
+      # the platform binary — allow-listed in pnpm-workspace.yaml), so CI runs the
+      # same CLI version as local, not a floating action-installed one.
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # -x skips containers the SQL suite never touches, trading image pulls for
+      # wall-clock. Do NOT add `db` (Postgres itself) or `storage` — the storage
+      # service creates the `storage` schema that
+      # 20260717120800_create_storage_bucket.sql writes its bucket and object
+      # policies into, so excluding it fails the migration outright. `kong`,
+      # `rest`, `realtime`, and `meta` are kept deliberately: cheap, and they keep
+      # this boot shaped like a real one. If this step ever misbehaves, dropping
+      # -x entirely is the first thing to try.
+      - name: Start Supabase stack
+        run: pnpm exec supabase start -x studio,imgproxy,edge-runtime,functions,analytics,vector,inbucket
+
+      # Redundant with `start` (which already applies migrations + seed) but kept
+      # on purpose: it asserts that the documented one-command known-good state
+      # actually works, and costs seconds now that the containers are up.
+      - name: Reset to migrations + seed
+        run: pnpm exec supabase db reset
+
+      - name: Run pgTAP suite
+        run: pnpm exec supabase test db
+
+      # First-failure triage: which containers exist, and did any exit early.
+      - name: Dump container state on failure
+        if: ${{ failure() }}
+        run: |
+          docker ps -a
+          pnpm exec supabase status || true
