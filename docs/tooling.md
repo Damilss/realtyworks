@@ -153,6 +153,23 @@ old version). Declaring vite directly is the mechanism that actually controls
 the resolved version. Remove the direct dependency once `vitest` requires
 `vite >= 8.0.16` on its own.
 
+**Clearing a transitive advisory — try a lockfile refresh first.** Three highs
+landed at once on 2026-07-20 (GHSA-3jxr-9vmj-r5cp `brace-expansion` ×2 ranges,
+GHSA-52cp-r559-cp3m `js-yaml`), all dev-only and all transitive under `eslint` /
+`@commitlint` / `eslint-config-next`. No `overrides` and no manifest change were
+needed: every patched version was already inside a range its parent declared
+(`brace-expansion` 1.1.14→1.1.16 under `minimatch@3`, 5.0.6→5.0.7 under
+`minimatch@10`, `js-yaml` 4.1.1→4.3.0), so the old versions were just stale
+lockfile pins. `pnpm update <pkg> --depth Infinity` moved them and the diff
+touched those three packages only.
+
+Reach for `overrides` (in `pnpm-workspace.yaml` — pnpm 11 ignores the
+`pnpm` field in package.json) **only** when the patched version falls outside
+the parent's declared range, and prefer the range-scoped key form
+(`"brace-expansion@<1.1.16": "1.1.16"`) so one major line's fix isn't forced
+onto a consumer expecting another. If the package is an auto-installed peer,
+neither works — declare it directly, per the vite case above.
+
 ### Why the gate requires pnpm 11 (`packageManager` pin)
 
 npm retired the legacy audit endpoints (`/-/npm/v1/security/audits` and
