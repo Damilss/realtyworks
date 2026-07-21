@@ -194,7 +194,53 @@ required-check names are unchanged; the OSV scan surfaces as a non-required
 
 ---
 
+## 🟠 High
+
+### 🟠 Restrict `service_role` privileges on `work_order_activity`
+**Why:** The table grants `ALL` to `service_role`, which bypasses RLS — and `ALL`
+includes `DELETE` and `TRUNCATE`. A mistaken or compromised server action can
+therefore erase the audit trail despite the documented append-only guarantee and
+the absence of any DELETE policy: that guarantee currently rests on a policy
+`service_role` never consults. The coordinated work-order hard delete does not
+need the privilege — `ON DELETE CASCADE` is authorized by the grant on the
+*parent* table, not the child. Audit trail is a product feature (`CLAUDE.md` §5)
+and this is a §2 trust-rule surface.
+`supabase/migrations/20260717120600_create_work_order_activity.sql:123`
+(PR review `dev` → `main`, 2026-07-21).
+**Do:** new migration narrowing the grant to the operations actually used
+(`SELECT, INSERT` if the trail is strictly append-only), explicitly `REVOKE`ing
+`DELETE, TRUNCATE` so the intent is legible in the file. Confirm the coordinated
+work-order delete still cascades under the narrower grant. Sweep the other six
+tables for the same `GRANT ALL … service_role` pattern — separate migration if
+any share it, keep this one scoped.
+**Done when:** pgTAP asserts `service_role` cannot `DELETE`/`TRUNCATE`
+`work_order_activity` and that the coordinated parent delete still removes its
+child rows — so re-widening the grant fails CI.
+
+---
+
 ## 🟡 Medium
+
+### 🟡 Guard deletion of the final landlord profile
+**Why:** The last-landlord guard is an `UPDATE`-only trigger, so deletion walks
+around it. An auth-admin flow deleting a landlord with no RESTRICT-linked history
+cascades `auth.users` → a profile `DELETE` and the trigger never fires. Deleting
+the final landlord leaves **no caller able to use `set_user_role`** — role
+management bricked with no in-app recovery — and the `DELETE` path also bypasses
+the advisory lock that serializes concurrent demotions.
+`supabase/migrations/20260717120100_create_profiles.sql:123-125`
+(PR review `dev` → `main`, 2026-07-21).
+**Do:** new migration extending the guard to `DELETE` under the **same advisory
+lock** as the UPDATE path. Settle the semantics first: (a) `BEFORE DELETE` raises
+on the last landlord — safest, forces promoting a replacement, and makes the
+`auth.users` cascade error rather than silently proceed; or (b) enforce it in
+every admin deletion path, leaving the DB permissive — weaker, and `CLAUDE.md` §2
+puts integrity in the DB, so (a) is the default unless the cascade makes it
+unworkable. Verify the choice against the `auth.users` cascade specifically —
+that's the path that doesn't go through app code.
+**Done when:** deleting the last landlord fails on both the direct and
+`auth.users`-cascade paths, covered by pgTAP, with the chosen semantics recorded
+in the migration comment.
 
 ### 🟡 Trim required text fields before the length CHECK (issues #75, #77)
 **Why:** Round 5 fixed `city`/`state`/`postal_code` with `char_length(trim(...)) > 0`
@@ -345,9 +391,13 @@ The `supabase` CLI is ✅ installed as a pinned devDependency (2026-07-17).
 branch protection.)*
 
 1. **Make the `db` job blocking** — it ships in this batch but isn't a required
-   check yet; add it in Settings → Branches once it has reported one run.
-2. **Supabase clients** (`@supabase/ssr`, issue #37) — the last piece of the
+   check yet; add it in Settings → Branches once it has reported one run. Do this
+   first: it's what makes the pgTAP assertions below actually gate a merge.
+2. **Restrict `service_role` on `work_order_activity`** (🟠 High) — the audit
+   trail's append-only guarantee is currently unenforced against the service key.
+3. **Supabase clients** (`@supabase/ssr`, issue #37) — the last piece of the
    Phase 2 runway, and the unblocker for the Phase 3 vertical slice.
 
 The security + CI + commit-hygiene foundation is green and the Phase 2 schema is
-in; everything after this is Phase 2/3 application work.
+in. Apart from the schema-review follow-ups above, everything after this is
+Phase 2/3 application work.
