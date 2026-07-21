@@ -124,6 +124,41 @@ single Playwright smoke spec (`tests/e2e/smoke.spec.ts`) — so CI proves the ap
 artifact (`if: !cancelled()`) for debugging. Only the smoke spec runs here; real
 flows arrive with the Phase 3 vertical slice. Details: [playwright.md](playwright.md).
 
+### Database suite (`db` job)
+
+A third parallel job (issue #72) boots the local Supabase stack and runs the
+pgTAP suite in `supabase/tests/` — the RLS policies and write guards that are
+the database authorization boundary. Before it existed the suite ran only when
+invoked by hand, so a policy regression could merge with every Node and E2E
+check green.
+
+It reuses `verify`'s Node 24 + pnpm prelude and the **pinned CLI
+devDependency** (`pnpm exec supabase`), so CI runs the same version as local
+rather than a floating action-installed one. Then: `supabase start` →
+`supabase db reset` → `supabase test db`.
+
+Three deliberate choices:
+
+- **`-x` excludes containers the SQL suite never touches**
+  (`studio,imgproxy,edge-runtime,functions,analytics,vector,inbucket`), trading
+  image pulls for wall-clock. **Never exclude `db` or `storage`** — the storage
+  service creates the `storage` schema that
+  `20260717120800_create_storage_bucket.sql` writes its bucket and object
+  policies into, so excluding it fails the migration outright. `kong`, `rest`,
+  `realtime`, and `meta` stay: cheap, and they keep the boot shaped like a real
+  one.
+- **`db reset` is redundant and kept anyway.** `start` already applies
+  migrations and the seed; running reset asserts that the documented
+  one-command known-good state actually works, and costs seconds once the
+  containers are up.
+- **No path filtering.** A policy regression can arrive via a migration, a
+  `config.toml` change, or a CLI bump, so gating on changed paths would miss
+  cases.
+
+Cold image pulls make this the slowest job in the matrix; `timeout-minutes: 20`
+is a backstop against a container that never reaches healthy. A `docker ps -a` +
+`supabase status` step runs `if: failure()` for triage.
+
 ### Dependency vulnerability gate (`pnpm audit`)
 
 The final CI step runs `pnpm audit --audit-level=high` (issue #20, PR #43):
@@ -153,6 +188,58 @@ old version). Declaring vite directly is the mechanism that actually controls
 the resolved version. Remove the direct dependency once `vitest` requires
 `vite >= 8.0.16` on its own.
 
+**Clearing a transitive advisory — try a lockfile refresh first.** Three highs
+landed at once on 2026-07-20 (GHSA-3jxr-9vmj-r5cp `brace-expansion` ×2 ranges,
+GHSA-52cp-r559-cp3m `js-yaml`), all dev-only and all transitive under `eslint` /
+`@commitlint` / `eslint-config-next`. No `overrides` and no manifest change were
+needed: every patched version was already inside a range its parent declared
+(`brace-expansion` 1.1.14→1.1.16 under `minimatch@3`, 5.0.6→5.0.7 under
+`minimatch@10`, `js-yaml` 4.1.1→4.3.0), so the old versions were just stale
+lockfile pins. `pnpm update <pkg> --depth Infinity` moved them and the diff
+touched those three packages only.
+
+Reach for `overrides` (in `pnpm-workspace.yaml` — pnpm 11 ignores the
+`pnpm` field in package.json) **only** when the patched version falls outside
+the parent's declared range, and prefer the range-scoped key form
+(`"brace-expansion@<1.1.16": "1.1.16"`) so one major line's fix isn't forced
+onto a consumer expecting another. If the package is an auto-installed peer,
+neither works — declare it directly, per the vite case above.
+
+**Both paths in one pass (2026-07-21).** Two highs landed together and split
+across exactly that rule, which is why they're worth keeping as the worked
+example:
+
+| Advisory | Package | Patched | Parent's range | Fix |
+|---|---|---|---|---|
+| GHSA-v2hh-gcrm-f6hx | `fast-uri` 3.1.3 | `>=3.1.4` | `ajv` wants `^3.0.1` — **in range** | `pnpm update fast-uri --depth Infinity` |
+| GHSA-f88m-g3jw-g9cj | `sharp` 0.34.5 | `>=0.35.0` | `next` wants `^0.34.5` — **out of range** | `overrides: sharp@<0.35.0` |
+
+`fast-uri` was the `brace-expansion` case again: a stale pin, patched inside
+ajv's range, cleared by a refresh with a 4-line lockfile diff and no manifest
+change. `sharp` is the repo's **first real `overrides` entry** — it reaches the
+tree as `next > sharp`, and next still declares `^0.34.5` as of **16.2.11**
+(the current latest), so there is no upstream release to upgrade into. The
+override deliberately forces past next's caret range; delete it once next's
+floor reaches `>=0.35.0`.
+
+Forcing a dependency past its parent's declared range is the case that actually
+warrants verification, because nothing upstream has vouched for the pairing.
+What was checked, and what's worth re-checking next time:
+
+- `next` `require`s sharp with **no version guard** — `image-optimizer.js` does a
+  bare `require('sharp')`, so nothing rejects 0.35 on sight.
+- Every API that file touches still exists and runs on 0.35.3, exercised as a
+  real pipeline: `concurrency()`, `rotate` → `resize` → `webp`/`avif`/`png`/
+  `jpeg` → `toBuffer`, plus `metadata()`.
+- The native binary resolves and encodes — sharp **0.35.3 on libvips 8.18.3**,
+  the patched libvips the four CVEs called for. Note a transitive dep isn't at
+  the root under pnpm's strict layout; resolve it from the parent
+  (`require.resolve('sharp', {paths: [require.resolve('next/package.json')]})`),
+  since a root `require('sharp')` fails with `MODULE_NOT_FOUND` whether or not
+  the install is healthy.
+- `@img/sharp-libvips-*` moved 1.2.4 → **1.3.2 for every platform** in the
+  lockfile, `linux-x64` included — CI builds there, not on darwin-arm64.
+
 ### Why the gate requires pnpm 11 (`packageManager` pin)
 
 npm retired the legacy audit endpoints (`/-/npm/v1/security/audits` and
@@ -178,8 +265,9 @@ rationale above, and the upgrade is cheapest now (Phase 1, three runtime deps).
 
 **Fallout — dependency build scripts are now opt-in.** pnpm 10 stopped running
 dependency install scripts by default and pnpm 11 made an unreviewed build a
-hard **error**, so this is not cosmetic: `sharp` (unbuilt → `pnpm build` fails)
-and `unrs-resolver` (unbuilt → `pnpm lint` fails) must be allowed explicitly.
+hard **error**, so this is not cosmetic: `sharp` (unbuilt → `pnpm build` fails),
+`unrs-resolver` (unbuilt → `pnpm lint` fails), and `supabase` (its postinstall
+fetches the platform CLI binary — Phase 2) must be allowed explicitly.
 pnpm 11 also **stopped reading the `pnpm` field in package.json**; settings moved
 to `pnpm-workspace.yaml` (present at the repo root for exactly this reason, and
 its `allowBuilds` replaces v10's `onlyBuiltDependencies`). Anything not listed
@@ -197,9 +285,9 @@ Two layers (issue #19, PR #41):
 
 1. **Pre-commit** (above) — catches a secret before it ever enters history.
    Best-effort: skipped when the binary is missing.
-2. **CI** (`.github/workflows/security.yml`) — `gitleaks/gitleaks-action@v2`
-   scans the **full git history** (`fetch-depth: 0`) on every PR and push to
-   `main`. This is the authoritative layer.
+2. **CI** (`.github/workflows/security.yml`) — `gitleaks/gitleaks-action`
+   (SHA-pinned, v2.3.9) scans the **full git history** (`fetch-depth: 0`) on
+   every PR and push to `main`/`dev`. This is the authoritative layer.
 
 Permissions are least-privilege: the workflow grants `contents: read`, and the
 gitleaks **job** adds `pull-requests: read` because on PR events the action
@@ -245,10 +333,12 @@ container and four registry rulesets: `p/typescript`, `p/react`, `p/nextjs`,
   renders as annotations for free. The annotate step runs
   `if: ${{ !cancelled() }}` so it still runs when the scan step fails — which
   is exactly when there are findings to annotate.
-- **Container image is deliberately unpinned** (`semgrep/semgrep`, latest):
-  Dependabot only bumps `uses:` references, not `container:` images, so a pin
-  would go stale silently — and rulesets are fetched from the registry at scan
-  time anyway, so pinning the CLI buys little reproducibility.
+- **Container image is digest-pinned** (`semgrep/semgrep@sha256:…` with a
+  version comment). This reverses the original "deliberately unpinned" call:
+  the mutable-tag risk won. The tradeoff is real — Dependabot only bumps
+  `uses:` references, not `container:` images, so this pin is bumped
+  **manually** when upgrading Semgrep; rulesets are still fetched from the
+  registry at scan time either way.
 
 **The first scan flagged our own CI config** (8 findings, all fixed in the
 same PR):
@@ -375,6 +465,14 @@ the paper trail; see git history for the full diffs.)
   specced, since Vite 8 resolves tsconfig paths in core. `globals: true` for
   RTL's auto-cleanup; `vitest.d.ts` types the globals (ESLint-ignored like
   `next-env.d.ts`). Rides the existing `verify` steps — no `ci.yml` change.
+- **2026-07 · sharp forced past next's declared range** (GHSA-f88m-g3jw-g9cj) —
+  the libvips CVEs are patched in sharp `>=0.35.0`, but `next` declares
+  `sharp: ^0.34.5` and still does at 16.2.11, so waiting for upstream wasn't an
+  option. First real `overrides` entry in `pnpm-workspace.yaml`, range-scoped
+  (`sharp@<0.35.0`). Verified rather than assumed: next has no sharp version
+  guard, and every optimizer API works on 0.35.3 / libvips 8.18.3. The
+  same-day `fast-uri` high needed no override — patched in ajv's range, so a
+  lockfile refresh cleared it. Both in the dependency-gate section above.
 - **2026-07 · Audit gate flipped to blocking** — removed
   `continue-on-error: true` from the `pnpm audit` step so a high/critical
   advisory now fails the PR. Required clearing GHSA-fx2h-pf6j-xcff first: pnpm

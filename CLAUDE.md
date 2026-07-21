@@ -37,6 +37,17 @@ pnpm exec vitest run -t "name of test"            # filter by test name
 pnpm exec vitest src/path/to/file.test.ts         # watch a single file
 ```
 
+Supabase local stack (CLI is a pinned devDependency; Docker must be running):
+```bash
+pnpm exec supabase start        # boot the local stack
+pnpm exec supabase stop         # stop it (config.toml changes need stop+start)
+pnpm exec supabase db reset     # rebuild from migrations + seed — known-good state
+pnpm exec supabase test db      # pgTAP suite in supabase/tests/
+pnpm exec supabase gen types typescript --local > src/lib/database.types.ts
+                                # regenerate after EVERY migration change,
+                                # then `pnpm format` (generated file must pass format:check)
+```
+
 Vitest only collects `src/**/*.{test,spec}.{ts,tsx}` and
 `tests/unit/**/*.{test,spec}.{ts,tsx}` (see `vitest.config.ts`). Import app code
 via the `@/*` alias (`@/* → ./src/*`, `tsconfig.json`).
@@ -46,7 +57,9 @@ runs lint → format:check → typecheck → test → build → audit. Each chec
 after the first uses `if: !cancelled()` so one run reports *every* failure, not
 just the first. A parallel `e2e` job runs the Playwright smoke test (boots the
 app, Chromium only, HTML report uploaded as an artifact) — proving the app
-*runs*, not just that it compiles.
+*runs*, not just that it compiles. A parallel `db` job boots the local Supabase
+stack and runs the pgTAP suite (`supabase test db`), so an RLS or write-guard
+regression fails CI instead of merging green.
 The audit step (`pnpm audit --audit-level=high`) is blocking — CI fails on any
 high/critical advisory. Two more workflows: gitleaks secret scan + Semgrep
 SAST (`security.yml`, PR + push to `main`/`dev`; semgrep is blocking, findings
@@ -63,23 +76,35 @@ old `CI/CD` type is retired in favor of `ci` — see `commitlint.config.mjs`).
 
 ### Current state vs. the target in §3
 
-The repo is at **Phase 1 (Foundations)** — tooling/CI/security gates are in
-place around a near-empty Next.js scaffold (`src/app/{layout,page}.tsx` +
-globals, one Playwright smoke test). Most of §3's *application* tree and some
-§5 tools are the **target**, not yet present. Verify before assuming they
-exist:
+The repo is at **Phase 2 (Supabase local + schema + RLS)** — the schema
+shipped 2026-07-17. Parts of §3's *application* tree are still the **target**,
+not yet present. Verify before assuming they exist:
 
-- **Not yet created:** `supabase/` (no migrations/seed/config), `src/server/`,
-  `src/lib/`, `src/schemas/`, `src/components/`, `tests/unit/`, `.env.example`.
-- **Not yet installed:** `@supabase/ssr` / Supabase client, Tailwind,
-  shadcn/ui. `database.types.ts` does not exist until the first migration is
-  generated.
-- **Already in place:** Husky (pre-commit + commit-msg), commitlint,
-  lint-staged, Playwright (+ `tests/e2e/smoke.spec.ts`), gitleaks
-  (CI + pre-commit), Semgrep SAST (CI), `pnpm audit` gate, weekly osv-scanner,
-  Dependabot.
-- When you add the first missing piece, follow §3/§5 exactly (e.g. RLS in the
-  same migration as its table; `src/server/` as the trust boundary).
+- **In place — schema layer:** `supabase/` with 9 migrations (all 7 tables,
+  RLS + grants + triggers in the same file as each table), `seed.sql`
+  (3 login-able users, sample properties/units/vendor, work orders in all 5
+  statuses — `pnpm exec supabase db reset` is the one-command known-good
+  state), `supabase/tests/` (pgTAP RLS/guard suite), and the generated
+  `src/lib/database.types.ts`. Supabase CLI pinned as a devDependency.
+  Settled 2026-07-17: landlord = manager superset (direct property/unit/vendor
+  deletes + role management; work-order delete only through the coordinated
+  server action); all staff see all properties; vendors scoped to assigned work
+  orders (columns guarded by trigger); coordinated work-order hard delete
+  removes Storage objects before cascading activity/attachment metadata. Signup
+  is invite-only (`[auth] enable_signup =
+  false`; `[auth.email].enable_signup` must STAY true — off kills logins,
+  see config.toml).
+- **In place — foundations:** Husky (pre-commit + commit-msg), commitlint,
+  lint-staged, Vitest DOM harness (`tests/unit/`), Playwright
+  (+ `tests/e2e/smoke.spec.ts`), gitleaks (CI + pre-commit), Semgrep SAST
+  (CI), `pnpm audit` gate, weekly osv-scanner, Dependabot.
+- **Not yet created:** `src/server/`, `src/schemas/`, `src/components/`,
+  `src/lib/supabase/` (clients), `supabase/functions/`, `.env.example`.
+- **Not yet installed:** `@supabase/ssr` / `@supabase/supabase-js`, Tailwind,
+  shadcn/ui.
+- When you add the next missing piece, follow §3/§5 exactly (e.g.
+  `src/server/` as the trust boundary; schema changes only as new migrations
+  with RLS alongside).
 
 ---
 
@@ -92,6 +117,29 @@ work orders, vendor coordination, documentation, and audit-ready records.
 - Status: MVP / in active development
 - Solo developer. No team. Optimize for low operational burden and a clear paper trail.
 - License: Proprietary (see `LICENSE.md`).
+
+### Timeline — we are on a clock
+
+**Target: past MVP by early August 2026** (~2 weeks out as of 2026-07-20). The
+§1 MVP scope needs to be built, deployed, and usable by then — Phases 1–5 of
+§4, not just the foundations.
+
+**This does not lower the bar.** Rigor is what keeps a two-week push from
+becoming a four-week one. RLS still ships in the same migration as its table,
+the §2 trust rule still holds, CI still has to be green, migrations are still
+the source of truth, and the audit trail is still a product feature. Do not
+propose skipping these to save time — at this size they *are* the time savings.
+
+What the deadline does change:
+- **Scope discipline gets stricter, not looser.** The §1 non-goals and the
+  Phase 6 deferral are now schedule protection. Flag creep early and fast.
+- **Prefer the boring path** when two options both satisfy the requirement —
+  §8's "smallest change" rule, applied harder. No speculative abstractions.
+- **Don't stall on ambiguity.** State the assumption, pick the option that
+  keeps Phase 7 mechanical, keep moving, and surface the call in your summary
+  rather than blocking on a question.
+- **Phase 5 breadth is the trim line** if something has to give. One polished
+  vertical slice beats five half-wired features.
 
 ### MVP scope
 - Properties & units (basic structure for organizing work)
@@ -182,7 +230,8 @@ realtyworks/
 │   ├── workflows/                  # ci.yml (main gate — see §0) · security.yml · osv-scanner.yml
 │   └── dependabot.yml              # weekly npm + github-actions updates
 ├── .husky/                         # pre-commit (lint-staged + gitleaks), commit-msg (commitlint)
-├── docs/                           # tooling.md · playwright.md · backlog.md · commit-messages.md · dependency-version-management.md · pwa.md · vendor-access.md · schema/schema-brainstorming.md · reports/
+├── docs/                           # tooling.md · playwright.md · backlog.md · commit-messages.md · dependency-version-management.md · pwa.md · vendor-access.md · reports/
+│   └── schema/                     # schema-brainstorming.md (the method) · my_schema_writeup.md (workflows → design → Phase 2 plan)
 ├── public/
 ├── src/
 │   ├── app/                        # App Router
@@ -207,9 +256,10 @@ realtyworks/
 │   │   └── queries/                # data-fetching helpers
 │   └── schemas/                    # zod schemas (shared client+server validation)
 ├── supabase/
-│   ├── migrations/                 # numbered SQL — SOURCE OF TRUTH
-│   ├── functions/                  # edge functions (empty until needed)
-│   ├── seed.sql                    # test users + sample data
+│   ├── migrations/                 # timestamped SQL — SOURCE OF TRUTH (RLS ships with its table)
+│   ├── functions/                  # edge functions (not created until needed)
+│   ├── tests/                      # pgTAP RLS/guard suite — `pnpm exec supabase test db`
+│   ├── seed.sql                    # 3 test users + sample data (db reset loads it)
 │   └── config.toml
 ├── tests/
 │   ├── unit/                       # vitest
@@ -226,6 +276,7 @@ realtyworks/
 ├── tsconfig.json                   # strict: true
 ├── vitest.config.ts
 ├── package.json
+├── pnpm-workspace.yaml             # pnpm settings (allowBuilds — reviewed install scripts)
 └── README.md
 ```
 
@@ -243,7 +294,8 @@ realtyworks/
 
 ## 4. Build phases — current order of work
 
-Foundations before features. Do not jump ahead to feature breadth.
+Foundations before features. Do not jump ahead to feature breadth. Phases 1–5
+are the ~2-week MVP push (§1 *Timeline*); Phases 6–7 are explicitly after it.
 
 **Phase 1 — Foundations**
 Repo + tooling + green CI on a near-empty Next.js app. TS strict, ESLint +
@@ -387,3 +439,5 @@ mechanical. Re-decide hosting on the merits when the time comes, not by default.
   folders, abstractions, or dependencies.
 - When a decision is ambiguous, prefer the option that keeps Phase 7 (self-host)
   mechanical and operational burden low.
+- We are on a deadline (§1 *Timeline*). Treat it as a reason to cut scope and
+  skip gold-plating — never as a reason to cut rigor, tests, RLS, or CI.

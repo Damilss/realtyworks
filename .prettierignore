@@ -7,3 +7,8 @@ pnpm-lock.yaml
 # Generated / build output (also covered by .gitignore)
 .next/
 next-env.d.ts
+
+# Supabase CLI scratch dir (git-ignored via supabase/.gitignore, which
+# Prettier doesn't read — without this line, format:check fails locally
+# whenever the local stack has run)
+supabase/.temp/

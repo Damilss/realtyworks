@@ -6,7 +6,7 @@ Modern solutions for property management.
 landlords to run real-estate maintenance and repair operations end-to-end:
 work orders, vendor coordination, documentation, and audit-ready records.
 
-> **Status:** MVP / in active development — Phase 1 (Foundations)
+> **Status:** MVP / in active development — Phase 2 (Supabase local + schema + RLS)
 > **License:** Proprietary (see [`LICENSE.md`](LICENSE.md))
 
 ---
@@ -56,14 +56,15 @@ reporting above.
 | Package manager | **pnpm** `11.13.1` (pinned via `packageManager`) |
 | Runtime | Node **24** (pinned in `.nvmrc`, matched by CI) |
 | Unit tests | Vitest |
-| E2E tests | Playwright (local-only for now — see [docs/playwright.md](docs/playwright.md)) |
+| E2E tests | Playwright (smoke test also runs in CI — see [docs/playwright.md](docs/playwright.md)) |
+| Database | Supabase (Postgres 17, Auth, Storage, RLS) — local stack via the pinned `supabase` CLI; schema lives in `supabase/migrations/` (RLS ships with each table), pgTAP tests in `supabase/tests/` |
 | Lint / format | ESLint (`next/core-web-vitals` + TypeScript) · Prettier |
 | Git hygiene | Husky + lint-staged · commitlint (conventional commits) · gitleaks |
 
-Planned for later phases (decided, not yet installed): Supabase (Postgres,
-Auth, Storage, RLS), Tailwind CSS + shadcn/ui, Sentry. There is **no separate
-backend service** — backend logic lives in Postgres (RLS/constraints), Next.js
-server actions/route handlers, and Supabase Edge Functions. See `CLAUDE.md` §2.
+Planned for later phases (decided, not yet installed): `@supabase/ssr` client
+wiring, Tailwind CSS + shadcn/ui, Sentry. There is **no separate backend
+service** — backend logic lives in Postgres (RLS/constraints), Next.js server
+actions/route handlers, and Supabase Edge Functions. See `CLAUDE.md` §2.
 
 ---
 
@@ -71,9 +72,13 @@ server actions/route handlers, and Supabase Edge Functions. See `CLAUDE.md` §2.
 
 ### Prerequisites
 
-- **Node 24** — `nvm use` reads `.nvmrc`
+- **Node 24** — pinned in `.nvmrc`. `nvm use` reads it; any Node 24 also works
+  if you manage versions another way (fnm, asdf, Volta, or a manual install).
 - **pnpm 11.13.1** — easiest via [corepack](https://nodejs.org/api/corepack.html)
-  (`corepack enable`), which reads the `packageManager` field; **do not use npm**
+  (`corepack enable`), which reads the `packageManager` field and activates the
+  pinned version on first use; **do not use npm**. The first `pnpm` command may
+  download pnpm — that's expected, not an error.
+- **git** — to clone and for the commit hooks.
 - **gitleaks** *(optional but recommended)* — the pre-commit hook runs a local
   secret scan when it's installed, and skips it with a warning when it isn't
   (CI scans regardless): `brew install gitleaks`
@@ -82,15 +87,77 @@ server actions/route handlers, and Supabase Edge Functions. See `CLAUDE.md` §2.
 
 ```bash
 git clone <repo-url> && cd realtyworks
-nvm use               # Node 24
+nvm use               # Node 24 (or ensure Node 24 another way)
 corepack enable       # activates pnpm 11.13.1 from package.json
-pnpm install          # also installs the git hooks (husky) via "prepare"
+pnpm install          # installs deps + the git hooks (husky) via "prepare"
 pnpm dev              # http://localhost:3000
 ```
 
-No environment variables are required yet — Phase 1 has no external services.
-A committed `.env.example` arrives with Supabase in Phase 2 (real values go in
-the gitignored `.env.local`).
+No environment variables are required yet — the local Supabase stack runs on
+well-known local dev keys. A committed `.env.example` arrives with the
+`@supabase/ssr` client wiring (real values go in the gitignored `.env.local`).
+
+The local database (requires Docker):
+
+```bash
+pnpm exec supabase start      # boot the local stack
+pnpm exec supabase db reset   # rebuild from migrations + seed (known-good state)
+pnpm exec supabase test db    # pgTAP RLS/guard suite
+```
+### Additional checkouts (git worktrees)
+
+`node_modules/` and `.husky/_/` are gitignored generated state, so they never
+travel with a checkout. A new `git worktree` — or a fresh clone — starts without
+them, and **git treats a missing hooks directory as "no hooks configured."** It
+skips pre-commit and commit-msg silently: no warning, zero exit code, commits
+succeed exactly as normal while lint-staged, gitleaks, and commitlint do
+nothing at all.
+
+`pnpm install` installs the hooks via the `prepare` script — but only when it
+actually installs something. If `node_modules/` is already populated (say by an
+earlier `pnpm update`, which does *not* run `prepare`), install short-circuits
+with `Already up to date` and the hooks are never created. That combination is
+easy to hit and gives no signal.
+
+So in a new worktree or clone, run both:
+
+```bash
+pnpm install       # dependencies
+pnpm run prepare   # git hooks — cheap, idempotent, safe to re-run anytime
+```
+
+To check an existing checkout:
+
+```bash
+ls .husky/_/commit-msg >/dev/null 2>&1 \
+  && echo "hooks installed" \
+  || echo "HOOKS MISSING — run: pnpm run prepare"
+```
+
+CI is unaffected either way — the workflows run the checks directly rather than
+through git hooks. A missing hook costs you fast local feedback, not the gate.
+
+### Verify your setup
+
+Run the full check suite once to confirm the toolchain is wired — this is the
+same gauntlet CI runs, and the one to run locally before every push:
+
+```bash
+pnpm lint && pnpm format:check && pnpm typecheck && pnpm test && pnpm build && pnpm audit --audit-level=high
+```
+
+All green means you're good to go.
+
+### Run the tests
+
+```bash
+pnpm test                              # unit (Vitest), one-shot
+pnpm exec playwright install chromium  # one-time per machine: download the E2E browser
+pnpm test:e2e                          # E2E (Playwright boots the dev server itself)
+```
+
+Full detail — what each runner collects and how they stay out of each other's
+way — is in [Testing](#testing) below and [docs/playwright.md](docs/playwright.md).
 
 ### Scripts
 
@@ -105,12 +172,6 @@ the gitignored `.env.local`).
 | `pnpm test` | Vitest, one-shot (`--passWithNoTests`) |
 | `pnpm test:e2e` | Playwright E2E (boots the dev server itself) |
 
-Run the CI gauntlet locally before pushing:
-
-```bash
-pnpm lint && pnpm format:check && pnpm typecheck && pnpm test && pnpm build && pnpm audit --audit-level=high
-```
-
 ---
 
 ## Testing
@@ -121,9 +182,10 @@ pnpm lint && pnpm format:check && pnpm typecheck && pnpm test && pnpm build && p
   `pnpm exec vitest run -t "name of test"`.
 - **E2E (Playwright)** — owns `tests/e2e/`; currently a single smoke test.
   Requires a one-time browser download:
-  `pnpm exec playwright install chromium`. Intentionally **not** wired into CI
-  until the Phase 3 vertical slice exists. Full guide:
-  [docs/playwright.md](docs/playwright.md).
+  `pnpm exec playwright install chromium`. The smoke test **does** run in CI
+  (the parallel `e2e` job in `.github/workflows/ci.yml`) — proving the app
+  boots, not just compiles; only real end-to-end flows wait for the Phase 3
+  vertical slice. Full guide: [docs/playwright.md](docs/playwright.md).
 
 The two runners never collect each other's files.
 
@@ -140,16 +202,26 @@ Everything below must pass before code lands on `main`.
   isn't installed).
 - **commit-msg** — commitlint enforces
   [conventional commits](https://www.conventionalcommits.org). Allowed types:
-  `build chore ci deps docs feat fix perf refactor revert style test`
-  (`deps` is a house addition for dependency bumps; the old `CI/CD` type from
-  early history is retired in favor of `ci`).
+  `build chore ci deps docs feat fix perf refactor revert style test wip`
+  (`deps` is a house addition for dependency bumps and `wip` for local
+  work-in-progress checkpoints; the old `CI/CD` type from early history is
+  retired in favor of `ci`).
+
+Both hooks **fail open**: if `.husky/_/` is missing, git skips them without
+warning and every commit passes unchecked. Common in a fresh worktree or clone —
+see [Additional checkouts](#additional-checkouts-git-worktrees).
 
 ### CI — `.github/workflows/ci.yml` (PRs + pushes to `main`)
 
-One job runs **lint → format check → typecheck → unit tests → build → audit**.
-Every check step after the first uses `if: ${{ !cancelled() }}`, so a single
-run reports *every* failure rather than stopping at the first. pnpm's store and the Next.js build
-cache are cached between runs.
+Three jobs run in parallel. `verify` runs **lint → format check → typecheck →
+unit tests → build → audit**; every check step after the first uses
+`if: ${{ !cancelled() }}`, so a single run reports *every* failure rather than
+stopping at the first. pnpm's store and the Next.js build cache are cached
+between runs. `e2e` boots the app and runs the Playwright smoke test. `db` boots
+the local Supabase stack and runs the pgTAP suite from `supabase/tests/`, so an
+RLS or write-guard regression fails CI rather than merging green — it's the
+slowest of the three (cold Docker image pulls). Details:
+[docs/tooling.md](docs/tooling.md).
 
 The final step, `pnpm audit --audit-level=high`, is a blocking dependency
 vulnerability gate. Any high/critical advisory fails CI; moderate/low
@@ -220,8 +292,8 @@ land — not speculatively.
 
 | Phase | Scope | Status |
 | --- | --- | --- |
-| 1 — Foundations | Tooling, CI, hooks, security scanning on a near-empty app | 🔷 Nearly done — open: branch protection ([backlog](docs/backlog.md)) |
-| 2 — Supabase | Local stack, migrations (RLS from day one), seed data | Next |
+| 1 — Foundations | Tooling, CI, hooks, security scanning on a near-empty app | ✅ Done |
+| 2 — Supabase | Local stack, migrations (RLS from day one), seed data | 🔷 In progress — schema, RLS, seed, and pgTAP suite landed; `@supabase/ssr` clients open ([backlog](docs/backlog.md)) |
 | 3 — Vertical slice | One full path: manager → work order → vendor → activity log | Planned |
 | 4 — Hosted deploy | Vercel + Supabase Cloud, PR previews, Sentry | Planned |
 | 5 — Breadth | More features, minimal reports, SMS/notifications, PWA install layer | Planned |

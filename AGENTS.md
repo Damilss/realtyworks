@@ -3,3 +3,15 @@
 
 This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` before writing any code. Heed deprecation notices.
 <!-- END:nextjs-agent-rules -->
+
+## Repository context
+
+Read the root `CLAUDE.md` file fully before beginning work. It is the agent
+context file and contains the broader project context and operating guidance.
+This `AGENTS.md` file remains authoritative for agent instructions.
+
+## Review and commits
+
+Before completing work, stage all working-tree changes with `git add -A`, but
+do not create a commit. Leave the changes staged for user review and provide a
+single commit message that conforms to this repository's commitlint rules.
