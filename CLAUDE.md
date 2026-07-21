@@ -93,6 +93,29 @@ work orders, vendor coordination, documentation, and audit-ready records.
 - Solo developer. No team. Optimize for low operational burden and a clear paper trail.
 - License: Proprietary (see `LICENSE.md`).
 
+### Timeline — we are on a clock
+
+**Target: past MVP by early August 2026** (~2 weeks out as of 2026-07-20). The
+§1 MVP scope needs to be built, deployed, and usable by then — Phases 1–5 of
+§4, not just the foundations.
+
+**This does not lower the bar.** Rigor is what keeps a two-week push from
+becoming a four-week one. RLS still ships in the same migration as its table,
+the §2 trust rule still holds, CI still has to be green, migrations are still
+the source of truth, and the audit trail is still a product feature. Do not
+propose skipping these to save time — at this size they *are* the time savings.
+
+What the deadline does change:
+- **Scope discipline gets stricter, not looser.** The §1 non-goals and the
+  Phase 6 deferral are now schedule protection. Flag creep early and fast.
+- **Prefer the boring path** when two options both satisfy the requirement —
+  §8's "smallest change" rule, applied harder. No speculative abstractions.
+- **Don't stall on ambiguity.** State the assumption, pick the option that
+  keeps Phase 7 mechanical, keep moving, and surface the call in your summary
+  rather than blocking on a question.
+- **Phase 5 breadth is the trim line** if something has to give. One polished
+  vertical slice beats five half-wired features.
+
 ### MVP scope
 - Properties & units (basic structure for organizing work)
 - Work orders (create, assign, update status, priority, due dates)
@@ -243,7 +266,8 @@ realtyworks/
 
 ## 4. Build phases — current order of work
 
-Foundations before features. Do not jump ahead to feature breadth.
+Foundations before features. Do not jump ahead to feature breadth. Phases 1–5
+are the ~2-week MVP push (§1 *Timeline*); Phases 6–7 are explicitly after it.
 
 **Phase 1 — Foundations**
 Repo + tooling + green CI on a near-empty Next.js app. TS strict, ESLint +
@@ -387,3 +411,5 @@ mechanical. Re-decide hosting on the merits when the time comes, not by default.
   folders, abstractions, or dependencies.
 - When a decision is ambiguous, prefer the option that keeps Phase 7 (self-host)
   mechanical and operational burden low.
+- We are on a deadline (§1 *Timeline*). Treat it as a reason to cut scope and
+  skip gold-plating — never as a reason to cut rigor, tests, RLS, or CI.
