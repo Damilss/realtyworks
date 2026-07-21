@@ -205,6 +205,41 @@ the parent's declared range, and prefer the range-scoped key form
 onto a consumer expecting another. If the package is an auto-installed peer,
 neither works — declare it directly, per the vite case above.
 
+**Both paths in one pass (2026-07-21).** Two highs landed together and split
+across exactly that rule, which is why they're worth keeping as the worked
+example:
+
+| Advisory | Package | Patched | Parent's range | Fix |
+|---|---|---|---|---|
+| GHSA-v2hh-gcrm-f6hx | `fast-uri` 3.1.3 | `>=3.1.4` | `ajv` wants `^3.0.1` — **in range** | `pnpm update fast-uri --depth Infinity` |
+| GHSA-f88m-g3jw-g9cj | `sharp` 0.34.5 | `>=0.35.0` | `next` wants `^0.34.5` — **out of range** | `overrides: sharp@<0.35.0` |
+
+`fast-uri` was the `brace-expansion` case again: a stale pin, patched inside
+ajv's range, cleared by a refresh with a 4-line lockfile diff and no manifest
+change. `sharp` is the repo's **first real `overrides` entry** — it reaches the
+tree as `next > sharp`, and next still declares `^0.34.5` as of **16.2.11**
+(the current latest), so there is no upstream release to upgrade into. The
+override deliberately forces past next's caret range; delete it once next's
+floor reaches `>=0.35.0`.
+
+Forcing a dependency past its parent's declared range is the case that actually
+warrants verification, because nothing upstream has vouched for the pairing.
+What was checked, and what's worth re-checking next time:
+
+- `next` `require`s sharp with **no version guard** — `image-optimizer.js` does a
+  bare `require('sharp')`, so nothing rejects 0.35 on sight.
+- Every API that file touches still exists and runs on 0.35.3, exercised as a
+  real pipeline: `concurrency()`, `rotate` → `resize` → `webp`/`avif`/`png`/
+  `jpeg` → `toBuffer`, plus `metadata()`.
+- The native binary resolves and encodes — sharp **0.35.3 on libvips 8.18.3**,
+  the patched libvips the four CVEs called for. Note a transitive dep isn't at
+  the root under pnpm's strict layout; resolve it from the parent
+  (`require.resolve('sharp', {paths: [require.resolve('next/package.json')]})`),
+  since a root `require('sharp')` fails with `MODULE_NOT_FOUND` whether or not
+  the install is healthy.
+- `@img/sharp-libvips-*` moved 1.2.4 → **1.3.2 for every platform** in the
+  lockfile, `linux-x64` included — CI builds there, not on darwin-arm64.
+
 ### Why the gate requires pnpm 11 (`packageManager` pin)
 
 npm retired the legacy audit endpoints (`/-/npm/v1/security/audits` and
@@ -430,6 +465,14 @@ the paper trail; see git history for the full diffs.)
   specced, since Vite 8 resolves tsconfig paths in core. `globals: true` for
   RTL's auto-cleanup; `vitest.d.ts` types the globals (ESLint-ignored like
   `next-env.d.ts`). Rides the existing `verify` steps — no `ci.yml` change.
+- **2026-07 · sharp forced past next's declared range** (GHSA-f88m-g3jw-g9cj) —
+  the libvips CVEs are patched in sharp `>=0.35.0`, but `next` declares
+  `sharp: ^0.34.5` and still does at 16.2.11, so waiting for upstream wasn't an
+  option. First real `overrides` entry in `pnpm-workspace.yaml`, range-scoped
+  (`sharp@<0.35.0`). Verified rather than assumed: next has no sharp version
+  guard, and every optimizer API works on 0.35.3 / libvips 8.18.3. The
+  same-day `fast-uri` high needed no override — patched in ajv's range, so a
+  lockfile refresh cleared it. Both in the dependency-gate section above.
 - **2026-07 · Audit gate flipped to blocking** — removed
   `continue-on-error: true` from the `pnpm audit` step so a high/critical
   advisory now fails the PR. Required clearing GHSA-fx2h-pf6j-xcff first: pnpm
