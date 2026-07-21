@@ -49,5 +49,14 @@ next-env.d.ts
 /blob-report/
 /playwright/.cache/
 
-#mac stuff 
+#mac stuff
 .DS_Store
+
+# git worktrees checked out inside the repo. Without this, `git add -A` from the
+# repo root records the nested checkout as a gitlink (mode 160000) — a phantom
+# submodule with no .gitmodules entry, which breaks fresh clones.
+/wt-*/
+
+# editor swap files
+*.swp
+*.swo
