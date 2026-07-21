@@ -77,10 +77,13 @@ old `CI/CD` type is retired in favor of `ci` — see `commitlint.config.mjs`).
 ### Current state vs. the target in §3
 
 The repo is at **Phase 2 (Supabase local + schema + RLS)** — the schema
-shipped 2026-07-17. Parts of §3's *application* tree are still the **target**,
-not yet present. Verify before assuming they exist:
+shipped 2026-07-17 and **merged to `main` 2026-07-21** (PR #78), so the first
+migrations are now on the default branch and `main` is the migration baseline:
+every schema change from here is a *new* forward migration, never an edit to a
+merged one. Parts of §3's *application* tree are still the **target**, not yet
+present. Verify before assuming they exist:
 
-- **In place — schema layer:** `supabase/` with 9 migrations (all 7 tables,
+- **In place — schema layer (on `main`):** `supabase/` with 9 migrations (all 7 tables,
   RLS + grants + triggers in the same file as each table), `seed.sql`
   (3 login-able users, sample properties/units/vendor, work orders in all 5
   statuses — `pnpm exec supabase db reset` is the one-command known-good
@@ -97,7 +100,12 @@ not yet present. Verify before assuming they exist:
 - **In place — foundations:** Husky (pre-commit + commit-msg), commitlint,
   lint-staged, Vitest DOM harness (`tests/unit/`), Playwright
   (+ `tests/e2e/smoke.spec.ts`), gitleaks (CI + pre-commit), Semgrep SAST
-  (CI), `pnpm audit` gate, weekly osv-scanner, Dependabot.
+  (CI), `pnpm audit` gate, weekly osv-scanner, Dependabot, and the parallel
+  `db` job running the pgTAP suite on every PR/push to `main`/`dev`.
+- **Remaining in Phase 2:** the `@supabase/ssr` clients
+  (`src/lib/supabase/{client,server,middleware}.ts`) — the last piece before
+  the Phase 3 vertical slice. Schema-review follow-ups are tracked in
+  `docs/backlog.md`, not blockers on starting Phase 3.
 - **Not yet created:** `src/server/`, `src/schemas/`, `src/components/`,
   `src/lib/supabase/` (clients), `supabase/functions/`, `.env.example`.
 - **Not yet installed:** `@supabase/ssr` / `@supabase/supabase-js`, Tailwind,
@@ -120,9 +128,13 @@ work orders, vendor coordination, documentation, and audit-ready records.
 
 ### Timeline — we are on a clock
 
-**Target: past MVP by early August 2026** (~2 weeks out as of 2026-07-20). The
+**Target: past MVP by early August 2026** (~2 weeks out as of 2026-07-21). The
 §1 MVP scope needs to be built, deployed, and usable by then — Phases 1–5 of
-§4, not just the foundations.
+§4, not just the foundations. As of 2026-07-21 Phase 1 is done and Phase 2 is
+on `main` bar the `@supabase/ssr` clients; **Phase 3 (the vertical slice) is
+the next real work** and the largest remaining unknown — schema polish
+competes with it for the same two weeks, so treat backlog follow-ups as
+fill-in work, not the critical path.
 
 **This does not lower the bar.** Rigor is what keeps a two-week push from
 becoming a four-week one. RLS still ships in the same migration as its table,
@@ -351,6 +363,11 @@ See §7. Should be a weekend job, not a rewrite, if §5/§7 rules are followed.
 
 - **Migrations are the source of truth.** All schema/RLS changes via numbered
   migration files. No dashboard click-ops, ever.
+- **Forward-only past `main`.** Since 2026-07-21 the migration set is merged to
+  `main`. A migration that has reached `main` is immutable — fix or change it
+  with a **new** timestamped migration, never by editing the merged file.
+  (Editing is only ever an option for a migration still unmerged on a local
+  branch, and only before anyone else's tree has applied it.)
 - **RLS from day one.** Every table ships with its RLS policy in the same
   migration. Retrofitting RLS is not allowed.
 - **Everything via env vars.** No hardcoded URLs, keys, or config. `.env.example`

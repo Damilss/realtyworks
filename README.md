@@ -6,7 +6,8 @@ Modern solutions for property management.
 landlords to run real-estate maintenance and repair operations end-to-end:
 work orders, vendor coordination, documentation, and audit-ready records.
 
-> **Status:** MVP / in active development — Phase 2 (Supabase local + schema + RLS)
+> **Status:** MVP / in active development — Phase 2 (Supabase local + schema + RLS);
+> the first migrations merged to `main` 2026-07-21
 > **License:** Proprietary (see [`LICENSE.md`](LICENSE.md))
 
 ---
@@ -257,8 +258,16 @@ realtyworks/
 ├── docs/                   # project docs (see index below) · docs/reports/ = roadbump postmortems
 ├── public/
 ├── src/
-│   └── app/                # Next.js App Router (near-empty scaffold — Phase 1)
+│   ├── app/                # Next.js App Router (near-empty scaffold — Phase 1)
+│   └── lib/
+│       └── database.types.ts   # GENERATED from the schema — never hand-edited
+├── supabase/
+│   ├── migrations/         # timestamped SQL — SOURCE OF TRUTH (RLS ships with its table)
+│   ├── tests/              # pgTAP RLS/write-guard suite
+│   ├── seed.sql            # 3 login-able users + sample data
+│   └── config.toml
 ├── tests/
+│   ├── unit/               # Vitest (DOM harness)
 │   └── e2e/                # Playwright specs (smoke test)
 ├── .gitleaks.toml          # secret-scanning config
 ├── .nvmrc                  # Node 24
@@ -268,9 +277,9 @@ realtyworks/
 └── CLAUDE.md               # engineering source of truth (architecture, phases, rules)
 ```
 
-The target application structure (`src/server/`, `src/schemas/`, `supabase/`
-migrations, …) is specified in `CLAUDE.md` §3 and gets created as Phases 2–3
-land — not speculatively.
+The rest of the target application structure (`src/server/`, `src/schemas/`,
+`src/components/`, `src/lib/supabase/` clients, …) is specified in `CLAUDE.md`
+§3 and gets created as Phases 2–3 land — not speculatively.
 
 ## Documentation index
 
@@ -293,7 +302,7 @@ land — not speculatively.
 | Phase | Scope | Status |
 | --- | --- | --- |
 | 1 — Foundations | Tooling, CI, hooks, security scanning on a near-empty app | ✅ Done |
-| 2 — Supabase | Local stack, migrations (RLS from day one), seed data | 🔷 In progress — schema, RLS, seed, and pgTAP suite landed; `@supabase/ssr` clients open ([backlog](docs/backlog.md)) |
+| 2 — Supabase | Local stack, migrations (RLS from day one), seed data | 🔷 In progress — schema, RLS, seed, and pgTAP suite merged to `main` 2026-07-21; `@supabase/ssr` clients open ([backlog](docs/backlog.md)) |
 | 3 — Vertical slice | One full path: manager → work order → vendor → activity log | Planned |
 | 4 — Hosted deploy | Vercel + Supabase Cloud, PR previews, Sentry | Planned |
 | 5 — Breadth | More features, minimal reports, SMS/notifications, PWA install layer | Planned |
