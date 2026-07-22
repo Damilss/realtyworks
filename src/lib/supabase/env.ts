@@ -8,31 +8,41 @@
  * the browser bundle. Read the value literally, then validate it here.
  */
 
-function required(name: string, value: string | undefined): string {
+type MissingConfigHandler = (name: string) => never;
+
+const throwPublicConfigError: MissingConfigHandler = () => {
+  throw new Error("Application configuration is unavailable.");
+};
+
+function required(
+  name: string,
+  value: string | undefined,
+  onMissing: MissingConfigHandler,
+): string {
   if (!value) {
-    throw new Error(
-      `Missing required environment variable: ${name}. ` +
-        `Copy .env.example to .env.local and fill it in — ` +
-        `\`pnpm exec supabase status\` prints the local values.`,
-    );
+    return onMissing(name);
   }
   return value;
 }
 
 /**
- * Shared validation for build configuration and runtime client creation.
- * `next.config.ts` calls this while loading so missing public values fail the
- * build before Next.js freezes them into the browser bundle.
+ * Shared validation for build configuration and runtime client creation. The
+ * default error is browser-safe; `next.config.ts` supplies detailed developer
+ * remediation while loading so it stays out of the client bundle.
  */
-export function supabaseEnv() {
+export function supabaseEnv(
+  onMissing: MissingConfigHandler = throwPublicConfigError,
+) {
   return {
     url: required(
       "NEXT_PUBLIC_SUPABASE_URL",
       process.env.NEXT_PUBLIC_SUPABASE_URL,
+      onMissing,
     ),
     publishableKey: required(
       "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY",
       process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY,
+      onMissing,
     ),
   };
 }
