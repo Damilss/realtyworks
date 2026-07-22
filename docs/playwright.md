@@ -15,6 +15,14 @@ vertical slice — see `CLAUDE.md` §4.
 - **pnpm** (`pnpm@11.13.1`). Do **not** use `npm init playwright` — it writes a
   `package-lock.json`, adds example tests, and drops in its own GitHub Actions
   workflow, none of which we want.
+- A **`.env.local`** with the two `NEXT_PUBLIC_SUPABASE_*` variables. Playwright
+  boots the app itself (see below), and `src/proxy.ts` refreshes the Supabase
+  session on every request — without that config the app 500s on every route
+  and the run fails on the `webServer` timeout rather than on an assertion.
+  Setup is in the [README](../README.md#install--run). The variables must be
+  *present*; they need not point at a live stack, since with no session cookie
+  the refresh short-circuits before any network call — which is exactly why
+  CI's `e2e` job sets placeholders and boots no Supabase.
 
 ## Installation
 
