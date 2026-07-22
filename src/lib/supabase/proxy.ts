@@ -1,8 +1,16 @@
-import { createServerClient } from "@supabase/ssr";
+import {
+  clearAuthCookiesAtScopes,
+  createServerClient,
+  type SetAllCookies,
+} from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
 import type { Database } from "@/lib/database.types";
 import { supabaseEnv } from "@/lib/supabase/env";
+
+function authStorageKey(url: string) {
+  return `sb-${new URL(url).hostname.split(".")[0]}-auth-token`;
+}
 
 /**
  * Refreshes the Supabase auth session on every request and writes the rotated
@@ -22,39 +30,55 @@ import { supabaseEnv } from "@/lib/supabase/env";
  */
 export async function updateSession(request: NextRequest) {
   const { url, publishableKey } = supabaseEnv();
+  const storageKey = authStorageKey(url);
 
   let response = NextResponse.next({ request });
 
+  const getAll = () => request.cookies.getAll();
+  const setAll: SetAllCookies = (cookiesToSet, headers) => {
+    for (const { name, value } of cookiesToSet) {
+      request.cookies.set(name, value);
+    }
+
+    response = NextResponse.next({ request });
+
+    for (const { name, value, options } of cookiesToSet) {
+      response.cookies.set(name, value, options);
+    }
+
+    // Responses that set auth cookies must never be cached by a CDN or
+    // reverse proxy, or one user's session token gets served to another.
+    // Keep a fallback for helpers that do not supply their own headers.
+    response.headers.set("Cache-Control", "private, no-store");
+
+    for (const [key, headerValue] of Object.entries(headers)) {
+      response.headers.set(key, headerValue);
+    }
+  };
+
   const supabase = createServerClient<Database>(url, publishableKey, {
     cookies: {
-      getAll() {
-        return request.cookies.getAll();
-      },
-      setAll(cookiesToSet, headers) {
-        for (const { name, value } of cookiesToSet) {
-          request.cookies.set(name, value);
-        }
-
-        response = NextResponse.next({ request });
-
-        for (const { name, value, options } of cookiesToSet) {
-          response.cookies.set(name, value, options);
-        }
-
-        // Responses that set auth cookies must never be cached by a CDN or
-        // reverse proxy, or one user's session token gets served to another.
-        // The library supplies the required no-store headers.
-        for (const [key, headerValue] of Object.entries(headers)) {
-          response.headers.set(key, headerValue);
-        }
-      },
+      getAll,
+      setAll,
     },
   });
 
   // Must run immediately after the client is created, with nothing in between:
   // this is the call that triggers the refresh, and it has to complete before
   // the response is committed or the rotated cookies are lost.
-  await supabase.auth.getClaims();
+  try {
+    await supabase.auth.getClaims();
+  } catch {
+    // auth-js returns AuthErrors, but malformed session data can throw a
+    // native parsing error instead. Clear every current-session chunk so the
+    // request can proceed signed out and the browser can recover.
+    await clearAuthCookiesAtScopes({
+      getAll,
+      setAll,
+      storageKey,
+      scopes: [{}],
+    });
+  }
 
   return response;
 }
