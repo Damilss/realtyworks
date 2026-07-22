@@ -20,8 +20,9 @@ function required(name: string, value: string | undefined): string {
 }
 
 /**
- * Validated at call time rather than module load, so a missing variable fails
- * with this message on the request that needs it instead of breaking the build.
+ * Shared validation for build configuration and runtime client creation.
+ * `next.config.ts` calls this while loading so missing public values fail the
+ * build before Next.js freezes them into the browser bundle.
  */
 export function supabaseEnv() {
   return {
