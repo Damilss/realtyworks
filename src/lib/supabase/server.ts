@@ -5,6 +5,16 @@ import { createServerClient } from "@supabase/ssr";
 import type { Database } from "@/lib/database.types";
 import { supabaseEnv } from "@/lib/supabase/env";
 
+const READONLY_COOKIE_STORE_ERROR =
+  "Cookies can only be modified in a Server Action or Route Handler.";
+
+function isReadonlyCookieStoreError(error: unknown) {
+  return (
+    error instanceof Error &&
+    error.message.startsWith(READONLY_COOKIE_STORE_ERROR)
+  );
+}
+
 /**
  * Supabase client for Server Components, server actions, and route handlers.
  *
@@ -24,14 +34,20 @@ export async function createClient() {
         return cookieStore.getAll();
       },
       setAll(cookiesToSet) {
-        try {
-          for (const { name, value, options } of cookiesToSet) {
+        for (const { name, value, options } of cookiesToSet) {
+          try {
             cookieStore.set(name, value, options);
+          } catch (error) {
+            if (isReadonlyCookieStoreError(error)) {
+              // Server Components cannot set any cookies. The proxy refreshes
+              // the session and writes the complete batch on every request.
+              return;
+            }
+
+            // Surface the failure instead of silently accepting a partial
+            // auth-cookie batch.
+            throw error;
           }
-        } catch {
-          // Server Components cannot set cookies. Safe to ignore: the proxy
-          // (src/proxy.ts) refreshes the session and writes the cookies back
-          // on every request, so the refreshed token is never lost.
         }
       },
     },
