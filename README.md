@@ -6,8 +6,9 @@ Modern solutions for property management.
 landlords to run real-estate maintenance and repair operations end-to-end:
 work orders, vendor coordination, documentation, and audit-ready records.
 
-> **Status:** MVP / in active development — Phase 2 (Supabase local + schema + RLS);
-> the first migrations merged to `main` 2026-07-21
+> **Status:** MVP / in active development — Phase 2 (Supabase local + schema + RLS)
+> complete: the first migrations merged to `main` 2026-07-21 and the
+> `@supabase/ssr` clients landed on top of them. Phase 3 (the vertical slice) is next.
 > **License:** Proprietary (see [`LICENSE.md`](LICENSE.md))
 
 ---
@@ -62,10 +63,16 @@ reporting above.
 | Lint / format | ESLint (`next/core-web-vitals` + TypeScript) · Prettier |
 | Git hygiene | Husky + lint-staged · commitlint (conventional commits) · gitleaks |
 
-Planned for later phases (decided, not yet installed): `@supabase/ssr` client
-wiring, Tailwind CSS + shadcn/ui, Sentry. There is **no separate backend
-service** — backend logic lives in Postgres (RLS/constraints), Next.js server
-actions/route handlers, and Supabase Edge Functions. See `CLAUDE.md` §2.
+Server-side auth is `@supabase/ssr`: browser and per-request server clients in
+`src/lib/supabase/`, plus session refresh in `src/proxy.ts` (Next.js 16 renamed
+the root `middleware` convention to `proxy` — it is **not** `middleware.ts`).
+Both clients use the publishable key and the caller's session, so RLS applies
+identically on the server and in the browser; neither is privileged.
+
+Planned for later phases (decided, not yet installed): Tailwind CSS +
+shadcn/ui, Sentry. There is **no separate backend service** — backend logic
+lives in Postgres (RLS/constraints), Next.js server actions/route handlers, and
+Supabase Edge Functions. See `CLAUDE.md` §2.
 
 ---
 
@@ -80,6 +87,8 @@ actions/route handlers, and Supabase Edge Functions. See `CLAUDE.md` §2.
   pinned version on first use; **do not use npm**. The first `pnpm` command may
   download pnpm — that's expected, not an error.
 - **git** — to clone and for the commit hooks.
+- **Docker** — required for the local Supabase stack (Postgres, Auth, Storage).
+  Docker Desktop or OrbStack; the daemon must be **running**, not just installed.
 - **gitleaks** *(optional but recommended)* — the pre-commit hook runs a local
   secret scan when it's installed, and skips it with a warning when it isn't
   (CI scans regardless): `brew install gitleaks`
@@ -91,20 +100,53 @@ git clone <repo-url> && cd realtyworks
 nvm use               # Node 24 (or ensure Node 24 another way)
 corepack enable       # activates pnpm 11.13.1 from package.json
 pnpm install          # installs deps + the git hooks (husky) via "prepare"
+```
+
+**Stop here — the app needs environment variables before it will serve a single
+page.** `src/proxy.ts` refreshes the Supabase session on *every* request, and
+`src/lib/supabase/env.ts` throws when its config is missing. Running `pnpm dev`
+without a `.env.local` returns **500 on every route**, including `/login`, so
+there is no page you can reach to work around it.
+
+Boot the local database, then write `.env.local` from the running stack:
+
+```bash
+pnpm exec supabase start      # boot the local stack (first run pulls images)
+
+pnpm exec supabase status -o env \
+  --override-name api.url=NEXT_PUBLIC_SUPABASE_URL \
+  --override-name auth.publishable_key=NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY \
+  | grep '^NEXT_PUBLIC_' > .env.local
+```
+
+That writes exactly the two variables the app reads. **The `grep` is
+load-bearing:** `-o env` also prints `SERVICE_ROLE_KEY`, `SECRET_KEY`,
+`JWT_SECRET`, and `DB_URL`, and none of those belong in the app's env file —
+only the two `NEXT_PUBLIC_` values are safe to ship to the browser. The CLI
+quotes its values; Next.js strips the quotes when it loads the file.
+
+> The redirect **overwrites** `.env.local`. If you've customized it, back it up
+> first — or take the manual route instead: `cp .env.example .env.local`, then
+> fill in the two values from `pnpm exec supabase status`.
+> [`.env.example`](.env.example) is committed and documents both.
+
+Then run the app:
+
+```bash
 pnpm dev              # http://localhost:3000
 ```
 
-No environment variables are required yet — the local Supabase stack runs on
-well-known local dev keys. A committed `.env.example` arrives with the
-`@supabase/ssr` client wiring (real values go in the gitignored `.env.local`).
-
-The local database (requires Docker):
+Other local-database commands:
 
 ```bash
-pnpm exec supabase start      # boot the local stack
 pnpm exec supabase db reset   # rebuild from migrations + seed (known-good state)
 pnpm exec supabase test db    # pgTAP RLS/guard suite
+pnpm exec supabase stop       # shut the stack down
 ```
+
+Seeded logins (landlord, manager, vendor) come from `supabase/seed.sql`, which
+`db reset` loads.
+
 ### Additional checkouts (git worktrees)
 
 `node_modules/` and `.husky/_/` are gitignored generated state, so they never
@@ -156,6 +198,13 @@ pnpm test                              # unit (Vitest), one-shot
 pnpm exec playwright install chromium  # one-time per machine: download the E2E browser
 pnpm test:e2e                          # E2E (Playwright boots the dev server itself)
 ```
+
+`pnpm test:e2e` boots the app via `pnpm dev`, so it needs the same `.env.local`
+as the app — without it every request 500s and the run fails on the
+`webServer` timeout, not on an assertion. The variables must be *present*; they
+don't have to point at a live stack, since with no session cookie the refresh
+short-circuits before any network call. (That's why CI's `e2e` job sets
+placeholders and runs no Supabase — see `.github/workflows/ci.yml`.)
 
 Full detail — what each runner collects and how they stay out of each other's
 way — is in [Testing](#testing) below and [docs/playwright.md](docs/playwright.md).
@@ -259,8 +308,10 @@ realtyworks/
 ├── public/
 ├── src/
 │   ├── app/                # Next.js App Router (near-empty scaffold — Phase 1)
-│   └── lib/
-│       └── database.types.ts   # GENERATED from the schema — never hand-edited
+│   ├── lib/
+│   │   ├── supabase/       # client.ts (browser) · server.ts (per-request) · proxy.ts (session refresh) · env.ts (validated config)
+│   │   └── database.types.ts   # GENERATED from the schema — never hand-edited
+│   └── proxy.ts            # Next.js 16 root convention (renamed from middleware.ts)
 ├── supabase/
 │   ├── migrations/         # timestamped SQL — SOURCE OF TRUTH (RLS ships with its table)
 │   ├── tests/              # pgTAP RLS/write-guard suite
@@ -269,6 +320,7 @@ realtyworks/
 ├── tests/
 │   ├── unit/               # Vitest (DOM harness)
 │   └── e2e/                # Playwright specs (smoke test)
+├── .env.example            # committed template — documents every required var
 ├── .gitleaks.toml          # secret-scanning config
 ├── .nvmrc                  # Node 24
 ├── commitlint.config.mjs   # conventional-commit rules
@@ -278,8 +330,8 @@ realtyworks/
 ```
 
 The rest of the target application structure (`src/server/`, `src/schemas/`,
-`src/components/`, `src/lib/supabase/` clients, …) is specified in `CLAUDE.md`
-§3 and gets created as Phases 2–3 land — not speculatively.
+`src/components/`, …) is specified in `CLAUDE.md` §3 and gets created as
+Phase 3 lands — not speculatively.
 
 ## Documentation index
 
@@ -302,8 +354,8 @@ The rest of the target application structure (`src/server/`, `src/schemas/`,
 | Phase | Scope | Status |
 | --- | --- | --- |
 | 1 — Foundations | Tooling, CI, hooks, security scanning on a near-empty app | ✅ Done |
-| 2 — Supabase | Local stack, migrations (RLS from day one), seed data | 🔷 In progress — schema, RLS, seed, and pgTAP suite merged to `main` 2026-07-21; `@supabase/ssr` clients open ([backlog](docs/backlog.md)) |
-| 3 — Vertical slice | One full path: manager → work order → vendor → activity log | Planned |
+| 2 — Supabase | Local stack, migrations (RLS from day one), seed data, `@supabase/ssr` clients | ✅ Done — schema, RLS, seed, and pgTAP suite merged to `main` 2026-07-21; clients + session-refresh proxy landed on top |
+| 3 — Vertical slice | One full path: manager → work order → vendor → activity log | 🔷 Next |
 | 4 — Hosted deploy | Vercel + Supabase Cloud, PR previews, Sentry | Planned |
 | 5 — Breadth | More features, minimal reports, SMS/notifications, PWA install layer | Planned |
 | 6 — Accounting & rent tracking | Rent roll, ledger, cost rollups — server-side, append-only | Late stage |
