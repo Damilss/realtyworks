@@ -102,14 +102,21 @@ present. Verify before assuming they exist:
   (+ `tests/e2e/smoke.spec.ts`), gitleaks (CI + pre-commit), Semgrep SAST
   (CI), `pnpm audit` gate, weekly osv-scanner, Dependabot, and the parallel
   `db` job running the pgTAP suite on every PR/push to `main`/`dev`.
-- **Remaining in Phase 2:** the `@supabase/ssr` clients
-  (`src/lib/supabase/{client,server,middleware}.ts`) — the last piece before
-  the Phase 3 vertical slice. Schema-review follow-ups are tracked in
-  `docs/backlog.md`, not blockers on starting Phase 3.
+- **In place — Supabase clients (2026-07-21):** `@supabase/ssr` +
+  `@supabase/supabase-js` installed, and `src/lib/supabase/`
+  (`client.ts` browser · `server.ts` per-request server · `proxy.ts` session
+  refresh · `env.ts` validated config) wired to the root `src/proxy.ts`.
+  **Phase 2 is complete.** Note the Next.js 16 rename: the root `middleware`
+  file convention is deprecated in favor of **`proxy`**, so the session-refresh
+  file is `src/proxy.ts`, not `middleware.ts` — ignore any `@supabase/ssr`
+  guide that says otherwise. Both clients use the *publishable* key and the
+  caller's session, so RLS applies identically on server and client; neither is
+  privileged.
+- **Phase 3 (the vertical slice) is the next work.** Schema-review follow-ups
+  are tracked in `docs/backlog.md`, not blockers on starting it.
 - **Not yet created:** `src/server/`, `src/schemas/`, `src/components/`,
-  `src/lib/supabase/` (clients), `supabase/functions/`, `.env.example`.
-- **Not yet installed:** `@supabase/ssr` / `@supabase/supabase-js`, Tailwind,
-  shadcn/ui.
+  `supabase/functions/`.
+- **Not yet installed:** Tailwind, shadcn/ui.
 - When you add the next missing piece, follow §3/§5 exactly (e.g.
   `src/server/` as the trust boundary; schema changes only as new migrations
   with RLS alongside).
@@ -130,8 +137,8 @@ work orders, vendor coordination, documentation, and audit-ready records.
 
 **Target: past MVP by early August 2026** (~2 weeks out as of 2026-07-21). The
 §1 MVP scope needs to be built, deployed, and usable by then — Phases 1–5 of
-§4, not just the foundations. As of 2026-07-21 Phase 1 is done and Phase 2 is
-on `main` bar the `@supabase/ssr` clients; **Phase 3 (the vertical slice) is
+§4, not just the foundations. As of 2026-07-21 Phases 1 and 2 are both
+complete (schema on `main`, clients landed); **Phase 3 (the vertical slice) is
 the next real work** and the largest remaining unknown — schema polish
 competes with it for the same two weeks, so treat backlog follow-ups as
 fill-in work, not the critical path.
@@ -260,13 +267,15 @@ realtyworks/
 │   │   ├── supabase/
 │   │   │   ├── client.ts           # browser client
 │   │   │   ├── server.ts           # server client (cookies/SSR)
-│   │   │   └── middleware.ts       # session refresh
+│   │   │   ├── proxy.ts            # session refresh (called by src/proxy.ts)
+│   │   │   └── env.ts              # validated NEXT_PUBLIC_SUPABASE_* config
 │   │   ├── database.types.ts       # GENERATED — never hand-edit
 │   │   └── utils.ts
 │   ├── server/                     # SERVER-ONLY — never imported by client
 │   │   ├── actions/                # server actions ("use server")
 │   │   └── queries/                # data-fetching helpers
-│   └── schemas/                    # zod schemas (shared client+server validation)
+│   ├── schemas/                    # zod schemas (shared client+server validation)
+│   └── proxy.ts                    # Next 16 root convention (was middleware.ts)
 ├── supabase/
 │   ├── migrations/                 # timestamped SQL — SOURCE OF TRUTH (RLS ships with its table)
 │   ├── functions/                  # edge functions (not created until needed)

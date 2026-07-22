@@ -85,6 +85,14 @@ jobs:
     runs-on: ubuntu-latest
     env:
       NEXT_TELEMETRY_DISABLED: "1"
+      # The proxy (src/proxy.ts) refreshes the Supabase session on every
+      # request and fails loudly when its config is missing, so the app will
+      # not serve a single page without these. This job runs no Supabase
+      # stack; placeholders are enough because with no session cookie the
+      # refresh short-circuits before making a network call. Not secrets —
+      # both are NEXT_PUBLIC_ by design (see .env.example).
+      NEXT_PUBLIC_SUPABASE_URL: "http://127.0.0.1:54321"
+      NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: "sb_publishable_ci_placeholder"
     steps:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1

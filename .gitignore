@@ -35,6 +35,9 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+# ...except the committed template, which documents every required var
+# (CLAUDE.md §3/§5) and holds no real values.
+!.env.example
 
 # vercel
 .vercel
