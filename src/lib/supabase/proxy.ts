@@ -40,6 +40,11 @@ export async function updateSession(request: NextRequest) {
       request.cookies.set(name, value);
     }
 
+    // Recreating the response (rather than mutating the outer one) is the
+    // @supabase/ssr pattern: it re-snapshots `request` now that the rotated
+    // cookies are applied above. The trade-off is that nothing set on the prior
+    // response survives — so any custom header (request-id, CSP nonce) must be
+    // applied to the returned response *after* the refresh call, never before.
     response = NextResponse.next({ request });
 
     for (const { name, value, options } of cookiesToSet) {
@@ -67,7 +72,17 @@ export async function updateSession(request: NextRequest) {
   // this is the call that triggers the refresh, and it has to complete before
   // the response is committed or the rotated cookies are lost.
   try {
-    await supabase.auth.getClaims();
+    const { error } = await supabase.auth.getClaims();
+
+    if (error) {
+      // getClaims() returns AuthErrors — a revoked refresh token, or an
+      // AuthRetryableFetchError during an Auth outage — rather than throwing,
+      // so they fall through the catch below. Left unhandled the error vanishes
+      // and the request just degrades to unauthenticated: users appear randomly
+      // logged out with nothing to explain it. This log line is that signal
+      // (CLAUDE.md §5 audit trail; Sentry captures it once Phase 4 wires it).
+      console.error("[proxy] Supabase session refresh failed", error);
+    }
   } catch {
     // auth-js returns AuthErrors, but malformed session data can throw a
     // native parsing error instead. Clear every current-session chunk so the
