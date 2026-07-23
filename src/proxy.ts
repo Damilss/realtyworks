@@ -18,9 +18,11 @@ export const config = {
     /*
      * Every path except the ones that never carry a session worth refreshing:
      * - _next/static, _next/image — build output
-     * - favicon.ico and image files
+     * - robots.txt, sitemap.xml — public metadata
+     * - manifest.webmanifest, sw.js — PWA entry points
+     * - image and font files
      * Extend this list rather than adding early returns in the proxy.
      */
-    "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
+    "/((?!_next/static|_next/image|robots\\.txt$|sitemap\\.xml$|manifest\\.webmanifest$|sw\\.js$|.*\\.(?:svg|png|jpg|jpeg|gif|webp|avif|ico|woff|woff2|ttf|otf|eot)$).*)",
   ],
 };
