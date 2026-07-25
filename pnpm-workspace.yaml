@@ -22,3 +22,17 @@ overrides:
   # (still true as of 16.2.11), so nothing to upgrade into — this deliberately
   # forces past next's range. Drop it once next's floor reaches >=0.35.0.
   sharp@<0.35.0: ^0.35.0
+  # GHSA-6g55-p6wh-862q + GHSA-r28c-9q8g-f849 — postcss sourceMappingURL path
+  # traversal / arbitrary .map file read, patched in 8.5.18. Reached via
+  # `next > postcss` (next exact-pins 8.4.31, outside the patched range) and
+  # `vite > postcss` (^8.5.16, in range). One range-scoped override lifts both.
+  # Drop it once next's pin reaches >=8.5.18.
+  postcss@<8.5.18: ^8.5.18
+  # GHSA-mh99-v99m-4gvg — brace-expansion DoS via unbounded expansion, patched
+  # only in 5.0.8 (no fixed 1.x/2.x line exists). Reached solely through
+  # minimatch. The pre-9 minimatch line (eslint > minimatch@3) is CJS and calls
+  # brace-expansion's default export, which 5.x no longer provides — so the two
+  # move together: force minimatch to 10 (declares brace-expansion ^5.0.5) and
+  # brace-expansion to 5.0.8. Verified with lint/typecheck/test/build green.
+  minimatch@<9: ^10.0.0
+  brace-expansion@<5.0.8: 5.0.8
