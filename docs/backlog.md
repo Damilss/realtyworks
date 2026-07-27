@@ -15,7 +15,7 @@ Pick them off at your discretion.
 
 ---
 
-## State verified (2026-07-17)
+## State verified (2026-07-21)
 
 - `next 16.2.6` / `react 19.2.4` / `pnpm@11.13.1`, Node pinned to 24 (`.nvmrc`).
 - CI runs `lint → format:check → typecheck → test → build → audit` — with
@@ -33,10 +33,16 @@ Pick them off at your discretion.
 - Husky **pre-commit** (lint-staged + gitleaks) **and `commit-msg`**
   (commitlint, conventional types + `deps`, `CI/CD` retired → `ci`).
 - Prettier configured (markdown intentionally ignored).
-- **Phase 2 schema live locally** — `supabase/` (9 migrations, seed, pgTAP
-  suite via `pnpm exec supabase test db`), generated
+- **Phase 2 schema is on `main`** — merged 2026-07-21 (PR #78): `supabase/`
+  (9 migrations, seed, pgTAP suite via `pnpm exec supabase test db`), generated
   `src/lib/database.types.ts`, supabase CLI pinned as a devDependency. See ✅.
+  `main` is now the migration baseline — every schema change from here is a new
+  forward migration, never an edit to a merged file.
+- **pgTAP `db` job** running in CI on `main`/`dev` (issue #72) — not yet a
+  *required* check. See ✅.
 - **Branch protection on `main`** enabled 2026-07-20 (web UI). See ✅.
+- `pnpm audit --audit-level=high` **clean** as of 2026-07-21 (fast-uri + sharp
+  cleared — see ✅).
 
 ### Sharp edges these issues address
 - Native GitHub security features (CodeQL, secret-scanning push-protection,
@@ -48,6 +54,61 @@ Pick them off at your discretion.
 
 ## ✅ Done (kept for the paper trail)
 
+### ✅ Supabase clients — Phase 2 complete (2026-07-21, issue #37)
+`@supabase/ssr` + `@supabase/supabase-js` installed; `src/lib/supabase/`
+(`client.ts` · `server.ts` · `proxy.ts` · `env.ts`) wired to a root `src/proxy.ts`,
+plus a committed `.env.example` (`.gitignore` now negates `.env*` for it).
+
+**Next.js 16 renamed the root `middleware` convention to `proxy`** — every
+`@supabase/ssr` guide still says `middleware.ts` and is wrong for this repo. The
+file is `src/proxy.ts` exporting `proxy`; `next build` reports it as
+`ƒ Proxy (Middleware)`.
+
+Two decisions worth keeping: the clients read the **publishable** key
+(`sb_publishable_…`), not the legacy anon JWT — it is what a new Supabase project
+issues, so Phase 4 needs no rename; and `env.ts` reads
+`process.env.NEXT_PUBLIC_*` as literal member expressions, because Next inlines
+those by static analysis and a dynamic `process.env[name]` lookup would silently
+be `undefined` in the browser bundle.
+
+**The proxy does session refresh only** — no route protection. The Next proxy
+guide scopes it to optimistic checks, not authorization; RLS plus server-side
+checks stay the trust boundary (`CLAUDE.md` §2). Auth redirects belong to Phase 3.
+
+Verified against the running local stack, not just typecheck: anonymous reads on
+`properties` are refused, the seeded manager sees 2 properties / 5 work orders,
+and the vendor sees 3 work orders — matching the pgTAP expectations.
+
+**CI needed a fix:** the proxy runs on every request and fails loudly on missing
+config, so the `e2e` job (which boots the app but runs no Supabase stack) served
+500s on every page. It now sets placeholder `NEXT_PUBLIC_SUPABASE_*` values —
+confirmed sufficient because with no session cookie the refresh short-circuits
+before any network call. The `verify` job needs nothing; `next build` does not
+execute the proxy.
+
+### ✅ First migrations merged to `main` (2026-07-21, PR #78)
+The Phase 2 schema batch — 9 migrations, `seed.sql`, the pgTAP suite, the CI
+`db` job, and the generated `database.types.ts` — went `dev` → `main` through
+branch protection with CI green. **`main` is now the migration baseline:**
+every schema change from here is a new timestamped forward migration, never an
+edit to a merged file, because the merged ones have been applied to trees other
+than the local one. Phase 2's remaining runway is the `@supabase/ssr` clients
+(issue #37); the schema-review findings below are follow-up migrations, not
+re-writes.
+
+### ✅ fast-uri + sharp high advisories cleared (2026-07-21)
+Two highs were failing the blocking `pnpm audit` gate and split across the
+`docs/tooling.md` rule for when an override is warranted, so they were fixed
+differently: **fast-uri** (GHSA-v2hh-gcrm-f6hx) was a stale lockfile pin inside
+ajv's declared `^3.0.1` range — cleared with `pnpm update fast-uri --depth
+Infinity`, lockfile-only. **sharp** (GHSA-f88m-g3jw-g9cj, libvips
+CVE-2026-33327/33328/35590/35591) is patched in `>=0.35.0`, but `next` still
+declares `sharp: ^0.34.5` as of 16.2.11 — no upstream release to move into, so
+it took the first `overrides` entry in `pnpm-workspace.yaml`, range-scoped to
+`sharp@<0.35.0`. **Remove that override once Next's floor reaches `>=0.35.0`.**
+Supersedes the "1 low + 1 moderate remain" snapshot in the 2026-07-20 entry
+below.
+
 ### ✅ pgTAP database suite in CI (2026-07-21, issue #72)
 Parallel `db` job in `ci.yml`: pinned CLI devDependency, `supabase start -x …` →
 `db reset` → `test db`, on the existing `main`/`dev` PR/push triggers with no
@@ -55,8 +116,9 @@ path filtering. The `-x` list must never include `db` or `storage` — reasoning
 and the rest of the design, in `docs/tooling.md`.
 **Two halves — only the first is done.** The job runs; making it *blocking*
 needs it added to `main`'s required checks in Settings → Branches, which GitHub
-only allows once the job has reported at least one run. Until then a red `db`
-job does not stop a merge.
+only allows once the job has reported at least one run. It has now reported —
+PR #78 ran it — so **the setting is unblocked and this is a one-click todo**.
+Until it's flipped, a red `db` job does not stop a merge.
 
 ### ✅ Branch protection on `main` (2026-07-20)
 Configured in Settings → Branches, closing the `CLAUDE.md` §4/§5 Phase-1
@@ -76,7 +138,7 @@ A `postcss@8.4.31` still resolves under Next's own bundled dependency block
 alongside 8.5.16; the audit does not flag it, so it needs no action, but it is
 the thing to re-check if that advisory is ever re-scored.
 
-### ✅ Phase 2 — Supabase local + schema + RLS + seed + pgTAP (2026-07-17, issues #34/#35)
+### ✅ Phase 2 — Supabase local + schema + RLS + seed + pgTAP (2026-07-17, merged to `main` 2026-07-21, issues #34/#35)
 Supabase CLI pinned as a devDependency (`supabase` ^2.109.1, install script
 allow-listed in `pnpm-workspace.yaml`). Nine migrations create the seven §7
 tables — RLS + grants + triggers in the **same file** as each table: landlord =
@@ -321,11 +383,6 @@ from the app.
 
 ## 🟢 Low — general-development runway (Phase 2+, phase-gated)
 
-### 🟢 Phase 2 — Supabase clients (`@supabase/ssr`) (issue #37)
-`@supabase/ssr` → `src/lib/supabase/{client,server,middleware}.ts`. The rest of the Phase 2
-runway (local stack, migrations + RLS, seed, `database.types.ts`) shipped 2026-07-17 — see ✅.
-Regenerate types after every migration change, then `pnpm format`.
-
 ### 🟢 Phase 2/3 — Tailwind + shadcn/ui (not yet installed) (issue #38)
 Stack is decided (`CLAUDE.md` §2) but absent. Install Tailwind + `prettier-plugin-tailwindcss`,
 init shadcn/ui into `src/components/ui/`.
@@ -388,16 +445,23 @@ The `supabase` CLI is ✅ installed as a pinned devDependency (2026-07-17).
 
 *(Done so far: commitlint → gitleaks → `pnpm audit` gate + osv-scanner → Semgrep
 → audit gate flipped to blocking → Dependabot tuning + `@types/node` pin →
-branch protection.)*
+branch protection → pgTAP in CI → first migrations merged to `main` →
+**Supabase clients: Phase 2 complete**.)*
 
-1. **Make the `db` job blocking** — it ships in this batch but isn't a required
-   check yet; add it in Settings → Branches once it has reported one run. Do this
-   first: it's what makes the pgTAP assertions below actually gate a merge.
-2. **Restrict `service_role` on `work_order_activity`** (🟠 High) — the audit
-   trail's append-only guarantee is currently unenforced against the service key.
-3. **Supabase clients** (`@supabase/ssr`, issue #37) — the last piece of the
-   Phase 2 runway, and the unblocker for the Phase 3 vertical slice.
+1. **Make the `db` job blocking** — the job has reported a run (PR #78), so it
+   is now selectable in Settings → Branches. Two minutes of web UI, and it's
+   what makes the pgTAP assertions below actually gate a merge.
+2. **The Phase 3 vertical slice** — now unblocked and the critical path. The
+   deadline (`CLAUDE.md` §1) says start it before the schema-polish items, and
+   trim Phase 5 breadth before trimming this. Start with login: the clients are
+   in place but nothing calls them yet, so the auth routes
+   (`src/app/(auth)/`) and the first server action are the next keystrokes.
+3. **Restrict `service_role` on `work_order_activity`** (🟠 High) — the audit
+   trail's append-only guarantee is currently unenforced against the service
+   key. A small forward migration; do it alongside Phase 3 rather than ahead
+   of it.
 
-The security + CI + commit-hygiene foundation is green and the Phase 2 schema is
-in. Apart from the schema-review follow-ups above, everything after this is
+The security + CI + commit-hygiene foundation is green and the Phase 2 schema
+is **on `main`**. Apart from the schema-review follow-ups above — all of which
+are now *forward* migrations on a merged baseline — everything after this is
 Phase 2/3 application work.

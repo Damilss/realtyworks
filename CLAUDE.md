@@ -77,10 +77,13 @@ old `CI/CD` type is retired in favor of `ci` — see `commitlint.config.mjs`).
 ### Current state vs. the target in §3
 
 The repo is at **Phase 2 (Supabase local + schema + RLS)** — the schema
-shipped 2026-07-17. Parts of §3's *application* tree are still the **target**,
-not yet present. Verify before assuming they exist:
+shipped 2026-07-17 and **merged to `main` 2026-07-21** (PR #78), so the first
+migrations are now on the default branch and `main` is the migration baseline:
+every schema change from here is a *new* forward migration, never an edit to a
+merged one. Parts of §3's *application* tree are still the **target**, not yet
+present. Verify before assuming they exist:
 
-- **In place — schema layer:** `supabase/` with 9 migrations (all 7 tables,
+- **In place — schema layer (on `main`):** `supabase/` with 9 migrations (all 7 tables,
   RLS + grants + triggers in the same file as each table), `seed.sql`
   (3 login-able users, sample properties/units/vendor, work orders in all 5
   statuses — `pnpm exec supabase db reset` is the one-command known-good
@@ -97,11 +100,23 @@ not yet present. Verify before assuming they exist:
 - **In place — foundations:** Husky (pre-commit + commit-msg), commitlint,
   lint-staged, Vitest DOM harness (`tests/unit/`), Playwright
   (+ `tests/e2e/smoke.spec.ts`), gitleaks (CI + pre-commit), Semgrep SAST
-  (CI), `pnpm audit` gate, weekly osv-scanner, Dependabot.
+  (CI), `pnpm audit` gate, weekly osv-scanner, Dependabot, and the parallel
+  `db` job running the pgTAP suite on every PR/push to `main`/`dev`.
+- **In place — Supabase clients (2026-07-21):** `@supabase/ssr` +
+  `@supabase/supabase-js` installed, and `src/lib/supabase/`
+  (`client.ts` browser · `server.ts` per-request server · `proxy.ts` session
+  refresh · `env.ts` validated config) wired to the root `src/proxy.ts`.
+  **Phase 2 is complete.** Note the Next.js 16 rename: the root `middleware`
+  file convention is deprecated in favor of **`proxy`**, so the session-refresh
+  file is `src/proxy.ts`, not `middleware.ts` — ignore any `@supabase/ssr`
+  guide that says otherwise. Both clients use the *publishable* key and the
+  caller's session, so RLS applies identically on server and client; neither is
+  privileged.
+- **Phase 3 (the vertical slice) is the next work.** Schema-review follow-ups
+  are tracked in `docs/backlog.md`, not blockers on starting it.
 - **Not yet created:** `src/server/`, `src/schemas/`, `src/components/`,
-  `src/lib/supabase/` (clients), `supabase/functions/`, `.env.example`.
-- **Not yet installed:** `@supabase/ssr` / `@supabase/supabase-js`, Tailwind,
-  shadcn/ui.
+  `supabase/functions/`.
+- **Not yet installed:** Tailwind, shadcn/ui.
 - When you add the next missing piece, follow §3/§5 exactly (e.g.
   `src/server/` as the trust boundary; schema changes only as new migrations
   with RLS alongside).
@@ -120,9 +135,13 @@ work orders, vendor coordination, documentation, and audit-ready records.
 
 ### Timeline — we are on a clock
 
-**Target: past MVP by early August 2026** (~2 weeks out as of 2026-07-20). The
+**Target: past MVP by early August 2026** (~2 weeks out as of 2026-07-21). The
 §1 MVP scope needs to be built, deployed, and usable by then — Phases 1–5 of
-§4, not just the foundations.
+§4, not just the foundations. As of 2026-07-21 Phases 1 and 2 are both
+complete (schema on `main`, clients landed); **Phase 3 (the vertical slice) is
+the next real work** and the largest remaining unknown — schema polish
+competes with it for the same two weeks, so treat backlog follow-ups as
+fill-in work, not the critical path.
 
 **This does not lower the bar.** Rigor is what keeps a two-week push from
 becoming a four-week one. RLS still ships in the same migration as its table,
@@ -248,13 +267,15 @@ realtyworks/
 │   │   ├── supabase/
 │   │   │   ├── client.ts           # browser client
 │   │   │   ├── server.ts           # server client (cookies/SSR)
-│   │   │   └── middleware.ts       # session refresh
+│   │   │   ├── proxy.ts            # session refresh (called by src/proxy.ts)
+│   │   │   └── env.ts              # validated NEXT_PUBLIC_SUPABASE_* config
 │   │   ├── database.types.ts       # GENERATED — never hand-edit
 │   │   └── utils.ts
 │   ├── server/                     # SERVER-ONLY — never imported by client
 │   │   ├── actions/                # server actions ("use server")
 │   │   └── queries/                # data-fetching helpers
-│   └── schemas/                    # zod schemas (shared client+server validation)
+│   ├── schemas/                    # zod schemas (shared client+server validation)
+│   └── proxy.ts                    # Next 16 root convention (was middleware.ts)
 ├── supabase/
 │   ├── migrations/                 # timestamped SQL — SOURCE OF TRUTH (RLS ships with its table)
 │   ├── functions/                  # edge functions (not created until needed)
@@ -351,6 +372,11 @@ See §7. Should be a weekend job, not a rewrite, if §5/§7 rules are followed.
 
 - **Migrations are the source of truth.** All schema/RLS changes via numbered
   migration files. No dashboard click-ops, ever.
+- **Forward-only past `main`.** Since 2026-07-21 the migration set is merged to
+  `main`. A migration that has reached `main` is immutable — fix or change it
+  with a **new** timestamped migration, never by editing the merged file.
+  (Editing is only ever an option for a migration still unmerged on a local
+  branch, and only before anyone else's tree has applied it.)
 - **RLS from day one.** Every table ships with its RLS policy in the same
   migration. Retrofitting RLS is not allowed.
 - **Everything via env vars.** No hardcoded URLs, keys, or config. `.env.example`
