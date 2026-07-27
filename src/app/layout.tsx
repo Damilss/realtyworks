@@ -25,7 +25,10 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className={`${geistSans.variable} ${geistMono.variable}`}>
-      <body>{children}</body>
+      {/* globals.css maps --font-sans to Geist via @theme inline, but nothing
+          applied it — without `font-sans` the app renders in the browser
+          default and the loaded font is dead weight. */}
+      <body className="font-sans antialiased">{children}</body>
     </html>
   );
 }
