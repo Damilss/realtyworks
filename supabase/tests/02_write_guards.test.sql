@@ -8,7 +8,7 @@ begin;
 create extension if not exists pgtap with schema extensions;
 set search_path to public, extensions;
 
-select plan(46);
+select plan(53);
 
 -- ── vendor write surface ────────────────────────────────────────────────────
 do $$
@@ -504,6 +504,105 @@ select is(
   (select allowed_mime_types from storage.buckets where id = 'work-order-attachments'),
   array['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'application/pdf'],
   'a cleared allowed_mime_types allowlist is reasserted on conflict'
+);
+
+-- ── final-landlord deletes: direct and auth.users cascade ───────────────────
+-- Use disposable landlords with no RESTRICT-linked history so the assertions
+-- reach the profile trigger, rather than succeeding for an unrelated FK reason.
+-- Once both exist, demote the seeded landlord so these two form an isolated
+-- two-landlord state. The surrounding transaction rolls every fixture back.
+do $$
+begin
+  perform set_config('request.jwt.claims', '', true);
+end $$;
+
+insert into auth.users
+  (instance_id, id, aud, role, email, encrypted_password, email_confirmed_at,
+   raw_app_meta_data, raw_user_meta_data, created_at, updated_at,
+   confirmation_token, recovery_token, email_change, email_change_token_new,
+   email_change_token_current)
+values
+  ('00000000-0000-0000-0000-000000000000',
+   '00000000-0000-0000-0000-0000000000a1',
+   'authenticated', 'authenticated', 'landlord-delete-a@realtyworks.test',
+   extensions.crypt('password123', extensions.gen_salt('bf')), now(),
+   '{"provider": "email", "providers": ["email"], "app_role": "landlord"}',
+   '{"full_name": "Disposable Landlord A"}',
+   now(), now(), '', '', '', '', ''),
+  ('00000000-0000-0000-0000-000000000000',
+   '00000000-0000-0000-0000-0000000000a2',
+   'authenticated', 'authenticated', 'landlord-delete-b@realtyworks.test',
+   extensions.crypt('password123', extensions.gen_salt('bf')), now(),
+   '{"provider": "email", "providers": ["email"], "app_role": "landlord"}',
+   '{"full_name": "Disposable Landlord B"}',
+   now(), now(), '', '', '', '', '');
+
+update public.profiles
+set role = 'manager'
+where id = '00000000-0000-0000-0000-000000000001';
+
+set local role service_role;
+
+select lives_ok(
+  $$delete from public.profiles
+    where id = '00000000-0000-0000-0000-0000000000a1'$$,
+  'a privileged direct delete may remove a non-final landlord profile'
+);
+
+reset role;
+
+select is(
+  (select count(*) from public.profiles
+   where id = '00000000-0000-0000-0000-0000000000a1')::int,
+  0,
+  'the non-final landlord profile was deleted'
+);
+
+set local role service_role;
+
+select throws_ok(
+  $$delete from public.profiles
+    where id = '00000000-0000-0000-0000-0000000000a2'$$,
+  '42501', 'cannot delete the last landlord',
+  'a privileged direct delete cannot remove the final landlord profile'
+);
+
+reset role;
+
+select is(
+  (select count(*) from public.profiles
+   where id = '00000000-0000-0000-0000-0000000000a2')::int,
+  1,
+  'the final landlord profile survives the refused direct delete'
+);
+
+-- Supabase reserves auth-admin membership to superusers, while the CLI's pgTAP
+-- connection is intentionally non-superuser. Assert the definer boundary that
+-- lets the production auth-admin trigger inspect profiles, then delete the auth
+-- parent as the test owner to exercise the exact same FK cascade path.
+select is(
+  (select p.prosecdef
+   from pg_proc p
+   join pg_namespace n on n.oid = p.pronamespace
+   where n.nspname = 'public' and p.proname = 'guard_profile_delete'),
+  true,
+  'the delete guard runs as definer for auth-admin cascades'
+);
+
+select throws_ok(
+  $$delete from auth.users
+    where id = '00000000-0000-0000-0000-0000000000a2'$$,
+  '42501', 'cannot delete the last landlord',
+  'the auth.users cascade cannot remove the final landlord profile'
+);
+
+select is(
+  (select count(*)
+   from auth.users u
+   join public.profiles p on p.id = u.id
+   where u.id = '00000000-0000-0000-0000-0000000000a2')::int,
+  1,
+  'the refused auth-admin cascade preserves both the auth user and profile'
 );
 
 select * from finish();

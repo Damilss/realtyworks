@@ -60,6 +60,17 @@ Pick them off at your discretion.
 
 ## ✅ Done (kept for the paper trail)
 
+### ✅ Guard deletion of the final landlord profile (2026-07-27)
+A forward migration chose the database hard-block semantics from the review:
+`BEFORE DELETE` now refuses to remove the final landlord profile with a loud
+`42501`, including when the delete reaches `profiles` through the
+`auth.users` cascade. Landlord deletes take the same transaction advisory lock
+as demotions before checking for a replacement, so concurrent removals are
+serialized against each other. An administrator must promote another landlord
+before deleting the current final one. pgTAP exercises a successful non-final
+direct delete, a refused final direct delete, and the `auth.users` cascade while
+confirming the auth user and profile both survive the failed transaction.
+
 ### ✅ GitHub repo scaffolding (2026-07-27, issue #31)
 `.github/pull_request_template.md`, three issue forms (`bug` · `feature` ·
 `chore`) plus `config.yml`, `.github/CODEOWNERS`, `CONTRIBUTING.md`, and
@@ -320,27 +331,6 @@ child rows — so re-widening the grant fails CI.
 ---
 
 ## 🟡 Medium
-
-### 🟡 Guard deletion of the final landlord profile
-**Why:** The last-landlord guard is an `UPDATE`-only trigger, so deletion walks
-around it. An auth-admin flow deleting a landlord with no RESTRICT-linked history
-cascades `auth.users` → a profile `DELETE` and the trigger never fires. Deleting
-the final landlord leaves **no caller able to use `set_user_role`** — role
-management bricked with no in-app recovery — and the `DELETE` path also bypasses
-the advisory lock that serializes concurrent demotions.
-`supabase/migrations/20260717120100_create_profiles.sql:123-125`
-(PR review `dev` → `main`, 2026-07-21).
-**Do:** new migration extending the guard to `DELETE` under the **same advisory
-lock** as the UPDATE path. Settle the semantics first: (a) `BEFORE DELETE` raises
-on the last landlord — safest, forces promoting a replacement, and makes the
-`auth.users` cascade error rather than silently proceed; or (b) enforce it in
-every admin deletion path, leaving the DB permissive — weaker, and `CLAUDE.md` §2
-puts integrity in the DB, so (a) is the default unless the cascade makes it
-unworkable. Verify the choice against the `auth.users` cascade specifically —
-that's the path that doesn't go through app code.
-**Done when:** deleting the last landlord fails on both the direct and
-`auth.users`-cascade paths, covered by pgTAP, with the chosen semantics recorded
-in the migration comment.
 
 ### 🟡 Trim required text fields before the length CHECK (issues #75, #77)
 **Why:** Round 5 fixed `city`/`state`/`postal_code` with `char_length(trim(...)) > 0`
