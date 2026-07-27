@@ -17,6 +17,18 @@ a link, a tap, no password, no signup form, ever. From our side, nothing about
 the architecture bends — `auth.uid()` exists, RLS works uniformly, and the
 activity trail names a person, not "someone with a valid link."
 
+**Update (2026-07-27): self-service signup is open, and this design is
+unchanged.** A vendor *can* now create their own account at `/signup` — but an
+account is not access. Signup produces a `vendor` profile with **no
+`vendors.profile_id` link**, so `current_vendor_id()` is NULL and every
+vendor-scoped policy arm returns nothing: no jobs, no properties, no
+attachments. The row that grants access is still created by staff, and the link
+below is still how the vendor reaches it. Read "no signup flow" throughout this
+doc as *no signup flow the vendor is ever asked to complete* — which is the
+claim that mattered. The one new wrinkle for the invite flow (§6): the auth user
+may already exist when staff go to invite, so the invite has to link an existing
+account as readily as it creates one.
+
 ---
 
 ## 1. Why links, not signups

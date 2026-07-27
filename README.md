@@ -8,8 +8,10 @@ work orders, vendor coordination, documentation, and audit-ready records.
 
 > **Status:** MVP / in active development — Phases 1–2 complete;
 > **Phase 3 (the vertical slice) is in progress** (as of 2026-07-27). The
-> Tailwind + shadcn/ui toolkit is installed; the auth loop (login → session-gated
-> shell) is the current focus.
+> Tailwind + shadcn/ui toolkit and the auth loop (login → signup →
+> session-gated shell → work-order list) have landed; the work-order half —
+> create, assign a vendor, vendor status update + photo, activity trail — is
+> the current focus.
 > **License:** Proprietary (see [`LICENSE.md`](LICENSE.md))
 
 ---
@@ -59,7 +61,7 @@ reporting above.
 | Package manager | **pnpm** `11.13.1` (pinned via `packageManager`) |
 | Runtime | Node **24** (pinned in `.nvmrc`, matched by CI) |
 | Unit tests | Vitest |
-| E2E tests | Playwright (smoke test also runs in CI — see [docs/playwright.md](docs/playwright.md)) |
+| E2E tests | Playwright (auth-loop suite runs in CI against a real seeded stack — see [docs/playwright.md](docs/playwright.md)) |
 | Database | Supabase (Postgres 17, Auth, Storage, RLS) — local stack via the pinned `supabase` CLI; schema lives in `supabase/migrations/` (RLS ships with each table), pgTAP tests in `supabase/tests/` |
 | Lint / format | ESLint (`next/core-web-vitals` + TypeScript) · Prettier |
 | Git hygiene | Husky + lint-staged · commitlint (conventional commits) · gitleaks |
@@ -70,9 +72,11 @@ the root `middleware` convention to `proxy` — it is **not** `middleware.ts`).
 Both clients use the publishable key and the caller's session, so RLS applies
 identically on the server and in the browser; neither is privileged.
 
-Tailwind CSS + shadcn/ui (zinc) landed 2026-07-27 (Phase 3). Planned for a
-later phase (decided, not yet installed): Sentry (Phase 4). There is **no
-separate backend service** — backend logic
+Tailwind CSS + shadcn/ui (zinc) and the auth loop both landed 2026-07-27
+(Phase 3): zod schemas in `src/schemas/`, the session data-access layer and
+server actions in `src/server/`, and the `(auth)` / `(dashboard)` route groups.
+Planned for a later phase (decided, not yet installed): Sentry (Phase 4). There
+is **no separate backend service** — backend logic
 lives in Postgres (RLS/constraints), Next.js server actions/route handlers, and
 Supabase Edge Functions. See `CLAUDE.md` §2.
 
@@ -135,8 +139,19 @@ quotes its values; Next.js strips the quotes when it loads the file.
 Then run the app:
 
 ```bash
-pnpm dev              # http://localhost:3000
+pnpm dev              # http://127.0.0.1:3000
 ```
+
+`/` redirects to `/dashboard`, which redirects to **`/login`** when there is no
+session. **`/signup`** is open self-registration (name, email, password,
+phone) — but a self-registered account is deliberately inert: it lands as an
+unlinked `vendor`, so RLS returns nothing until staff link it to a `vendors`
+row, and the dashboard says as much instead of rendering an empty table.
+
+Prefer `127.0.0.1` over `localhost` for the dev server. It is what
+`[auth] site_url` in `supabase/config.toml` and the Playwright `baseURL` both
+use, and cookies are scoped per host — mixing the two hostnames strands a
+session on whichever one issued it.
 
 Other local-database commands:
 
@@ -147,7 +162,9 @@ pnpm exec supabase stop       # shut the stack down
 ```
 
 Seeded logins (landlord, manager, vendor) come from `supabase/seed.sql`, which
-`db reset` loads.
+`db reset` loads — `<role>@realtyworks.test` / `password123`. Signing in as each
+is the fastest way to see RLS working: the manager sees all five seeded work
+orders, the vendor only the three assigned to them.
 
 ### Additional checkouts (git worktrees)
 
@@ -198,15 +215,19 @@ All green means you're good to go.
 ```bash
 pnpm test                              # unit (Vitest), one-shot
 pnpm exec playwright install chromium  # one-time per machine: download the E2E browser
+pnpm exec supabase db reset            # E2E needs the seeded known-good state
 pnpm test:e2e                          # E2E (Playwright boots the dev server itself)
 ```
 
 `pnpm test:e2e` boots the app via `pnpm dev`, so it needs the same `.env.local`
-as the app — without it every request 500s and the run fails on the
-`webServer` timeout, not on an assertion. The variables must be *present*; they
-don't have to point at a live stack, since with no session cookie the refresh
-short-circuits before any network call. (That's why CI's `e2e` job sets
-placeholders and runs no Supabase — see `.github/workflows/ci.yml`.)
+as the app — without it every request 500s and the run fails on the `webServer`
+timeout, not on an assertion. Since the auth loop landed, the specs sign in as
+the seeded users and assert exact row counts, so the variables must point at a
+**running, freshly reset** stack; placeholders no longer work. The signup spec
+creates a real auth user, so a second run without `db reset` fails on "account
+already exists". CI's `e2e` job does exactly this — boots a stack, resets it,
+writes `.env.local` from `supabase status` — see
+[docs/playwright.md](docs/playwright.md).
 
 Full detail — what each runner collects and how they stay out of each other's
 way — is in [Testing](#testing) below and [docs/playwright.md](docs/playwright.md).
@@ -215,7 +236,7 @@ way — is in [Testing](#testing) below and [docs/playwright.md](docs/playwright
 
 | Command | What it does |
 | --- | --- |
-| `pnpm dev` | Dev server at http://localhost:3000 |
+| `pnpm dev` | Dev server at http://127.0.0.1:3000 |
 | `pnpm build` | Production build (`next build`) |
 | `pnpm start` | Serve the production build |
 | `pnpm lint` | ESLint |
@@ -232,12 +253,14 @@ way — is in [Testing](#testing) below and [docs/playwright.md](docs/playwright
   `tests/unit/**/*.{test,spec}.{ts,tsx}` only. Run one file with
   `pnpm exec vitest run src/path/to/file.test.ts`, or filter by name with
   `pnpm exec vitest run -t "name of test"`.
-- **E2E (Playwright)** — owns `tests/e2e/`; currently a single smoke test.
-  Requires a one-time browser download:
-  `pnpm exec playwright install chromium`. The smoke test **does** run in CI
-  (the parallel `e2e` job in `.github/workflows/ci.yml`) — proving the app
-  boots, not just compiles; only real end-to-end flows wait for the Phase 3
-  vertical slice. Full guide: [docs/playwright.md](docs/playwright.md).
+- **E2E (Playwright)** — owns `tests/e2e/`: the boot smoke test plus
+  `auth.spec.ts`, which drives the real auth loop (sign in as each seeded role,
+  self-register, wrong password, signed-out redirect, sign out). Requires a
+  one-time browser download: `pnpm exec playwright install chromium`, and a
+  seeded local stack. Both specs run in CI (the parallel `e2e` job in
+  `.github/workflows/ci.yml`), which boots its own Supabase stack — so CI
+  proves the app runs *and* that RLS holds through a real session, not just
+  that it compiles. Full guide: [docs/playwright.md](docs/playwright.md).
 
 The two runners never collect each other's files.
 
@@ -269,10 +292,11 @@ Three jobs run in parallel. `verify` runs **lint → format check → typecheck 
 unit tests → build → audit**; every check step after the first uses
 `if: ${{ !cancelled() }}`, so a single run reports *every* failure rather than
 stopping at the first. pnpm's store and the Next.js build cache are cached
-between runs. `e2e` boots the app and runs the Playwright smoke test. `db` boots
-the local Supabase stack and runs the pgTAP suite from `supabase/tests/`, so an
-RLS or write-guard regression fails CI rather than merging green — it's the
-slowest of the three (cold Docker image pulls). Details:
+between runs. `e2e` boots a local Supabase stack, resets it to the seeded state,
+then boots the app and runs the Playwright auth-loop specs against it. `db`
+boots the same stack and runs the pgTAP suite from `supabase/tests/`, so an
+RLS or write-guard regression fails CI rather than merging green. Both pull
+Docker images cold, so they, not `verify`, set the wall-clock. Details:
 [docs/tooling.md](docs/tooling.md).
 
 The final step, `pnpm audit --audit-level=high`, is a blocking dependency
@@ -313,12 +337,17 @@ realtyworks/
 ├── public/
 ├── src/
 │   ├── app/                # Next.js App Router · globals.css carries the shadcn zinc theme
+│   │   ├── (auth)/         # login · signup (signed-out route group)
+│   │   └── (dashboard)/    # authed shell + /dashboard work-order list
 │   ├── components/
-│   │   └── ui/             # shadcn/ui primitives (button; add more via `shadcn add`)
+│   │   ├── features/       # composed, domain-specific components (work-orders/)
+│   │   └── ui/             # shadcn/ui primitives (button, input, label, card, table, badge)
 │   ├── lib/
 │   │   ├── supabase/       # client.ts (browser) · server.ts (per-request) · proxy.ts (session refresh) · env.ts (validated config)
 │   │   ├── utils.ts        # cn() class-name helper (clsx + tailwind-merge)
 │   │   └── database.types.ts   # GENERATED from the schema — never hand-edited
+│   ├── schemas/            # zod schemas shared by client + server (auth.ts)
+│   ├── server/             # actions/ (server actions) · queries/ (server-only DAL)
 │   └── proxy.ts            # Next.js 16 root convention (renamed from middleware.ts)
 ├── supabase/
 │   ├── migrations/         # timestamped SQL — SOURCE OF TRUTH (RLS ships with its table)
@@ -327,7 +356,7 @@ realtyworks/
 │   └── config.toml
 ├── tests/
 │   ├── unit/               # Vitest (DOM harness)
-│   └── e2e/                # Playwright specs (smoke test)
+│   └── e2e/                # Playwright specs (smoke.spec.ts · auth.spec.ts)
 ├── .env.example            # committed template — documents every required var
 ├── .gitleaks.toml          # secret-scanning config
 ├── .nvmrc                  # Node 24
@@ -339,9 +368,15 @@ realtyworks/
 └── CLAUDE.md               # engineering source of truth (architecture, phases, rules)
 ```
 
-The rest of the target application structure (`src/server/`, `src/schemas/`, …)
-is specified in `CLAUDE.md` §3 and gets created as Phase 3 lands — not
-speculatively. (`src/components/` arrived with the UI toolkit on 2026-07-27.)
+The rest of the target structure (`src/app/api/`, `supabase/functions/`) is
+specified in `CLAUDE.md` §3 and gets created when something needs it — not
+speculatively. (`src/components/`, `src/schemas/`, and `src/server/` all
+arrived with the UI toolkit and auth loop on 2026-07-27.)
+
+`src/server/queries/` is server-only and says so in code (`import
+"server-only"`, which fails the build if client code imports it).
+`src/server/actions/` is the deliberate exception — client components import
+server actions, and `"use server"` keeps the implementation out of the bundle.
 
 ## Documentation index
 
@@ -367,7 +402,7 @@ speculatively. (`src/components/` arrived with the UI toolkit on 2026-07-27.)
 | --- | --- | --- |
 | 1 — Foundations | Tooling, CI, hooks, security scanning on a near-empty app | ✅ Done |
 | 2 — Supabase | Local stack, migrations (RLS from day one), seed data, `@supabase/ssr` clients | ✅ Done — schema, RLS, seed, and pgTAP suite merged to `main` 2026-07-21; clients + session-refresh proxy landed on top |
-| 3 — Vertical slice | One full path: manager → work order → vendor → activity log | 🚧 In progress — UI toolkit (Tailwind + shadcn/ui, zinc) installed 2026-07-27; auth loop next |
+| 3 — Vertical slice | One full path: manager → work order → vendor → activity log | 🚧 In progress — UI toolkit + auth loop (login/signup, session-gated shell, work-order list, Playwright coverage) landed 2026-07-27; create/assign work orders next |
 | 4 — Hosted deploy | Vercel + Supabase Cloud, PR previews, Sentry | Planned |
 | 5 — Breadth | More features, minimal reports, SMS/notifications, PWA install layer | Planned |
 | 6 — Accounting & rent tracking | Rent roll, ledger, cost rollups — server-side, append-only | Late stage |

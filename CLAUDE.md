@@ -11,7 +11,7 @@ Read this fully before generating code, scaffolding, or migrations.
 
 **Package manager is `pnpm` (`pnpm@11.13.1`), not npm.** Node is pinned to
 **24** (`.nvmrc`, matched by CI). Stack versions are new and have breaking
-changes: **Next.js 16.2.6**, **React 19.2.4**. Per `AGENTS.md`, read the
+changes: **Next.js 16.2.11**, **React 19.2.4**. Per `AGENTS.md`, read the
 relevant guide in `node_modules/next/dist/docs/` (`01-app`, `02-pages`,
 `03-architecture`, …) before writing Next.js code — do not assume
 training-data APIs.
@@ -19,13 +19,14 @@ training-data APIs.
 ### Commands
 ```bash
 pnpm install            # install deps (CI uses --frozen-lockfile)
-pnpm dev                # dev server, http://localhost:3000
+pnpm dev                # dev server, http://127.0.0.1:3000 (matches [auth] site_url)
 pnpm build              # production build (next build)
 pnpm start              # serve the production build
 pnpm lint               # eslint (next core-web-vitals + typescript)
 pnpm typecheck          # tsc --noEmit (strict)
 pnpm test               # vitest run --passWithNoTests
-pnpm test:e2e           # playwright smoke test (also runs in CI; boots the dev server itself)
+pnpm test:e2e           # playwright auth-loop suite (also runs in CI; boots the dev
+                        # server itself, but needs a seeded local stack + .env.local)
 pnpm format             # prettier --write .
 pnpm format:check       # prettier --check . (CI gate; *.md is ignored)
 ```
@@ -55,11 +56,16 @@ via the `@/*` alias (`@/* → ./src/*`, `tsconfig.json`).
 **CI** (`.github/workflows/ci.yml`, on PR + push to `main`/`dev`): the `verify` job
 runs lint → format:check → typecheck → test → build → audit. Each check step
 after the first uses `if: !cancelled()` so one run reports *every* failure, not
-just the first. A parallel `e2e` job runs the Playwright smoke test (boots the
-app, Chromium only, HTML report uploaded as an artifact) — proving the app
-*runs*, not just that it compiles. A parallel `db` job boots the local Supabase
-stack and runs the pgTAP suite (`supabase test db`), so an RLS or write-guard
-regression fails CI instead of merging green.
+just the first. A parallel `e2e` job boots a local Supabase stack
+(`supabase start -x …` → `db reset` → write `.env.local` from `supabase
+status`) and runs the Playwright auth-loop specs against it (Chromium only,
+HTML report uploaded as an artifact) — proving the app *runs* and that RLS
+holds through a real session, not just that it compiles. That job sets no
+`NEXT_PUBLIC_SUPABASE_*` of its own on purpose: process env outranks
+`.env.local`, so a leftover placeholder would silently outrank the real values.
+A parallel `db` job boots the same stack and runs the pgTAP suite
+(`supabase test db`), so an RLS or write-guard regression fails CI instead of
+merging green.
 The audit step (`pnpm audit --audit-level=high`) is blocking — CI fails on any
 high/critical advisory. Two more workflows: gitleaks secret scan + Semgrep
 SAST (`security.yml`, PR + push to `main`/`dev`; semgrep is blocking, findings
@@ -93,10 +99,14 @@ Verify before assuming they exist:
   deletes + role management; work-order delete only through the coordinated
   server action); all staff see all properties; vendors scoped to assigned work
   orders (columns guarded by trigger); coordinated work-order hard delete
-  removes Storage objects before cascading activity/attachment metadata. Signup
-  is invite-only (`[auth] enable_signup =
-  false`; `[auth.email].enable_signup` must STAY true — off kills logins,
-  see config.toml).
+  removes Storage objects before cascading activity/attachment metadata.
+  **Signup is open** as of 2026-07-27 (`[auth] enable_signup = true`), reversing
+  the earlier invite-only call — safe because the role comes only from
+  server-set `raw_app_meta_data`, so a self-registration is an unlinked
+  `vendor` that can read nothing (see the auth-loop bullet below, and
+  `docs/schema/my_schema_writeup.md` for the reversal's paper trail).
+  Unchanged gotcha: `[auth.email].enable_signup` must STAY `true` — off kills
+  logins, see config.toml.
 - **In place — foundations:** Husky (pre-commit + commit-msg), commitlint,
   lint-staged, Vitest DOM harness (`tests/unit/`), Playwright
   (+ `tests/e2e/smoke.spec.ts`), gitleaks (CI + pre-commit), Semgrep SAST
@@ -121,10 +131,37 @@ Verify before assuming they exist:
   `shadcn` CLI dropped the classic zinc/neutral base colors for named
   "presets", so the toolkit was scaffolded from the registry's zinc tokens
   directly — add further primitives with `pnpm dlx shadcn@latest add <name>`.)
-- **Phase 3 (the vertical slice) is in progress.** UI toolkit landed
-  2026-07-27; the auth loop (login → session-gated shell) is the next work.
-  Schema-review follow-ups are tracked in `docs/backlog.md`, not blockers on it.
-- **Not yet created:** `src/server/`, `src/schemas/`, `supabase/functions/`.
+- **In place — auth loop (2026-07-27):** `src/schemas/auth.ts` (zod v4
+  `loginSchema` / `signupSchema` / `normalizePhone`), `src/server/queries/`
+  (`session.ts` — the DAL: `getSession`, `requireSession`, `getCurrentProfile`,
+  `isStaff`, `cache()`-memoized behind `import "server-only"`; `work-orders.ts`
+  — `listWorkOrders()`), `src/server/actions/auth.ts` (`signIn` · `signUp` ·
+  `signOut`), the `(auth)` route group (`/login` + `/signup`, `useActionState`
+  client forms), the `(dashboard)` shell (name, role badge, sign-out **form
+  POST**) and `/dashboard` (work-order list, plus a pending-access state for an
+  account nothing is linked to). `/` is now just `redirect("/dashboard")`. New
+  primitives: `input`, `label`, `card`, `table`, `badge`; new deps: `zod`,
+  `server-only`. **Auth checks live in pages and the DAL, never in a layout** —
+  Next.js Partial Rendering means a layout check stops running on client-side
+  navigation between sibling routes. Self-service signup opened in the same
+  change; the fail-safe is that a self-registration is a `vendor` with no
+  `vendors` row, so `current_vendor_id()` is NULL and every vendor-scoped
+  policy arm returns nothing (pinned by
+  `supabase/tests/03_signup_defaults.test.sql`). Forward migration
+  `20260727140000_handle_new_user_phone_from_metadata.sql` makes
+  `handle_new_user()` read the signup form's phone out of `raw_user_meta_data`
+  (`auth.users.phone` still wins when set) and store whitespace-only name/phone
+  as NULL. Two accepted risks, both in `docs/backlog.md`:
+  `[auth.email] enable_confirmations` is still `false` (must be on before the
+  Phase 4 public deploy), and there is no CAPTCHA —
+  `[auth.rate_limit] sign_in_sign_ups` is the only brake.
+- **Phase 3 (the vertical slice) is in progress.** UI toolkit and the auth loop
+  both landed 2026-07-27; next is the work-order half — create a work order,
+  assign a vendor, vendor status update + photo upload, activity trail. SSO
+  (Google first, then Microsoft, then Apple) is queued as the next PR. Both are
+  tracked in `docs/backlog.md`, along with schema-review follow-ups that are
+  fill-in work, not blockers.
+- **Not yet created:** `supabase/functions/`, `src/app/api/`.
 - When you add the next missing piece, follow §3/§5 exactly (e.g.
   `src/server/` as the trust boundary; schema changes only as new migrations
   with RLS alongside).
@@ -147,8 +184,9 @@ work orders, vendor coordination, documentation, and audit-ready records.
 §1 MVP scope needs to be built, deployed, and usable by then — Phases 1–5 of
 §4, not just the foundations. As of 2026-07-27 Phases 1 and 2 are complete and
 **Phase 3 (the vertical slice) is underway** — the Tailwind + shadcn/ui toolkit
-landed 2026-07-27 and the auth loop is the current focus. It is the largest
-remaining unknown — schema polish competes with it for the same window, so
+and the auth loop both landed 2026-07-27, and the work-order half (create →
+assign → vendor update → activity trail) is the current focus. It is the
+largest remaining unknown — schema polish competes with it for the same window, so
 treat backlog follow-ups as fill-in work, not the critical path.
 
 **This does not lower the bar.** Rigor is what keeps a two-week push from
@@ -315,8 +353,13 @@ realtyworks/
 ```
 
 ### Structure rules
-- `src/server/` is the trust boundary. Client components must never import from
-  it. Enforce with an ESLint import restriction once real code exists.
+- `src/server/` is the trust boundary, with one deliberate seam.
+  `src/server/queries/**` is server-only — every module opens with
+  `import "server-only"`, so pulling one into client code fails the build.
+  `src/server/actions/**` is the exception: client components are *meant* to
+  import server actions, because `"use server"` swaps the body for an RPC
+  reference and the implementation never ships. A lint rule blocking all of
+  `@/server/*` would break the login form; scope one to `queries/` (backlog).
 - `src/schemas/` (zod) is imported by both client and server: validate in both,
   trust only the server. Schemas do NOT live in `src/server/`.
 - `database.types.ts` is generated via `supabase gen types typescript`.
@@ -347,11 +390,15 @@ the table it protects. Seed file with 3 test users (landlord, manager, vendor),
 sample properties, a vendor, work orders in varied states. One command resets
 local to a known-good state.
 
-**Phase 3 — One vertical slice** *(in progress — started 2026-07-27; UI toolkit landed)*
+**Phase 3 — One vertical slice** *(in progress — UI toolkit + auth loop landed 2026-07-27)*
 Exactly one full path, nothing else: manager logs in → creates work order →
 assigns vendor → vendor logs in → vendor updates status + uploads photo →
 activity log reflects all of it → manager sees it. Exercises auth, RLS,
 mutations, storage, activity trail before the pattern is duplicated.
+**Done:** login/signup, the session-gated shell, and the work-order list, with
+Playwright driving all of it against a seeded stack. **Remaining:** create a
+work order, assign a vendor, the vendor status update + photo upload, and the
+activity trail rendered back to the manager.
 
 **Phase 4 — Hosted deployment**
 Vercel + Supabase Cloud free tier. PR preview deploys, Sentry wired, prod
