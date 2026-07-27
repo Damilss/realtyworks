@@ -122,7 +122,7 @@ single Playwright smoke spec (`tests/e2e/smoke.spec.ts`) — so CI proves the ap
 `playwright install --with-deps chromium` and cached on `~/.cache/ms-playwright`
 (keyed on the lockfile), and the HTML report uploads as a `playwright-report`
 artifact (`if: !cancelled()`) for debugging. Only the smoke spec runs here; real
-flows arrive with the Phase 3 vertical slice. Details: [playwright.md](playwright.md).
+flows arrive as the Phase 3 vertical slice (now in progress) is built. Details: [playwright.md](playwright.md).
 
 ### Database suite (`db` job)
 

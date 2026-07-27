@@ -15,7 +15,7 @@ Pick them off at your discretion.
 
 ---
 
-## State verified (2026-07-21)
+## State verified (2026-07-27)
 
 - `next 16.2.6` / `react 19.2.4` / `pnpm@11.13.1`, Node pinned to 24 (`.nvmrc`).
 - CI runs `lint → format:check → typecheck → test → build → audit` — with
@@ -43,6 +43,12 @@ Pick them off at your discretion.
 - **Branch protection on `main`** enabled 2026-07-20 (web UI). See ✅.
 - `pnpm audit --audit-level=high` **clean** as of 2026-07-21 (fast-uri + sharp
   cleared — see ✅).
+- **UI toolkit installed 2026-07-27** — Tailwind CSS v4 (`@tailwindcss/postcss`,
+  no `tailwind.config.js`) + shadcn/ui (zinc base, new-york) scaffolded from the
+  registry's zinc tokens (the current `shadcn` CLI dropped the classic base
+  colors for named presets); `components.json`, `postcss.config.mjs`,
+  `src/lib/utils.ts`, and `src/components/ui/button.tsx` added; class order
+  enforced by `prettier-plugin-tailwindcss`. **Phase 3 has started.** See ✅.
 
 ### Sharp edges these issues address
 - Native GitHub security features (CodeQL, secret-scanning push-protection,
@@ -383,9 +389,13 @@ from the app.
 
 ## 🟢 Low — general-development runway (Phase 2+, phase-gated)
 
-### 🟢 Phase 2/3 — Tailwind + shadcn/ui (not yet installed) (issue #38)
-Stack is decided (`CLAUDE.md` §2) but absent. Install Tailwind + `prettier-plugin-tailwindcss`,
-init shadcn/ui into `src/components/ui/`.
+### ✅ Phase 3 — Tailwind + shadcn/ui installed (2026-07-27, issue #38)
+Done. Tailwind CSS v4 + `prettier-plugin-tailwindcss` + shadcn/ui (zinc base,
+new-york) scaffolded into `src/components/ui/` (button seeded); `components.json`,
+`postcss.config.mjs`, and `src/lib/utils.ts` (`cn`) in place. The current `shadcn`
+CLI replaced the classic base colors with named presets, so the toolkit was built
+from the registry's zinc tokens directly — add further primitives with
+`pnpm dlx shadcn@latest add <name>`.
 
 ### 🟢 Phase 3 — The one vertical slice
 manager logs in → creates work order → assigns vendor → vendor updates status + uploads photo →
@@ -446,16 +456,18 @@ The `supabase` CLI is ✅ installed as a pinned devDependency (2026-07-17).
 *(Done so far: commitlint → gitleaks → `pnpm audit` gate + osv-scanner → Semgrep
 → audit gate flipped to blocking → Dependabot tuning + `@types/node` pin →
 branch protection → pgTAP in CI → first migrations merged to `main` →
-**Supabase clients: Phase 2 complete**.)*
+**Supabase clients: Phase 2 complete** → **Tailwind + shadcn/ui: Phase 3
+started**.)*
 
 1. **Make the `db` job blocking** — the job has reported a run (PR #78), so it
    is now selectable in Settings → Branches. Two minutes of web UI, and it's
    what makes the pgTAP assertions below actually gate a merge.
-2. **The Phase 3 vertical slice** — now unblocked and the critical path. The
-   deadline (`CLAUDE.md` §1) says start it before the schema-polish items, and
-   trim Phase 5 breadth before trimming this. Start with login: the clients are
-   in place but nothing calls them yet, so the auth routes
-   (`src/app/(auth)/`) and the first server action are the next keystrokes.
+2. **The Phase 3 vertical slice** — **in progress** and the critical path. The
+   deadline (`CLAUDE.md` §1) says stay on it before the schema-polish items, and
+   trim Phase 5 breadth before trimming this. The UI toolkit landed 2026-07-27;
+   **next is the auth loop** — the clients are in place but nothing calls them
+   yet, so the auth routes (`src/app/(auth)/`) and the first server action are
+   the next keystrokes.
 3. **Restrict `service_role` on `work_order_activity`** (🟠 High) — the audit
    trail's append-only guarantee is currently unenforced against the service
    key. A small forward migration; do it alongside Phase 3 rather than ahead

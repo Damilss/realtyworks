@@ -76,12 +76,12 @@ old `CI/CD` type is retired in favor of `ci` — see `commitlint.config.mjs`).
 
 ### Current state vs. the target in §3
 
-The repo is at **Phase 2 (Supabase local + schema + RLS)** — the schema
-shipped 2026-07-17 and **merged to `main` 2026-07-21** (PR #78), so the first
-migrations are now on the default branch and `main` is the migration baseline:
-every schema change from here is a *new* forward migration, never an edit to a
-merged one. Parts of §3's *application* tree are still the **target**, not yet
-present. Verify before assuming they exist:
+The repo is at **Phase 3 (the vertical slice), in progress as of 2026-07-27** —
+Phases 1 and 2 are complete. The schema shipped 2026-07-17 and **merged to
+`main` 2026-07-21** (PR #78), so `main` is the migration baseline: every schema
+change from here is a *new* forward migration, never an edit to a merged one.
+Parts of §3's *application* tree are still the **target**, not yet present.
+Verify before assuming they exist:
 
 - **In place — schema layer (on `main`):** `supabase/` with 9 migrations (all 7 tables,
   RLS + grants + triggers in the same file as each table), `seed.sql`
@@ -112,11 +112,19 @@ present. Verify before assuming they exist:
   guide that says otherwise. Both clients use the *publishable* key and the
   caller's session, so RLS applies identically on server and client; neither is
   privileged.
-- **Phase 3 (the vertical slice) is the next work.** Schema-review follow-ups
-  are tracked in `docs/backlog.md`, not blockers on starting it.
-- **Not yet created:** `src/server/`, `src/schemas/`, `src/components/`,
-  `supabase/functions/`.
-- **Not yet installed:** Tailwind, shadcn/ui.
+- **In place — UI toolkit (2026-07-27):** Tailwind CSS v4
+  (`@tailwindcss/postcss`, no `tailwind.config.js`) + shadcn/ui (zinc base,
+  new-york style) wired via `postcss.config.mjs`, `components.json`, and
+  `src/lib/utils.ts` (`cn`); `src/app/globals.css` carries the zinc theme
+  tokens; `src/components/ui/` seeded with the `button` primitive. Tailwind
+  class order is enforced by `prettier-plugin-tailwindcss`. (The current
+  `shadcn` CLI dropped the classic zinc/neutral base colors for named
+  "presets", so the toolkit was scaffolded from the registry's zinc tokens
+  directly — add further primitives with `pnpm dlx shadcn@latest add <name>`.)
+- **Phase 3 (the vertical slice) is in progress.** UI toolkit landed
+  2026-07-27; the auth loop (login → session-gated shell) is the next work.
+  Schema-review follow-ups are tracked in `docs/backlog.md`, not blockers on it.
+- **Not yet created:** `src/server/`, `src/schemas/`, `supabase/functions/`.
 - When you add the next missing piece, follow §3/§5 exactly (e.g.
   `src/server/` as the trust boundary; schema changes only as new migrations
   with RLS alongside).
@@ -135,13 +143,13 @@ work orders, vendor coordination, documentation, and audit-ready records.
 
 ### Timeline — we are on a clock
 
-**Target: past MVP by early August 2026** (~2 weeks out as of 2026-07-21). The
+**Target: past MVP by early August 2026** (~1 week out as of 2026-07-27). The
 §1 MVP scope needs to be built, deployed, and usable by then — Phases 1–5 of
-§4, not just the foundations. As of 2026-07-21 Phases 1 and 2 are both
-complete (schema on `main`, clients landed); **Phase 3 (the vertical slice) is
-the next real work** and the largest remaining unknown — schema polish
-competes with it for the same two weeks, so treat backlog follow-ups as
-fill-in work, not the critical path.
+§4, not just the foundations. As of 2026-07-27 Phases 1 and 2 are complete and
+**Phase 3 (the vertical slice) is underway** — the Tailwind + shadcn/ui toolkit
+landed 2026-07-27 and the auth loop is the current focus. It is the largest
+remaining unknown — schema polish competes with it for the same window, so
+treat backlog follow-ups as fill-in work, not the critical path.
 
 **This does not lower the bar.** Rigor is what keeps a two-week push from
 becoming a four-week one. RLS still ships in the same migration as its table,
@@ -334,7 +342,7 @@ the table it protects. Seed file with 3 test users (landlord, manager, vendor),
 sample properties, a vendor, work orders in varied states. One command resets
 local to a known-good state.
 
-**Phase 3 — One vertical slice**
+**Phase 3 — One vertical slice** *(in progress — started 2026-07-27; UI toolkit landed)*
 Exactly one full path, nothing else: manager logs in → creates work order →
 assigns vendor → vendor logs in → vendor updates status + uploads photo →
 activity log reflects all of it → manager sees it. Exercises auth, RLS,
