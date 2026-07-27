@@ -23,7 +23,13 @@ supabaseEnv((name, problem) => {
 });
 
 const nextConfig: NextConfig = {
-  /* config options here */
+  // The dev server initializes on `localhost` and blocks cross-origin requests
+  // to dev-only assets from anything else. We address it as 127.0.0.1 — that is
+  // [auth] site_url in supabase/config.toml and the Playwright baseURL, kept
+  // aligned because cookies are scoped per host. Without this the dev server
+  // warns on every e2e run, and a future Next version turns that into a block.
+  // Development only; it has no effect on `next build` or `next start`.
+  allowedDevOrigins: ["127.0.0.1"],
 };
 
 export default nextConfig;
