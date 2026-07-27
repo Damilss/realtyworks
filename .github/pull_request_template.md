@@ -6,7 +6,14 @@
 
 <!-- Two sentences. The diff already shows what changed — say why it changed. -->
 
-Closes #
+<!-- `Refs`, not `Closes`. Closing keywords in a PR description are interpreted
+     ONLY when the PR targets the default branch: "If the pull request targets
+     any other branch, then these keywords are ignored, no links are created,
+     and merging the PR has no effect on the issues." Most PRs here target
+     `dev`, so `Closes` would silently do nothing. Put the closing keyword in
+     the COMMIT message instead — that fires when the commit reaches `main`. -->
+
+Refs #
 
 ## How I verified
 
