@@ -6,9 +6,10 @@ Modern solutions for property management.
 landlords to run real-estate maintenance and repair operations end-to-end:
 work orders, vendor coordination, documentation, and audit-ready records.
 
-> **Status:** MVP / in active development — Phase 2 (Supabase local + schema + RLS)
-> complete: the first migrations merged to `main` 2026-07-21 and the
-> `@supabase/ssr` clients landed on top of them. Phase 3 (the vertical slice) is next.
+> **Status:** MVP / in active development — Phases 1–2 complete;
+> **Phase 3 (the vertical slice) is in progress** (as of 2026-07-27). The
+> Tailwind + shadcn/ui toolkit is installed; the auth loop (login → session-gated
+> shell) is the current focus.
 > **License:** Proprietary (see [`LICENSE.md`](LICENSE.md))
 
 ---
@@ -69,8 +70,9 @@ the root `middleware` convention to `proxy` — it is **not** `middleware.ts`).
 Both clients use the publishable key and the caller's session, so RLS applies
 identically on the server and in the browser; neither is privileged.
 
-Planned for later phases (decided, not yet installed): Tailwind CSS +
-shadcn/ui, Sentry. There is **no separate backend service** — backend logic
+Tailwind CSS + shadcn/ui (zinc) landed 2026-07-27 (Phase 3). Planned for a
+later phase (decided, not yet installed): Sentry (Phase 4). There is **no
+separate backend service** — backend logic
 lives in Postgres (RLS/constraints), Next.js server actions/route handlers, and
 Supabase Edge Functions. See `CLAUDE.md` §2.
 
@@ -307,9 +309,12 @@ realtyworks/
 ├── docs/                   # project docs (see index below) · docs/reports/ = roadbump postmortems
 ├── public/
 ├── src/
-│   ├── app/                # Next.js App Router (near-empty scaffold — Phase 1)
+│   ├── app/                # Next.js App Router · globals.css carries the shadcn zinc theme
+│   ├── components/
+│   │   └── ui/             # shadcn/ui primitives (button; add more via `shadcn add`)
 │   ├── lib/
 │   │   ├── supabase/       # client.ts (browser) · server.ts (per-request) · proxy.ts (session refresh) · env.ts (validated config)
+│   │   ├── utils.ts        # cn() class-name helper (clsx + tailwind-merge)
 │   │   └── database.types.ts   # GENERATED from the schema — never hand-edited
 │   └── proxy.ts            # Next.js 16 root convention (renamed from middleware.ts)
 ├── supabase/
@@ -329,9 +334,9 @@ realtyworks/
 └── CLAUDE.md               # engineering source of truth (architecture, phases, rules)
 ```
 
-The rest of the target application structure (`src/server/`, `src/schemas/`,
-`src/components/`, …) is specified in `CLAUDE.md` §3 and gets created as
-Phase 3 lands — not speculatively.
+The rest of the target application structure (`src/server/`, `src/schemas/`, …)
+is specified in `CLAUDE.md` §3 and gets created as Phase 3 lands — not
+speculatively. (`src/components/` arrived with the UI toolkit on 2026-07-27.)
 
 ## Documentation index
 
@@ -355,7 +360,7 @@ Phase 3 lands — not speculatively.
 | --- | --- | --- |
 | 1 — Foundations | Tooling, CI, hooks, security scanning on a near-empty app | ✅ Done |
 | 2 — Supabase | Local stack, migrations (RLS from day one), seed data, `@supabase/ssr` clients | ✅ Done — schema, RLS, seed, and pgTAP suite merged to `main` 2026-07-21; clients + session-refresh proxy landed on top |
-| 3 — Vertical slice | One full path: manager → work order → vendor → activity log | 🔷 Next |
+| 3 — Vertical slice | One full path: manager → work order → vendor → activity log | 🚧 In progress — UI toolkit (Tailwind + shadcn/ui, zinc) installed 2026-07-27; auth loop next |
 | 4 — Hosted deploy | Vercel + Supabase Cloud, PR previews, Sentry | Planned |
 | 5 — Breadth | More features, minimal reports, SMS/notifications, PWA install layer | Planned |
 | 6 — Accounting & rent tracking | Rent roll, ledger, cost rollups — server-side, append-only | Late stage |
