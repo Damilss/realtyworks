@@ -180,7 +180,14 @@ is the record of *why*; the diff is only the *what*.
 
 1. Open the PR. `.github/pull_request_template.md` prefills it; fill it in
    rather than deleting it. Base is `dev` unless the branch was cut from `main`.
-2. Put `Closes #NN` in the description so the issue closes on merge.
+2. Reference the issue as `Refs #NN` — **not** `Closes #NN`. Closing keywords in
+   a PR description are interpreted only when the PR targets the *default*
+   branch; target any other branch and "these keywords are ignored, no links are
+   created, and merging the PR has no effect on the issues." Since PRs here
+   normally target `dev`, `Closes` in a PR body silently does nothing. **Put the
+   closing keyword in the commit message instead** — a commit-message `Closes
+   #NN` fires when that commit reaches `main`, which is exactly what the
+   `dev → main` merge does. That is the only form that survives this flow.
 3. **Read your own diff in the Files-changed tab before merging.** This is the
    step that actually catches things. GitHub won't let you approve your own PR,
    so the review *is* the reading, not the button.
