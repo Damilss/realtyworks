@@ -247,6 +247,8 @@ How each rule is enforced (brainstorming §4 — RLS picks rows, not columns):
 - **Signup** → `enable_signup = false` in config.toml (invite-only; magic-link
   *login* unaffected). Belt: even if re-enabled, a stranger lands as an
   unlinked vendor and can see nothing.
+  **Reversed 2026-07-27 — signup is now open; see the last section of this
+  file.** The belt quoted here is what made that cheap.
 - `auto_expose_new_tables` is off → every table/function carries explicit
   grants (`anon`: none anywhere; `service_role`: explicit `grant all`).
 
@@ -298,3 +300,66 @@ append-only activity, self-escalation blocks, and anon isolation.
 - Whether vendors need a narrowed work-order view (they can currently read
   `description` and `cost_cents` on assigned jobs — so keep gate codes and
   tenant PII out of `description`; `vendor-access.md` §3a).
+
+# Decision reversed — self-service signup is open (2026-07-27)
+
+"Signup → invite-only" above (§*Who can do what*) was settled 2026-07-17 and is
+**no longer true**. `[auth] enable_signup` is `true`, and `/signup` collects
+full name, email, password, and phone. The original entry stays as written; this
+is the record of it changing.
+
+**What drove it.** Invite-only presumed an administrative surface that does not
+exist. Every account had to come from a service-role `auth.admin.createUser` /
+`inviteUserByEmail` call — i.e. from a script or the Supabase console — so there
+was no path into the product from inside the product, and the Phase 3 auth loop
+would have shipped a login page nobody could get an account for. Building the
+admin invite console first is real work that the vertical slice does not need,
+and the vendor path was never a signup anyway (`vendor-access.md`: magic link,
+account created *for* them). Opening signup was the smaller change, and the belt
+above says why it costs nothing.
+
+**Why the fail-safe holds — the four links in the chain.** Re-read these before
+touching any of them; the entire authorization model now rests on this list, not
+on a config flag.
+
+1. `handle_new_user()` reads the role from `new.raw_app_meta_data ->> 'app_role'`
+   and from nowhere else, defaulting to `'vendor'`. A client's
+   `signUp({ options: { data } })` lands in **`raw_user_meta_data`**, a
+   different column, which the trigger consults only for `full_name` and
+   `phone`. There is no code path from client input to `profiles.role`.
+2. So **every self-registration is a `vendor`** — and an *unlinked* one, because
+   `vendors.profile_id` is set by staff, not by signup.
+3. An unlinked vendor resolves `current_vendor_id()` to NULL, and every
+   vendor-scoped policy arm is keyed on it. NULL matches nothing: zero work
+   orders, zero properties, zero units, zero activity, zero attachments, zero
+   rows through `staff_directory`. They can read their own `profiles` row and
+   that is the whole surface. (`/dashboard` renders a "your account isn't linked
+   yet" state rather than an empty table, so this reads as pending setup instead
+   of a broken page.)
+4. Staff roles still arrive only two ways, both server-side: a
+   create/invite that sets `app_metadata.app_role`, or `set_user_role()` — the
+   landlord-only definer RPC that refuses self-promotion. **Self-signup cannot
+   produce staff.**
+
+Pinned, not asserted: `supabase/tests/03_signup_defaults.test.sql` (9
+assertions) runs in the CI `db` job. The headline case registers a user whose
+`raw_user_meta_data` claims `"app_role": "landlord"` and asserts the profile
+comes out `vendor`; two more assert an unlinked self-registration sees no work
+orders and no properties. Re-widening any of the four links above fails CI.
+
+**Same-day trigger change.** Forward migration
+`20260727140000_handle_new_user_phone_from_metadata.sql`: the trigger read phone
+from `new.phone` (the `auth.users.phone` column, which only SMS signup
+populates), so a phone typed into the email signup form was accepted and
+silently dropped. It now falls back to `raw_user_meta_data ->> 'phone'`, with
+`auth.users.phone` still winning when present, and wraps both text values in
+`nullif(trim(...), '')` so a whitespace-only entry stores as NULL instead of
+satisfying the length CHECKs.
+
+**What opening signup does cost — two accepted risks, both tracked in
+`docs/backlog.md`.** `[auth.email] enable_confirmations` is still `false`, so an
+account can be created against an email address the registrant does not own;
+harmless while such an account can see nothing, but it must be **on before the
+Phase 4 public deploy**. And there is no CAPTCHA — `[auth.rate_limit]
+sign_in_sign_ups` (30 per 5 minutes) is the only brake on automated
+registration.

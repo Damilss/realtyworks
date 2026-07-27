@@ -3,9 +3,17 @@
 End-to-end tests for RealtyWorks. Playwright drives a real browser against the
 running app to verify user-facing behavior.
 
-**Phase 1 scope:** install + a single smoke test only. The smoke test now runs
-in CI (see [CI](#ci) below); real **flows** arrive as the Phase 3 vertical
-slice (now in progress) is built — see `CLAUDE.md` §4.
+**Current scope (since 2026-07-27):** the boot smoke test, plus
+`tests/e2e/auth.spec.ts` — 7 specs driving the Phase 3 auth loop against a
+**real, seeded Supabase stack**. The rest of the vertical slice (create work
+order → assign vendor → status + photo → activity trail) joins as it is built —
+see `CLAUDE.md` §4.
+
+The suite's point is not "a cookie was set." It is that the *same* URL renders
+different rows for different people — the manager sees all five seeded work
+orders, the assigned vendor sees three, a self-registered stranger sees none.
+That is RLS observed through the product, and it is only meaningful against a
+real database.
 
 ---
 
@@ -15,14 +23,20 @@ slice (now in progress) is built — see `CLAUDE.md` §4.
 - **pnpm** (`pnpm@11.13.1`). Do **not** use `npm init playwright` — it writes a
   `package-lock.json`, adds example tests, and drops in its own GitHub Actions
   workflow, none of which we want.
-- A **`.env.local`** with the two `NEXT_PUBLIC_SUPABASE_*` variables. Playwright
-  boots the app itself (see below), and `src/proxy.ts` refreshes the Supabase
-  session on every request — without that config the app 500s on every route
-  and the run fails on the `webServer` timeout rather than on an assertion.
-  Setup is in the [README](../README.md#install--run). The variables must be
-  *present*; they need not point at a live stack, since with no session cookie
-  the refresh short-circuits before any network call — which is exactly why
-  CI's `e2e` job sets placeholders and boots no Supabase.
+- **A running local Supabase stack, freshly reset**
+  (`pnpm exec supabase start` → `pnpm exec supabase db reset`). The specs sign
+  in as the seeded users from `supabase/seed.sql` and assert exact row counts,
+  so they need the known-good state, not merely a migrated database.
+- A **`.env.local`** with the two `NEXT_PUBLIC_SUPABASE_*` variables, pointing
+  at that stack. Playwright boots the app itself (see below), and `src/proxy.ts`
+  refreshes the Supabase session on every request — without the config the app
+  500s on every route and the run fails on the `webServer` timeout rather than
+  on an assertion. Setup is in the [README](../README.md#install--run).
+  **Placeholder values no longer work.** They used to: with no session cookie
+  the refresh short-circuits before any network call, so a smoke test that never
+  logged in was happy with fiction. Most specs here sign in, and fiction fails
+  at the first assertion with a connection error that reads like an application
+  bug.
 
 ## Installation
 
@@ -45,13 +59,34 @@ pnpm exec playwright install firefox webkit
 ## Running the tests
 
 ```bash
-pnpm test:e2e            # run all E2E tests (script in package.json)
+pnpm exec supabase db reset   # known-good state — see "Re-running" below
+pnpm test:e2e                 # run all E2E tests (script in package.json)
 ```
 
 You do **not** need to start the dev server yourself. `playwright.config.ts`
 has a `webServer` block that boots `pnpm dev` automatically, waits for
-`http://localhost:3000`, runs the tests, then shuts it down. (If a dev server is
+`http://127.0.0.1:3000`, runs the tests, then shuts it down. (If a dev server is
 already running locally, Playwright reuses it.)
+
+**`baseURL` is `127.0.0.1`, not `localhost`** — deliberately, and it must stay
+matched to `[auth] site_url` in `supabase/config.toml`. Cookies are scoped per
+host, and the two hostnames are different hosts to a browser: a session
+established through an auth redirect on one is invisible on the other. Nothing
+breaks today, because password sign-in sets the cookie on whatever host served
+the form — it breaks the moment OAuth or an email confirmation link sends the
+user through Supabase and back. `next.config.ts` carries a matching
+`allowedDevOrigins: ["127.0.0.1"]`, because the dev server initializes on
+`localhost` and otherwise warns on every run about cross-origin requests to
+dev-only assets.
+
+### Re-running locally
+
+`auth.spec.ts` has one spec that **writes**: the self-registration case creates
+a real auth user. The address is derived from the worker index rather than
+randomized — a fresh address every run would pass forever while quietly filling
+`auth.users` — so a second run against the same database fails with "account
+already exists." Run `supabase db reset` before each pass. CI gets this for
+free; it resets immediately before Playwright starts.
 
 Useful variants:
 
@@ -69,7 +104,9 @@ pnpm exec playwright show-report            # open the HTML report from the last
 ```
 playwright.config.ts        # config: testDir, baseURL, browser, webServer auto-boot
 tests/e2e/                  # E2E specs (*.spec.ts)
-tests/e2e/smoke.spec.ts     # the current smoke test (app boots + serves a page)
+tests/e2e/smoke.spec.ts     # the app boots + serves a page
+tests/e2e/auth.spec.ts      # the auth loop: sign in as each seeded role, self-register,
+                            # wrong password, signed-out redirect, root redirect, sign out
 ```
 
 Test runners stay separated by directory: **Vitest** collects `src/**` and
@@ -85,7 +122,7 @@ Playwright's generated output (`test-results/`, `playwright-report/`,
 import { test, expect } from "@playwright/test";
 
 test("home page loads", async ({ page }) => {
-  await page.goto("/"); // resolved against baseURL (localhost:3000)
+  await page.goto("/"); // resolved against baseURL (127.0.0.1:3000)
   await expect(page).toHaveTitle(/.+/);
 });
 ```
@@ -98,23 +135,63 @@ test("home page loads", async ({ page }) => {
 - **`Executable doesn't exist ...` / browser missing** — run
   `pnpm exec playwright install chromium`. Installing the npm package alone does
   not download browsers.
-- **Hangs on "waiting for localhost:3000"** — the dev server is slow to boot on
+- **Hangs on "waiting for 127.0.0.1:3000"** — the dev server is slow to boot on
   first run; the config allows 120s. Confirm `pnpm dev` works on its own.
+- **Every login assertion fails / `fetch failed`** — the app is talking to a
+  stack that isn't there. Check that `supabase status` reports running services
+  and that `.env.local` matches its output; a stale URL or key from a previous
+  stack looks exactly like an app bug.
+- **Row counts off by one, or "account already exists"** — the database has
+  drifted from the seed. `pnpm exec supabase db reset`, then re-run.
 - **Wrong Node version** — `nvm use` to match `.nvmrc` (Node 24), the same
   version CI uses.
 
 ## CI
 
-The smoke test runs in CI as a dedicated `e2e` job in
-`.github/workflows/ci.yml` — parallel to the `verify` gate
+The suite runs in CI as a dedicated `e2e` job in `.github/workflows/ci.yml`
+("E2E (Playwright auth loop)") — parallel to the `verify` gate
 (`lint → format:check → typecheck → test → build → audit`, Vitest only), on the
-same triggers (PRs → `main`, pushes to `main`). The job installs deps
-(`--frozen-lockfile`), installs Chromium (`playwright install --with-deps
-chromium`, cached across runs on `~/.cache/ms-playwright`), runs `pnpm
-test:e2e`, and uploads the HTML report as a `playwright-report` artifact for
-debugging. `next build` in `verify` proves the app compiles; this proves it
-boots and renders.
+same triggers (PRs + pushes to `main`/`dev`). The job installs deps
+(`--frozen-lockfile`) and Chromium (`playwright install --with-deps chromium`,
+cached across runs on `~/.cache/ms-playwright`), then — since the auth loop
+landed — stands up a real database before testing:
 
-Only the existing smoke spec runs here — real **flows** join in Phase 3/4 as
-the vertical slice (now in progress) grows enough to drive them. See
-`CLAUDE.md` §4–§5.
+```
+supabase start -x studio,imgproxy,edge-runtime,functions,analytics,vector,inbucket
+supabase db reset
+supabase status -o env … | grep '^NEXT_PUBLIC_' > .env.local
+pnpm run test:e2e
+```
+
+The HTML report uploads as a `playwright-report` artifact for debugging.
+`next build` in `verify` proves the app compiles; this proves it boots,
+authenticates, and enforces RLS.
+
+Four things about that setup are load-bearing:
+
+- **The job sets no `NEXT_PUBLIC_SUPABASE_*` env of its own — and must not.**
+  It used to set placeholders, back when nothing logged in. Those had to be
+  *removed*, not updated: **process env takes precedence over `.env.local` in
+  Next.js**, so a leftover placeholder silently outranks the real values written
+  from `supabase status`, and the app keeps addressing a stack that isn't there.
+  The failure looks like a network error in the application, not a
+  misconfigured job — which is the expensive kind of wrong.
+- **`db reset` is not redundant here** (unlike in the `db` job, where it is kept
+  as an assertion). The specs assert exact row counts against the seeded
+  fixtures, and one of them creates a user, so the run needs the known-good
+  state.
+- **The `grep` is load-bearing.** `supabase status -o env` also prints
+  `SERVICE_ROLE_KEY`, `SECRET_KEY`, and `JWT_SECRET`. None of those belong in a
+  file `next build` inlines into the browser bundle.
+- **The `-x` list mirrors the `db` job**, with the same rule: never exclude `db`
+  or `storage`. `inbucket` is excluded only because
+  `[auth.email] enable_confirmations` is `false` — turning confirmations on
+  (backlog, required before the Phase 4 public deploy) makes signup send mail,
+  and this job will then need the mailbox back.
+
+`timeout-minutes: 20` caps a stack that never reaches healthy, same reasoning as
+the `db` job. Cold image pulls mean this is no longer a fast job — details in
+[tooling.md](tooling.md).
+
+The remaining vertical-slice flows (create → assign → status + photo → activity
+trail) join as they are built. See `CLAUDE.md` §4–§5.

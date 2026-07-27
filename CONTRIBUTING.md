@@ -199,7 +199,7 @@ What the CI jobs prove:
 | Job | Proves |
 | --- | --- |
 | `verify` | lint → format:check → typecheck → test → build → audit. It compiles and is clean. Every step after the first runs on `!cancelled()`, so one run reports *every* failure |
-| `e2e` | Playwright Chromium smoke test — the app actually **runs**, not just compiles |
+| `e2e` | Boots a real Supabase stack, resets it to the seed, and drives the Playwright auth loop in Chromium — the app actually **runs** and RLS holds through a real session, not just compiles |
 | `db` | `supabase db reset` + pgTAP — RLS and write guards still hold. Runs on every PR, **not yet a required check** |
 | `security` | gitleaks full-history secret scan + Semgrep SAST. Both blocking |
 | `osv-scanner` | Lockfile CVEs — weekly, plus every PR into `main`. Advisory |

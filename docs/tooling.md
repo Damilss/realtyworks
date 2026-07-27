@@ -13,7 +13,8 @@ the [README](../README.md#quality-gates); this is the detail.
 | commitlint | `.husky/commit-msg` | every commit |
 | Lint → format → typecheck → test → build | `.github/workflows/ci.yml` | PRs + pushes to `main`/`dev` |
 | `pnpm audit` dependency gate | `.github/workflows/ci.yml` | PRs + pushes to `main`/`dev` |
-| Playwright E2E smoke test | `.github/workflows/ci.yml` | PRs + pushes to `main`/`dev` |
+| Playwright E2E auth loop (boots its own Supabase stack) | `.github/workflows/ci.yml` | PRs + pushes to `main`/`dev` |
+| pgTAP RLS/write-guard suite (`db` job) | `.github/workflows/ci.yml` | PRs + pushes to `main`/`dev` |
 | gitleaks full-history scan | `.github/workflows/security.yml` | PRs + pushes to `main`/`dev` |
 | Semgrep SAST scan | `.github/workflows/security.yml` | PRs + pushes to `main`/`dev` |
 | osv-scanner lockfile CVE scan | `.github/workflows/osv-scanner.yml` | weekly + PRs into `main` + manual |
@@ -113,16 +114,42 @@ pnpm lint && pnpm format:check && pnpm typecheck && pnpm test && pnpm build
 
 Add `pnpm audit --audit-level=high` to preview the audit step too.
 
-### E2E smoke test (`e2e` job)
+### E2E auth loop (`e2e` job)
 
-A second job runs **in parallel** with `verify`, on the same triggers. It boots
-the app (`pnpm dev`, via `playwright.config.ts`'s `webServer`) and runs the
-single Playwright smoke spec (`tests/e2e/smoke.spec.ts`) — so CI proves the app
-*runs*, not just that `next build` compiles it. Chromium is installed with
-`playwright install --with-deps chromium` and cached on `~/.cache/ms-playwright`
-(keyed on the lockfile), and the HTML report uploads as a `playwright-report`
-artifact (`if: !cancelled()`) for debugging. Only the smoke spec runs here; real
-flows arrive as the Phase 3 vertical slice (now in progress) is built. Details: [playwright.md](playwright.md).
+A second job runs **in parallel** with `verify`, on the same triggers. Chromium
+is installed with `playwright install --with-deps chromium` and cached on
+`~/.cache/ms-playwright` (keyed on the lockfile), and the HTML report uploads as
+a `playwright-report` artifact (`if: !cancelled()`) for debugging.
+
+**Since the Phase 3 auth loop landed (2026-07-27) this job boots a real
+Supabase stack** — `supabase start -x …` → `db reset` → write `.env.local` from
+`supabase status -o env | grep '^NEXT_PUBLIC_'` — and then boots the app
+(`pnpm dev`, via `playwright.config.ts`'s `webServer`) and runs
+`tests/e2e/smoke.spec.ts` + `tests/e2e/auth.spec.ts` against it. So CI now
+proves the app *runs*, authenticates, and enforces RLS through a real session —
+not just that `next build` compiles it.
+
+Two consequences worth knowing before editing the job:
+
+- **It deliberately sets no `NEXT_PUBLIC_SUPABASE_*` env.** It used to set
+  placeholders, which were sufficient while nothing logged in (with no session
+  cookie the proxy's refresh short-circuits before any network call). They had
+  to be **removed**, not updated: process env outranks `.env.local` in Next, so
+  a leftover placeholder silently wins over the values written from
+  `supabase status`, and the app addresses a stack that isn't there — a
+  connection error that reads like an application bug. **`verify` keeps its
+  placeholders** and should: `next build` never executes the proxy, and the
+  values exist there only so `next.config.ts` can prove the build environment
+  is complete.
+- **It is no longer the fast job.** It carries the same cold Docker pulls and
+  the same `timeout-minutes: 20` backstop as `db`, for the same reason.
+
+The `-x` exclusion list mirrors the `db` job below, including the rule about
+never excluding `db` or `storage`; `inbucket` is excluded only while
+`[auth.email] enable_confirmations` is `false`. Turning confirmations on (a
+backlog item, required before the Phase 4 public deploy) means signup sends
+mail, and this job then needs the mailbox back. Details:
+[playwright.md](playwright.md).
 
 ### Database suite (`db` job)
 
@@ -155,9 +182,10 @@ Three deliberate choices:
   `config.toml` change, or a CLI bump, so gating on changed paths would miss
   cases.
 
-Cold image pulls make this the slowest job in the matrix; `timeout-minutes: 20`
-is a backstop against a container that never reaches healthy. A `docker ps -a` +
-`supabase status` step runs `if: failure()` for triage.
+Cold image pulls make this and `e2e` — which now boots a stack of its own — the
+two slow jobs in the matrix; `timeout-minutes: 20` is a backstop against a
+container that never reaches healthy. A `docker ps -a` + `supabase status` step
+runs `if: failure()` for triage.
 
 ### Dependency vulnerability gate (`pnpm audit`)
 
@@ -465,6 +493,16 @@ worth adding (`actionlint` doesn't understand the issue-forms schema anyway).
 Running record of problems hit and calls made, newest first. (PR numbers are
 the paper trail; see git history for the full diffs.)
 
+- **2026-07 · `e2e` job placeholders removed, not updated** — the job now boots
+  a real Supabase stack because the auth-loop specs sign in. The non-obvious
+  half was deleting its `NEXT_PUBLIC_SUPABASE_*` env: **process env takes
+  precedence over `.env.local`**, so leaving placeholders there would have
+  outranked the values written from `supabase status` and pointed the app at
+  nothing, failing as a network error that reads like an application bug.
+  Playwright's `baseURL` also moved `localhost` → `127.0.0.1` to match
+  `[auth] site_url` (cookies are per-host, so an auth redirect across the two
+  strands the session), with a matching `allowedDevOrigins` in
+  `next.config.ts`. Detail: [playwright.md](playwright.md).
 - **2026-07 · CODEOWNERS is a record, not a required review** (issue #31) —
   added `.github/CODEOWNERS` (`* @Damilss`) with **"Require review from Code
   Owners" deliberately left off**. GitHub never requests a review from a PR's
