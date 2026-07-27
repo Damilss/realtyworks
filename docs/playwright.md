@@ -4,8 +4,8 @@ End-to-end tests for RealtyWorks. Playwright drives a real browser against the
 running app to verify user-facing behavior.
 
 **Phase 1 scope:** install + a single smoke test only. The smoke test now runs
-in CI (see [CI](#ci) below); real **flows** still arrive with the Phase 3
-vertical slice — see `CLAUDE.md` §4.
+in CI (see [CI](#ci) below); real **flows** arrive as the Phase 3 vertical
+slice (now in progress) is built — see `CLAUDE.md` §4.
 
 ---
 
@@ -115,5 +115,6 @@ test:e2e`, and uploads the HTML report as a `playwright-report` artifact for
 debugging. `next build` in `verify` proves the app compiles; this proves it
 boots and renders.
 
-Only the existing smoke spec runs here — real **flows** join in Phase 3/4 once
-the vertical slice exists to drive them. See `CLAUDE.md` §4–§5.
+Only the existing smoke spec runs here — real **flows** join in Phase 3/4 as
+the vertical slice (now in progress) grows enough to drive them. See
+`CLAUDE.md` §4–§5.

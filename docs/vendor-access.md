@@ -138,7 +138,7 @@ deferred / §4 Phase 6).
 
 The auth model is the thing; SMS is just the delivery channel. Split them:
 
-- **Phase 3 (build the model).** Build the tokenized link + vendor session now,
+- **Phase 3 (build the model) — now underway.** Build the tokenized link + vendor session now,
   delivered by a **"Copy vendor link"** button. The entire flow — vendor opens
   link, gets a real session, updates status, uploads a photo/receipt, activity
   trail records it — is testable with **no Twilio account, no 10DLC
