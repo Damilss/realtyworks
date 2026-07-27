@@ -254,8 +254,11 @@ that belong in them — no speculative/empty folders.
 ```
 realtyworks/
 ├── .github/
+│   ├── ISSUE_TEMPLATE/             # bug · feature · chore issue forms + config.yml
 │   ├── workflows/                  # ci.yml (main gate — see §0) · security.yml · osv-scanner.yml
-│   └── dependabot.yml              # weekly npm + github-actions updates
+│   ├── CODEOWNERS                  # * @Damilss — ownership record, NOT a required review
+│   ├── dependabot.yml              # weekly npm + github-actions updates
+│   └── pull_request_template.md    # self-review checklist (paper trail, not a gate)
 ├── .husky/                         # pre-commit (lint-staged + gitleaks), commit-msg (commitlint)
 ├── docs/                           # tooling.md · playwright.md · backlog.md · commit-messages.md · dependency-version-management.md · pwa.md · vendor-access.md · reports/
 │   └── schema/                     # schema-brainstorming.md (the method) · my_schema_writeup.md (workflows → design → Phase 2 plan)
@@ -306,6 +309,8 @@ realtyworks/
 ├── vitest.config.ts
 ├── package.json
 ├── pnpm-workspace.yaml             # pnpm settings (allowBuilds — reviewed install scripts)
+├── CONTRIBUTING.md                 # setup · branch naming · commits · PR flow · schema rules
+├── SECURITY.md                     # vulnerability reporting · gate coverage · triage runbook
 └── README.md
 ```
 

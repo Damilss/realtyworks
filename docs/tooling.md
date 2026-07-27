@@ -445,6 +445,19 @@ Prettier **intentionally ignores Markdown** (`*.md` in `.prettierignore`) —
 docs are hand-formatted. The pnpm lockfile and generated Next.js output are
 ignored too. So `pnpm format:check` failures are never about docs.
 
+**YAML is the opposite case, and it has a blind spot.** Prettier *does* format
+`*.yml`/`*.yaml` (only `pnpm-lock.yaml` is exempt), and its glob traverses
+dot-directories — that is why `supabase/.temp/` needs an explicit ignore entry,
+and it means everything under `.github/` is checked. But `lint-staged` in
+`package.json` covers `*.{ts,tsx,json,css,md}` and **not `*.yml`**, so a
+mis-formatted workflow or issue-form file passes the pre-commit hook and only
+fails in CI. Run `pnpm format` after touching any YAML.
+
+Useful side effect: Prettier is the repo's YAML parser. A syntax error in an
+issue form surfaces as a Prettier parse error, so `pnpm format:check` doubles as
+a validity check — there is no `yamllint` or `actionlint` here, and neither is
+worth adding (`actionlint` doesn't understand the issue-forms schema anyway).
+
 ---
 
 ## Issues & decisions log
@@ -452,6 +465,26 @@ ignored too. So `pnpm format:check` failures are never about docs.
 Running record of problems hit and calls made, newest first. (PR numbers are
 the paper trail; see git history for the full diffs.)
 
+- **2026-07 · CODEOWNERS is a record, not a required review** (issue #31) —
+  added `.github/CODEOWNERS` (`* @Damilss`) with **"Require review from Code
+  Owners" deliberately left off**. GitHub never requests a review from a PR's
+  own author, so a solo code owner can never satisfy the rule on their own PR;
+  enabling it would make every self-authored merge an admin override and turn
+  branch protection into noise. The one live effect is a review request on each
+  Dependabot PR (author `dependabot[bot]`, so the owner *is* requested).
+  Two adjacent gotchas from the same work: issue forms and `config.yml` render
+  from the **default branch only** (nothing appears while they sit on `dev`;
+  the PR template and CODEOWNERS come from a PR's *base* branch instead), and a
+  label named in a form that doesn't exist in the repo is **silently dropped** —
+  the issue opens unlabeled with no error anywhere.
+- **2026-07 · Private vulnerability reporting is unavailable here** (issue #31)
+  — GitHub's private vulnerability reporting *and* repository security
+  advisories are both public-repository features ("Owners and administrators of
+  public repositories can enable private vulnerability reporting"). This repo is
+  private, so the Security tab offers no intake path — the same GHAS-on-private
+  wall as CodeQL, push protection, and dependency review. `SECURITY.md` uses an
+  email channel instead and records the two switch-over triggers: the repo going
+  public, or issue #74 filling the `TOS.md` contact placeholder.
 - **2026-07 · pnpm store untracked** — `.pnpm-store/v11/index.db` (pnpm's local
   content-addressable store index) had been committed by accident. Added
   `.pnpm-store` to `.gitignore` and `git rm --cached`'d the binary so it stops

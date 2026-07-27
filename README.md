@@ -303,8 +303,11 @@ Details, decisions, and known issues: [docs/tooling.md](docs/tooling.md).
 ```
 realtyworks/
 ├── .github/
+│   ├── ISSUE_TEMPLATE/     # bug.yml · feature.yml · chore.yml · config.yml (issue forms)
 │   ├── workflows/          # ci.yml · security.yml (gitleaks + semgrep) · osv-scanner.yml
-│   └── dependabot.yml
+│   ├── CODEOWNERS          # * @Damilss — ownership record, not a required review
+│   ├── dependabot.yml
+│   └── pull_request_template.md
 ├── .husky/                 # pre-commit (lint-staged + gitleaks) · commit-msg (commitlint)
 ├── docs/                   # project docs (see index below) · docs/reports/ = roadbump postmortems
 ├── public/
@@ -331,6 +334,8 @@ realtyworks/
 ├── commitlint.config.mjs   # conventional-commit rules
 ├── playwright.config.ts
 ├── vitest.config.ts
+├── CONTRIBUTING.md         # setup · branch naming · commits · PR & merge flow
+├── SECURITY.md             # vulnerability reporting · what the gates cover · triage
 └── CLAUDE.md               # engineering source of truth (architecture, phases, rules)
 ```
 
@@ -343,6 +348,8 @@ speculatively. (`src/components/` arrived with the UI toolkit on 2026-07-27.)
 | Doc | What's in it |
 | --- | --- |
 | [`CLAUDE.md`](CLAUDE.md) | Source of truth: architecture, phases, conventions, working agreements |
+| [`CONTRIBUTING.md`](CONTRIBUTING.md) | Setup, branch naming, commits, PR & merge flow, schema rules |
+| [`SECURITY.md`](SECURITY.md) | Reporting a vulnerability, what the gates cover, secret-leak runbook |
 | [`docs/tooling.md`](docs/tooling.md) | CI, security scanning, git hooks — how it works, decisions, known issues |
 | [`docs/playwright.md`](docs/playwright.md) | E2E testing: install, run, troubleshoot |
 | [`docs/backlog.md`](docs/backlog.md) | Ranked foundation & development backlog (issue-ready blocks) |
@@ -377,3 +384,6 @@ Full definitions in `CLAUDE.md` §4.
 - Production data is never used in local/dev environments.
 - All changes reach `main` via PR with green CI (paper trail, even solo).
 - Conventional commits, enforced by commitlint.
+- Branch naming, the `feature → dev → main` flow, and the PR checklist live in
+  [CONTRIBUTING.md](CONTRIBUTING.md); vulnerability reporting in
+  [SECURITY.md](SECURITY.md).
