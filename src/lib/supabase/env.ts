@@ -8,21 +8,51 @@
  * the browser bundle. Read the value literally, then validate it here.
  */
 
-type MissingConfigHandler = (name: string) => never;
+/**
+ * Why a config value is unusable. Kept to a small discriminator — never the
+ * detailed remediation text — because this module is imported by the browser
+ * client, so anything here ships in the bundle. `next.config.ts` maps each
+ * problem to a developer-facing message while it stays out of the client.
+ */
+export type ConfigProblem = "missing" | "not-publishable";
 
-const throwPublicConfigError: MissingConfigHandler = () => {
+type ConfigErrorHandler = (name: string, problem: ConfigProblem) => never;
+
+const throwPublicConfigError: ConfigErrorHandler = () => {
   throw new Error("Application configuration is unavailable.");
 };
 
 function required(
   name: string,
   value: string | undefined,
-  onMissing: MissingConfigHandler,
+  onError: ConfigErrorHandler,
 ): string {
   if (!value) {
-    return onMissing(name);
+    return onError(name, "missing");
   }
   return value;
+}
+
+/**
+ * A Supabase publishable key is prefixed `sb_publishable_`. Its privileged
+ * counterparts — the `sb_secret_` key and legacy `service_role` JWT — are NOT,
+ * and must never reach the browser. Because NEXT_PUBLIC_* is frozen into the
+ * client bundle by `next build`, a secret key mistakenly set here would ship to
+ * every browser and bypass RLS (CLAUDE.md §2). Fail closed: accept only a value
+ * that is specifically a publishable key, rather than merely a non-empty one.
+ */
+const PUBLISHABLE_KEY_PREFIX = "sb_publishable_";
+
+function requirePublishableKey(
+  name: string,
+  value: string | undefined,
+  onError: ConfigErrorHandler,
+): string {
+  const key = required(name, value, onError);
+  if (!key.startsWith(PUBLISHABLE_KEY_PREFIX)) {
+    return onError(name, "not-publishable");
+  }
+  return key;
 }
 
 /**
@@ -31,18 +61,18 @@ function required(
  * remediation while loading so it stays out of the client bundle.
  */
 export function supabaseEnv(
-  onMissing: MissingConfigHandler = throwPublicConfigError,
+  onError: ConfigErrorHandler = throwPublicConfigError,
 ) {
   return {
     url: required(
       "NEXT_PUBLIC_SUPABASE_URL",
       process.env.NEXT_PUBLIC_SUPABASE_URL,
-      onMissing,
+      onError,
     ),
-    publishableKey: required(
+    publishableKey: requirePublishableKey(
       "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY",
       process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY,
-      onMissing,
+      onError,
     ),
   };
 }

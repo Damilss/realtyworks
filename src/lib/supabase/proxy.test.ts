@@ -19,7 +19,10 @@ function encodedSession(accessToken: string) {
 describe("updateSession", () => {
   beforeEach(() => {
     vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", SUPABASE_URL);
-    vi.stubEnv("NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY", "publishable-key");
+    vi.stubEnv(
+      "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY",
+      "sb_publishable_test_placeholder",
+    );
   });
 
   afterEach(() => {

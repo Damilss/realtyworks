@@ -25,4 +25,23 @@ describe("Next.js build configuration", () => {
       );
     },
   );
+
+  // A secret / service_role key on the publishable NEXT_PUBLIC_* variable would
+  // be inlined into the browser bundle by `next build`. Config loading must fail
+  // so the leaking bundle is never emitted.
+  it.each([
+    ["a secret key", "sb_secret_deadbeef"],
+    ["a service_role JWT", "eyJhbGciOiJIUzI1NiJ9.payload.sig"],
+  ])(
+    "fails config loading when the publishable key is %s",
+    async (_label, value) => {
+      vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", "http://127.0.0.1:54321");
+      vi.stubEnv("NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY", value);
+      vi.resetModules();
+
+      await expect(import("../../next.config")).rejects.toThrow(
+        "expected a Supabase publishable key",
+      );
+    },
+  );
 });
