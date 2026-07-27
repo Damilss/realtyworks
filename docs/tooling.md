@@ -472,11 +472,15 @@ the paper trail; see git history for the full diffs.)
   enabling it would make every self-authored merge an admin override and turn
   branch protection into noise. The one live effect is a review request on each
   Dependabot PR (author `dependabot[bot]`, so the owner *is* requested).
-  Two adjacent gotchas from the same work: issue forms and `config.yml` render
-  from the **default branch only** (nothing appears while they sit on `dev`;
-  the PR template and CODEOWNERS come from a PR's *base* branch instead), and a
-  label named in a form that doesn't exist in the repo is **silently dropped** —
-  the issue opens unlabeled with no error anywhere.
+  Two adjacent gotchas from the same work. **Every template renders from the
+  default branch only** — issue forms, `config.yml`, *and*
+  `pull_request_template.md` alike do nothing while they sit on `dev`
+  ("templates are available to collaborators when they are merged into the
+  repository's default branch"). `CODEOWNERS` is the one exception in this set
+  and works the other way round: it is read from a PR's **base** branch, so it
+  takes effect on `dev` a merge before the templates do. Second, a label named
+  in a form that doesn't exist in the repo is **silently dropped** — the issue
+  opens unlabeled with no error anywhere.
 - **2026-07 · Private vulnerability reporting is unavailable here** (issue #31)
   — GitHub's private vulnerability reporting *and* repository security
   advisories are both public-repository features ("Owners and administrators of

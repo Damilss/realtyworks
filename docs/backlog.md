@@ -66,10 +66,14 @@ Pick them off at your discretion.
 `SECURITY.md`. Issue forms mirror this file's **Why / Do / Done when** shape, so
 a block here copies straight across.
 
-Three things worth keeping. **Templates render from the default branch only** —
-the issue forms and `config.yml` do nothing until they are on `main`, so "it's
-on `dev`" is not done. (The PR template and `CODEOWNERS` are read from a PR's
-*base* branch, so those go live one merge earlier.) **A label named in a form
+Three things worth keeping. **Every template renders from the default branch
+only** — the issue forms, `config.yml`, *and* `pull_request_template.md` all do
+nothing until they are on `main`, so "it's on `dev`" is not done. GitHub's
+wording for the PR template is the same as for the issue forms: "available to
+collaborators when they are merged into the repository's default branch."
+`CODEOWNERS` is the lone exception and works the other way round — it is read
+from a PR's **base** branch, so it takes effect on `dev` a merge earlier than
+the templates do. **A label named in a form
 that doesn't exist is silently dropped** — the issue just opens unlabeled, no
 error anywhere; the forms only auto-apply `bug` and `enhancement`, both GitHub
 defaults, and `chore.yml` ships label-free on purpose.
