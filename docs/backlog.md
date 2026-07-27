@@ -60,6 +60,34 @@ Pick them off at your discretion.
 
 ## ✅ Done (kept for the paper trail)
 
+### ✅ GitHub repo scaffolding (2026-07-27, issue #31)
+`.github/pull_request_template.md`, three issue forms (`bug` · `feature` ·
+`chore`) plus `config.yml`, `.github/CODEOWNERS`, `CONTRIBUTING.md`, and
+`SECURITY.md`. Issue forms mirror this file's **Why / Do / Done when** shape, so
+a block here copies straight across.
+
+Three things worth keeping. **Templates render from the default branch only** —
+the issue forms and `config.yml` do nothing until they are on `main`, so "it's
+on `dev`" is not done. (The PR template and `CODEOWNERS` are read from a PR's
+*base* branch, so those go live one merge earlier.) **A label named in a form
+that doesn't exist is silently dropped** — the issue just opens unlabeled, no
+error anywhere; the forms only auto-apply `bug` and `enhancement`, both GitHub
+defaults, and `chore.yml` ships label-free on purpose.
+
+And **`CODEOWNERS` is a record, not a gate.** GitHub never requests review from
+a PR's own author, so `* @Damilss` is inert on self-authored PRs and only fires
+on Dependabot's. "Require review from Code Owners" stays **off**: it could never
+be satisfied solo, so every merge would become an admin override and branch
+protection would stop meaning anything.
+
+`SECURITY.md` names an email channel because **GitHub private vulnerability
+reporting and repository security advisories are both public-repository
+features** — per GitHub's docs, "Owners and administrators of public
+repositories can enable private vulnerability reporting." Same GHAS-on-private
+wall as CodeQL and push protection. The switch-over triggers (repo goes public,
+or issue #74 fills the `TOS.md` contact placeholder) are written into the policy
+itself.
+
 ### ✅ Supabase clients — Phase 2 complete (2026-07-21, issue #37)
 `@supabase/ssr` + `@supabase/supabase-js` installed; `src/lib/supabase/`
 (`client.ts` · `server.ts` · `proxy.ts` · `env.ts`) wired to a root `src/proxy.ts`,
@@ -367,12 +395,6 @@ from the app.
 **Do:** `pnpm add @t3-oss/env-nextjs zod`; define a typed env module; commit `.env.example`.
 **Note:** `.gitignore` has `.env*` — add `!.env.example` or it won't commit.
 **Done when:** a missing required var throws at build/start; `.env.example` is tracked.
-
-### 🟡 GitHub repo scaffolding (paper trail)
-**Why:** Templates + ownership records make the solo workflow auditable and consistent.
-**Do:** add `.github/pull_request_template.md`, `.github/ISSUE_TEMPLATE/{bug,feature,chore}.yml`,
-`CODEOWNERS` (`* @yourname`), `CONTRIBUTING.md`, `SECURITY.md`.
-**Done when:** new PRs/issues open with the templates prefilled.
 
 ### 🟡 `.editorconfig` + package.json `engines`
 **Why:** Keep formatting/runtime consistent across machines and warn on wrong Node.
