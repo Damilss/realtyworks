@@ -1,0 +1,66 @@
+name: Bug
+description: Something is broken or behaves differently than intended
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Not for security vulnerabilities.** Those follow
+        [SECURITY.md](https://github.com/Damilss/RealtyWorks/blob/main/SECURITY.md)
+        instead — do not put exploit detail in a normal issue.
+
+  - type: textarea
+    id: symptom
+    attributes:
+      label: What happens
+      description: Expected vs. actual, plus the real error output if there is one.
+      placeholder: |
+        Expected:
+        Actual:
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Repro
+      description: >-
+        Steps from a known-good state — `pnpm exec supabase db reset` rebuilds
+        one. If you cannot reproduce it, say so; that is a finding too.
+      value: |
+        1.
+        2.
+        3.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - App / UI (Next.js)
+        - Auth / session (src/proxy.ts, @supabase/ssr)
+        - Database (migration, RLS, pgTAP)
+        - CI / tooling
+        - Docs
+        - Unsure
+    validations:
+      required: true
+
+  - type: input
+    id: where
+    attributes:
+      label: Where
+      description: Local or CI (link the failed run), and which branch.
+      placeholder: local, branch dev
+    validations:
+      required: true
+
+  - type: textarea
+    id: done-when
+    attributes:
+      label: Done when
+      description: The check that proves it is fixed — ideally one CI already runs.
+    validations:
+      required: true

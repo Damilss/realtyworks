@@ -1,0 +1,12 @@
+# Blank issues stay ON. Templates are a drafting aid for one person, not a
+# triage funnel — there is no external reporter population to shape. The forms
+# earn their keep converting a docs/backlog.md block into an issue; the blank
+# path earns its keep for a ten-second note.
+blank_issues_enabled: true
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/Damilss/RealtyWorks/blob/main/SECURITY.md
+    about: Report privately per SECURITY.md. Do not open a normal issue with exploit detail.
+  - name: Backlog — ranked, issue-ready blocks
+    url: https://github.com/Damilss/RealtyWorks/blob/main/docs/backlog.md
+    about: Most planned work is already written up. Copy the block into a Feature or Chore issue.
