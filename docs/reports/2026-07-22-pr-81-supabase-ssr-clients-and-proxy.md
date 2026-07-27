@@ -5,9 +5,9 @@
 | **Date** | 2026-07-22 (opened) → 2026-07-25 (merged) |
 | **Area** | runtime / auth / config / CI / deps / security |
 | **Cost** | 3 review passes over ~3 days · 12 review findings triaged (7 fixed, 4 rejected-with-reason, 1 unmerged) · 7 high-severity advisories cleared · 10 commits merged · +853 / −189 across 21 files |
-| **Status** | **Merged** to `dev` (rebase-merge, ref `9986c70`, 2026-07-25 08:25 UTC, 5 checks passed). The final `[P2]` getClaims returned-error fix did **not** land in these 10 commits — it ships as follow-up **PR #82** (rebased on top of #81); see [Open items](#open-items--follow-ups). |
-| **Commits / PRs** | PR **#81** `supabase-ssr` → `dev` · 10 merged commits `1cd7baa` … `2e32235` (rebased onto `dev` as `ed2b4ed` … `9986c70`) · getClaims fix `cd5bc6d` follows in **PR #82** |
-| **Issues / links** | closes **#37** (Phase 2 runway) · refs **#78** (schema→local stack, makes the `db` check selectable) · follow-ups **#82** (getClaims returned-error clear) · **#64** (postcss → 8.5.10, `GHSA-qx2v-qp2m-jg93`) |
+| **Status** | **Merged** to `dev` (rebase-merge, ref `9986c70`, 2026-07-25 08:25 UTC, 5 checks passed). The final `[P2]` getClaims returned-error fix did **not** land in these 10 commits, and follow-up **PR #82** never merged either — the gap was re-confirmed live on `dev` and the fix **re-landed directly on `dev` on 2026-07-27** (restoring `cd5bc6d`); see [Open items](#open-items--follow-ups). |
+| **Commits / PRs** | PR **#81** `supabase-ssr` → `dev` · 10 merged commits `1cd7baa` … `2e32235` (rebased onto `dev` as `ed2b4ed` … `9986c70`) · getClaims fix `cd5bc6d` (PR **#82**, never merged) re-landed directly on `dev` 2026-07-27 |
+| **Issues / links** | closes **#37** (Phase 2 runway) · refs **#78** (schema→local stack, makes the `db` check selectable) · follow-ups **#82** (getClaims returned-error clear — never merged; re-landed on `dev` 2026-07-27) · **#64** (postcss → 8.5.10, `GHSA-qx2v-qp2m-jg93`) |
 | **Participants / labels** | 1 participant (Damilss, author + self-review) · label `backend logic` · self-assigned |
 | **See also** | `CLAUDE.md` §2 (trust rule), §5 (audit trail), §8 (no speculative changes) · [`../backlog.md`](../backlog.md) · [`2026-07-17-phase-2-schema-review-hardening.md`](2026-07-17-phase-2-schema-review-hardening.md) (the schema half of Phase 2) |
 
@@ -36,7 +36,8 @@ The auth findings rhyme: `@supabase/ssr` / `auth-js` fails in ways that **don't
 throw** — config inlined at build time, `getClaims()` *returning* `AuthError`s,
 cookie writes partially failing — so several bugs were "green build / silent runtime
 break." The final `[P2]` (getClaims returning invalid-JWT errors instead of
-throwing) is documented in full below; note it was **not** carried into the merge.
+throwing) is documented in full below; note it was **not** carried into the merge —
+nor by PR #82, which never landed. It was re-landed directly on `dev` on 2026-07-27.
 
 ---
 
@@ -215,7 +216,7 @@ throws away:
 
 | # | Finding | Where | Status |
 | --- | --- | --- | --- |
-| P3 | **[P2]** Invalid JWTs **returned** by `getClaims()` (non-retryable `AuthError`) only logged → bad cookie persists → redirect loops until expiry | `proxy.ts:77-84` | Fixed in `cd5bc6d`, **outside** #81's 10 merged commits; ships as follow-up **PR #82** (rebased on #81) — see deep dive + [Open items](#open-items--follow-ups) |
+| P3 | **[P2]** Invalid JWTs **returned** by `getClaims()` (non-retryable `AuthError`) only logged → bad cookie persists → redirect loops until expiry | `proxy.ts:77-84` | Fixed in `cd5bc6d`, **outside** #81's 10 merged commits; follow-up **PR #82** never merged, so re-landed directly on `dev` 2026-07-27 — see deep dive + [Open items](#open-items--follow-ups) |
 
 ---
 
@@ -319,8 +320,16 @@ tests · build).
 **But:** this fix (`cd5bc6d`) was **not** pushed before #81 merged. The PR was
 rebase-merged from the state ending at `2e32235` (→ `9986c70` on `dev`), whose
 `proxy.ts` contains only the *thrown*-path `clearAuthCookiesAtScopes` from finding
-#1. The returned-error clear therefore reaches `dev` not through #81 but through
-**follow-up PR #82**, which rebases the fix on top of #81.
+#1. The returned-error clear was meant to reach `dev` through **follow-up PR #82**
+(rebased on #81) — but **that PR never merged**: `cd5bc6d` stayed stranded on the
+`supabase-ssr` branch, and `dev`'s `proxy.ts` kept only the log line.
+
+**Re-landed 2026-07-27.** The same `[P2]` resurfaced in a later review of `dev`,
+was re-confirmed still present (the returned-error branch logged but never cleared),
+and the `cd5bc6d` fix was **replicated directly onto `dev`** — same `clearSession` /
+`isAuthRetryableFetchError` branch, same two regression tests (invalid-JWT clear +
+retryable-outage preserve). Local gate green (typecheck · lint · format:check ·
+**29/29** unit tests). This is what actually closes the item; PR #82 is abandoned.
 
 ---
 
@@ -342,12 +351,16 @@ rebase-merged from the state ending at `2e32235` (→ `9986c70` on `dev`), whose
 
 ## Open items / follow-ups
 
-1. **The Pass-3 `[P2]` getClaims returned-error fix — tracked in PR #82.** As merged,
-   #81's `9986c70` `proxy.ts` lacks the `isAuthRetryableFetchError` / `clearSession`
-   branch (finding #1's thrown-path clear only); the fix (`cd5bc6d`) was authored
-   after the merged state and now ships as **PR #82**, rebased on top of #81, so a
-   structurally invalid or bad-signature JWT is cleared rather than looping until
-   expiry. Item resolved once #82 merges.
+1. **The Pass-3 `[P2]` getClaims returned-error fix — ✅ resolved on `dev` 2026-07-27.**
+   As merged, #81's `9986c70` `proxy.ts` lacked the `isAuthRetryableFetchError` /
+   `clearSession` branch (finding #1's thrown-path clear only). The fix (`cd5bc6d`)
+   was authored after the merged state and was meant to ship as **PR #82** — but that
+   PR **never merged**; `cd5bc6d` stayed on the `supabase-ssr` branch and the gap was
+   still live on `dev`. A later review re-confirmed it and **re-landed the fix
+   directly on `dev` on 2026-07-27** (restoring `cd5bc6d`: `clearSession` gated on
+   `!isAuthRetryableFetchError`, plus the invalid-JWT-clear and retryable-preserve
+   tests), so a structurally invalid or bad-signature JWT is cleared rather than
+   looping until expiry. PR #82 is abandoned; this direct commit is the resolution.
 2. **Make the `db` job a required check** in Settings → Branches (author follow-up).
    It has reported a run since #78, so it's selectable — that's what makes the pgTAP
    RLS assertions actually gate a merge.
@@ -386,8 +399,11 @@ rebase-merged from the state ending at `2e32235` (→ `9986c70` on `dev`), whose
 > relitigated next time.
 
 > **6 — "Addressed" in a comment ≠ "merged."** The Pass-3 fix was written up and
-> acknowledged, but the branch merged without it. Confirm the commit is in the
-> merged range, not just that a reply was posted.
+> acknowledged, but the branch merged without it — and the follow-up **PR #82** meant
+> to carry it *also* never merged, so the fix sat stranded on a side branch while the
+> bug stayed live on `dev` for two weeks (caught only when the same finding
+> resurfaced). Confirm the commit is actually in the target branch — `git branch
+> --contains <sha>` — not that a reply was posted or a follow-up PR was opened.
 
 ---
 
@@ -398,7 +414,9 @@ rebase-merged from the state ending at `2e32235` (→ `9986c70` on `dev`), whose
 - Merged commits (PR-visible hashes): `1cd7baa` (feature) · `d8648c8` · `c588a7c` ·
   `ad3c8ed` · `3a245ee` · `d08b662` · `669aac8` · `35b51c5` · `0cc280f` · `2e32235`
   (rebased onto `dev` as `ed2b4ed` … `9986c70`).
-- Follow-up **PR #82** (rebased on #81): `cd5bc6d` — `fix(auth): clear unusable sessions returned by getClaims`.
+- Follow-up **PR #82** (rebased on #81) — **never merged**; `cd5bc6d`
+  (`fix(auth): clear unusable sessions returned by getClaims`) stayed stranded on the
+  `supabase-ssr` branch and was re-landed directly on `dev` 2026-07-27.
 - `@supabase/auth-js@2.110.7`: `GoTrueClient.js` `getClaims()` (return-vs-throw
   catch); `lib/errors.js` (`AuthError` → `CustomAuthError` → `AuthInvalidJwtError`;
   `isAuthRetryableFetchError`); `lib/helpers.js` `decodeJWT` / `validateExp`.
