@@ -3,6 +3,7 @@ import {
   createServerClient,
   type SetAllCookies,
 } from "@supabase/ssr";
+import { isAuthRetryableFetchError } from "@supabase/supabase-js";
 import { NextResponse, type NextRequest } from "next/server";
 
 import type { Database } from "@/lib/database.types";
@@ -68,6 +69,11 @@ export async function updateSession(request: NextRequest) {
     },
   });
 
+  // Drops every current-session cookie chunk so the request proceeds signed out
+  // and the browser can recover, instead of replaying a session the server rejects.
+  const clearSession = () =>
+    clearAuthCookiesAtScopes({ getAll, setAll, storageKey, scopes: [{}] });
+
   // Must run immediately after the client is created, with nothing in between:
   // this is the call that triggers the refresh, and it has to complete before
   // the response is committed or the rotated cookies are lost.
@@ -75,24 +81,32 @@ export async function updateSession(request: NextRequest) {
     const { error } = await supabase.auth.getClaims();
 
     if (error) {
-      // getClaims() returns AuthErrors — a revoked refresh token, or an
-      // AuthRetryableFetchError during an Auth outage — rather than throwing,
-      // so they fall through the catch below. Left unhandled the error vanishes
-      // and the request just degrades to unauthenticated: users appear randomly
-      // logged out with nothing to explain it. This log line is that signal
-      // (CLAUDE.md §5 audit trail; Sentry captures it once Phase 4 wires it).
+      // getClaims() reports auth failures by *returning* them, not throwing
+      // (only malformed session data throws — see the catch below). Two kinds
+      // of returned error land here and must be treated differently:
+      //
+      //   - AuthRetryableFetchError: Auth was unreachable (an outage), so the
+      //     stored session is probably still valid. Keep the cookies and let the
+      //     next request retry — clearing here would sign users out on a blip.
+      //   - Anything else (invalid/expired JWT, bad signature, revoked or missing
+      //     refresh token): the session is unusable. Clear it, or the browser
+      //     keeps presenting a session every server check rejects, looping until
+      //     the cookie expires.
+      //
+      // Either way we log: unhandled, the failure just degrades the request to
+      // unauthenticated and users appear randomly logged out with nothing to
+      // explain it (CLAUDE.md §5 audit trail; Sentry captures it once Phase 4
+      // wires it).
       console.error("[proxy] Supabase session refresh failed", error);
+
+      if (!isAuthRetryableFetchError(error)) {
+        await clearSession();
+      }
     }
   } catch {
-    // auth-js returns AuthErrors, but malformed session data can throw a
-    // native parsing error instead. Clear every current-session chunk so the
-    // request can proceed signed out and the browser can recover.
-    await clearAuthCookiesAtScopes({
-      getAll,
-      setAll,
-      storageKey,
-      scopes: [{}],
-    });
+    // auth-js returns AuthErrors, but malformed session data can throw a native
+    // parsing error (e.g. JSON.parse on a corrupt cookie) instead. Same recovery.
+    await clearSession();
   }
 
   return response;
