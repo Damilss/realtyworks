@@ -477,6 +477,33 @@ product feature.
 rejects it before the round trip.
 **Done when:** inserting a blank or whitespace-only note fails, covered by pgTAP.
 
+### 🟡 Scope the sign-out action to the current session
+**Why:** `src/server/actions/auth.ts` calls `supabase.auth.signOut()` with no
+options, and `@supabase/auth-js` (2.110.7) declares that as
+`signOut(options = { scope: 'global' })` — it revokes **every** refresh token the
+account holds, not just this browser's. The library's own JSDoc on the method
+says `{ scope: 'local' }` is what apps usually want on a "Sign out" button. So a
+manager signed in on a laptop and a phone who clicks the ordinary button
+(`src/app/(dashboard)/layout.tsx`) on one is signed out of the other — but not
+immediately: global scope revokes the *refresh* token while the access-token JWT
+stays valid until `jwt_expiry` (3600s, `supabase/config.toml`). The second device
+therefore works normally for up to an hour, then `src/proxy.ts` fails its refresh
+and bounces it to `/login`. The delayed, apparently random logout is what makes
+this worth fixing rather than documenting. The control is labeled "Sign out", not
+"Sign out everywhere". It fails in the **safe** direction — over-revoking, never
+under — which is why this is 🟡 and not a security item.
+**Do:** pass `{ scope: "local" }` in `signOut()` (`src/server/actions/auth.ts`),
+and tighten the assertion in `src/server/actions/auth.test.ts` from
+`toHaveBeenCalledOnce()` to `toHaveBeenCalledWith({ scope: "local" })` so the
+global default cannot creep back silently. Extend the comment above the redirect,
+which today explains the failure path but says nothing about scope. A deliberate
+"sign out everywhere" control is **not** in scope — that is a Phase 5
+account-settings affordance, and `scope: "others"` exists for it when wanted
+(`CLAUDE.md` §8: smallest change that satisfies the requirement).
+**Done when:** two concurrent sessions for the same seeded account exist, and
+signing out of one leaves the other able to load `/dashboard`; pinned by the unit
+assertion above.
+
 ### 🟡 Finish the ToS + Privacy Policy drafts (issue #74)
 **Why:** Required before any public or multi-tenant launch; both are currently
 banner-marked **DRAFT — NOT FOR PUBLICATION** and unusable for customer
@@ -688,6 +715,12 @@ started** → **auth loop + open signup: the read half of the slice** →
    unlisted, but it is a **hard gate on the Phase 4 public deploy**, and it
    drags in an `/auth/confirm` route, an email template, and production SMTP.
    Don't discover that during the deploy.
+
+*Ride-along:* the sign-out scope fix (🟡 above) is one argument plus a test
+assertion. Fold it into the next change that touches `src/server/actions/auth.ts`
+rather than letting it displace item 2 — it does not deserve its own session, but
+it also should not still be here at the Phase 4 deploy.
+
 The security + CI + commit-hygiene foundation is green and the Phase 2 schema
 is **on `main`**. Apart from the schema-review follow-ups above — all of which
 are now *forward* migrations on a merged baseline — everything after this is

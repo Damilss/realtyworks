@@ -154,7 +154,11 @@ Verify before assuming they exist:
   as NULL. Two accepted risks, both in `docs/backlog.md`:
   `[auth.email] enable_confirmations` is still `false` (must be on before the
   Phase 4 public deploy), and there is no CAPTCHA —
-  `[auth.rate_limit] sign_in_sign_ups` is the only brake.
+  `[auth.rate_limit] sign_in_sign_ups` is the only brake. One known **defect**
+  is filed alongside them (nobody chose this one): `signOut()` passes no
+  options, and auth-js defaults that to **global** scope, so signing out on one
+  device revokes the account's sessions everywhere. It should pass
+  `{ scope: "local" }`.
 - **Phase 3 (the vertical slice) is in progress.** UI toolkit and the auth loop
   both landed 2026-07-27; next is the work-order half — create a work order,
   assign a vendor, vendor status update + photo upload, activity trail. SSO
