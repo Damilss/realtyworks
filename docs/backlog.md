@@ -15,7 +15,7 @@ Pick them off at your discretion.
 
 ---
 
-## State verified (2026-07-27)
+## State verified (2026-08-01)
 
 - `next 16.2.11` / `react 19.2.4` / `pnpm@11.13.1`, Node pinned to 24 (`.nvmrc`).
 - CI runs `lint → format:check → typecheck → test → build → audit` — with
@@ -38,9 +38,11 @@ Pick them off at your discretion.
   (9 migrations, seed, pgTAP suite via `pnpm exec supabase test db`), generated
   `src/lib/database.types.ts`, supabase CLI pinned as a devDependency. See ✅.
   `main` is now the migration baseline — every schema change from here is a new
-  forward migration, never an edit to a merged file. Two such forward migrations
-  exist so far (both 2026-07-27, both on `dev`): the last-landlord delete guard
-  and the signup-phone metadata fix. pgTAP is up to three files with
+  forward migration, never an edit to a merged file. Four such forward
+  migrations now exist: the 2026-07-27 last-landlord delete guard and signup-phone
+  metadata fix, plus two 2026-08-01 migrations narrowing `service_role` to row
+  DML and making the activity trail append-only even for the service key. pgTAP
+  is up to 86 assertions across three files, including
   `03_signup_defaults.test.sql`.
 - **pgTAP `db` job** running in CI on `main`/`dev` (issue #72) — not yet a
   *required* check. See ✅.
@@ -148,6 +150,26 @@ environment variables. `zod` **is** installed as of 2026-07-27 — as a direct
 dependency for `src/schemas/`, which is what the §3 half of the original line
 was actually about. Revisit only if the env surface grows past a handful of
 vars.
+
+### ✅ Narrow `service_role` table privileges (2026-08-01)
+Two forward migrations replace the seven application tables' `GRANT ALL`
+surface with their documented row operations. `work_order_activity` is now
+strictly `SELECT, INSERT` for `service_role`, with `UPDATE, DELETE, TRUNCATE`
+explicitly revoked so the append-only audit guarantee no longer depends on RLS
+that the service key bypasses. The coordinated work-order hard delete still
+works: the privilege on the parent authorizes its `ON DELETE CASCADE` activity
+cleanup without any direct child `DELETE` grant.
+
+The required six-table sweep found the same administration-level overgrant on
+every sibling table. A separate migration keeps their ordinary
+`SELECT, INSERT, UPDATE, DELETE` lifecycle surface while removing `TRUNCATE`,
+`REFERENCES`, `TRIGGER`, `MAINTAIN`, and future privileges implied by `ALL`.
+`DELETE` remains deliberate on `work_orders` and `work_order_attachments` for
+the coordinated cleanup flows; `TRUNCATE` never was, and on attachment metadata
+it could orphan Storage objects. pgTAP pins each exact grant set, explicitly
+checks that the activity trail cannot be deleted or truncated through
+`service_role`, and exercises the parent cascade. `db reset` and all 86 database
+assertions pass locally.
 
 ### ✅ Guard deletion of the final landlord profile (2026-07-27)
 A forward migration chose the database hard-block semantics from the review:
@@ -422,27 +444,6 @@ confirmations are off, and that response shape changes when they are on.
 locally and on the hosted deploy — with the e2e signup spec updated to walk the
 mailbox instead of landing straight on `/dashboard`.
 
-### 🟠 Restrict `service_role` privileges on `work_order_activity`
-**Why:** The table grants `ALL` to `service_role`, which bypasses RLS — and `ALL`
-includes `DELETE` and `TRUNCATE`. A mistaken or compromised server action can
-therefore erase the audit trail despite the documented append-only guarantee and
-the absence of any DELETE policy: that guarantee currently rests on a policy
-`service_role` never consults. The coordinated work-order hard delete does not
-need the privilege — `ON DELETE CASCADE` is authorized by the grant on the
-*parent* table, not the child. Audit trail is a product feature (`CLAUDE.md` §5)
-and this is a §2 trust-rule surface.
-`supabase/migrations/20260717120600_create_work_order_activity.sql:123`
-(PR review `dev` → `main`, 2026-07-21).
-**Do:** new migration narrowing the grant to the operations actually used
-(`SELECT, INSERT` if the trail is strictly append-only), explicitly `REVOKE`ing
-`DELETE, TRUNCATE` so the intent is legible in the file. Confirm the coordinated
-work-order delete still cascades under the narrower grant. Sweep the other six
-tables for the same `GRANT ALL … service_role` pattern — separate migration if
-any share it, keep this one scoped.
-**Done when:** pgTAP asserts `service_role` cannot `DELETE`/`TRUNCATE`
-`work_order_activity` and that the coordinated parent delete still removes its
-child rows — so re-widening the grant fails CI.
-
 ---
 
 ## 🟡 Medium
@@ -662,7 +663,8 @@ The `supabase` CLI is ✅ installed as a pinned devDependency (2026-07-17).
 → audit gate flipped to blocking → Dependabot tuning + `@types/node` pin →
 branch protection → pgTAP in CI → first migrations merged to `main` →
 **Supabase clients: Phase 2 complete** → **Tailwind + shadcn/ui: Phase 3
-started** → **auth loop + open signup: the read half of the slice**.)*
+started** → **auth loop + open signup: the read half of the slice** →
+**service-role table grants narrowed**.)*
 
 1. **Make the `db` job blocking** — the job has reported a run (PR #78), so it
    is now selectable in Settings → Branches. Two minutes of web UI, and it's
@@ -686,11 +688,6 @@ started** → **auth loop + open signup: the read half of the slice**.)*
    unlisted, but it is a **hard gate on the Phase 4 public deploy**, and it
    drags in an `/auth/confirm` route, an email template, and production SMTP.
    Don't discover that during the deploy.
-5. **Restrict `service_role` on `work_order_activity`** (🟠 High) — the audit
-   trail's append-only guarantee is currently unenforced against the service
-   key. A small forward migration; do it alongside Phase 3 rather than ahead
-   of it.
-
 The security + CI + commit-hygiene foundation is green and the Phase 2 schema
 is **on `main`**. Apart from the schema-review follow-ups above — all of which
 are now *forward* migrations on a merged baseline — everything after this is
