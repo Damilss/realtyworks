@@ -8,7 +8,7 @@ begin;
 create extension if not exists pgtap with schema extensions;
 set search_path to public, extensions;
 
-select plan(53);
+select plan(65);
 
 -- ── vendor write surface ────────────────────────────────────────────────────
 do $$
@@ -604,6 +604,117 @@ select is(
   1,
   'the refused auth-admin cascade preserves both the auth user and profile'
 );
+
+-- ── service-role table privileges: row DML, never table administration ──────
+-- Query the direct grants as an exact set so a future GRANT ALL fails even if
+-- a trigger happens to reject the attempted mutation at runtime.
+select is(
+  (select array_agg(privilege_type::text order by privilege_type)
+   from information_schema.role_table_grants
+   where grantee = 'service_role'
+     and table_schema = 'public'
+     and table_name = 'work_order_activity'),
+  array['INSERT', 'SELECT']::text[],
+  'service_role has exactly SELECT and INSERT on the append-only activity trail'
+);
+
+select is(
+  has_table_privilege('service_role', 'public.work_order_activity', 'DELETE'),
+  false,
+  'service_role cannot DELETE activity rows directly'
+);
+
+select is(
+  has_table_privilege('service_role', 'public.work_order_activity', 'TRUNCATE'),
+  false,
+  'service_role cannot TRUNCATE the activity trail'
+);
+
+select is(
+  (select array_agg(privilege_type::text order by privilege_type)
+   from information_schema.role_table_grants
+   where grantee = 'service_role'
+     and table_schema = 'public'
+     and table_name = 'profiles'),
+  array['DELETE', 'INSERT', 'SELECT', 'UPDATE']::text[],
+  'service_role has row DML, not table-administration privileges, on profiles'
+);
+
+select is(
+  (select array_agg(privilege_type::text order by privilege_type)
+   from information_schema.role_table_grants
+   where grantee = 'service_role'
+     and table_schema = 'public'
+     and table_name = 'properties'),
+  array['DELETE', 'INSERT', 'SELECT', 'UPDATE']::text[],
+  'service_role has row DML, not table-administration privileges, on properties'
+);
+
+select is(
+  (select array_agg(privilege_type::text order by privilege_type)
+   from information_schema.role_table_grants
+   where grantee = 'service_role'
+     and table_schema = 'public'
+     and table_name = 'units'),
+  array['DELETE', 'INSERT', 'SELECT', 'UPDATE']::text[],
+  'service_role has row DML, not table-administration privileges, on units'
+);
+
+select is(
+  (select array_agg(privilege_type::text order by privilege_type)
+   from information_schema.role_table_grants
+   where grantee = 'service_role'
+     and table_schema = 'public'
+     and table_name = 'vendors'),
+  array['DELETE', 'INSERT', 'SELECT', 'UPDATE']::text[],
+  'service_role has row DML, not table-administration privileges, on vendors'
+);
+
+select is(
+  (select array_agg(privilege_type::text order by privilege_type)
+   from information_schema.role_table_grants
+   where grantee = 'service_role'
+     and table_schema = 'public'
+     and table_name = 'work_orders'),
+  array['DELETE', 'INSERT', 'SELECT', 'UPDATE']::text[],
+  'service_role has row DML, not table-administration privileges, on work_orders'
+);
+
+select is(
+  (select array_agg(privilege_type::text order by privilege_type)
+   from information_schema.role_table_grants
+   where grantee = 'service_role'
+     and table_schema = 'public'
+     and table_name = 'work_order_attachments'),
+  array['DELETE', 'INSERT', 'SELECT', 'UPDATE']::text[],
+  'service_role has row DML, not table-administration privileges, on attachment metadata'
+);
+
+-- Prove the child DELETE revocation does not break the coordinated parent
+-- delete. Seeded work order 5 has activity and no attachment object to clean up,
+-- so it isolates the Postgres cascade that the server action relies on.
+select ok(
+  (select count(*) from public.work_order_activity
+   where work_order_id = '40000000-0000-0000-0000-000000000005') > 0,
+  'the cascade fixture starts with activity rows'
+);
+
+set local role service_role;
+
+select lives_ok(
+  $$delete from public.work_orders
+    where id = '40000000-0000-0000-0000-000000000005'$$,
+  'service_role may delete the parent work order through the coordinated path'
+);
+
+select is(
+  (select count(*) from public.work_order_activity
+   where work_order_id = '40000000-0000-0000-0000-000000000005')::int,
+  0,
+  'the parent delete still cascades its activity rows without child DELETE privilege'
+);
+
+reset role;
 
 select * from finish();
 
