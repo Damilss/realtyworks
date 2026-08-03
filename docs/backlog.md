@@ -76,6 +76,54 @@ Pick them off at your discretion.
 
 ## ✅ Done (kept for the paper trail)
 
+### ✅ Phase 3 — the staff write path (2026-08-02)
+Create a work order → assign a vendor → activity trail, over real RLS.
+`src/schemas/work-order.ts`, `src/server/actions/work-orders.ts`
+(`createWorkOrder` · `assignVendor` · `addNote`), `src/server/queries/`
+(`properties.ts`, `vendors.ts`, plus `getWorkOrder` / `listWorkOrderActivity`),
+`/work-orders/new` and `/work-orders/[id]`, and
+`src/components/features/work-orders/` (`activity-trail`, shared `labels`). New
+primitives: `textarea` and `native-select`; `form-feedback` moved out of the
+`(auth)` route group to `src/components/ui/` now that both halves use it.
+
+**A `<select>`, not shadcn's Radix Select.** The Radix one renders divs and
+needs a hidden native control to take part in a form POST at all. A real
+`<select>` submits with the server action, works before hydration, and gives
+phone users their platform picker — which matters for the vendor half.
+
+**`z.guid()`, not `z.uuid()` — this one cost an e2e run to find.** Zod v4's
+`uuid()` enforces RFC 9562 version and variant nibbles; Postgres's `uuid` type
+enforces neither and stores any 128-bit value. Every id in `seed.sql`
+(`10000000-0000-0000-0000-000000000001`) has version/variant nibbles of `0`, so
+`uuid()` rejected the whole fixture set and the create form could not be
+submitted at all against a seeded stack. The unit tests passed throughout,
+because their fixtures were invented v4-shaped ids — so those fixtures are now
+the real seeded ones, with a regression case pinning all three shapes.
+
+**Actor names resolve through `staff_directory`, never a `profiles` embed.** A
+vendor has no SELECT policy on staff profile rows, so an embed renders every
+staff action anonymously for exactly the person who needs to know who assigned
+them the job. Pinned by an e2e assertion on the specific trail entry.
+
+`assignVendor` moves status to `assigned` only from `open`, so reassigning a
+job mid-repair changes the vendor and not the state. 115 unit tests across 12
+files; `tests/e2e/work-orders.spec.ts` adds 5 specs (14 e2e total).
+**Still open — the vendor half:** magic-link invite, vendor status update,
+photo upload.
+
+### ✅ Reject empty/whitespace notes on the activity trail (2026-08-02, issue #76)
+Forward migration `20260802143000_require_non_blank_activity_note.sql` tightens
+`activity_note_requires_text` from `note is not null` to
+`note is not null and char_length(trim(note)) > 0`. Landed with the note form —
+the first client that could ever write one — and mirrored in `addNoteSchema` so
+the form says so before the round trip.
+
+**The null arm has to stay in the predicate.** A CHECK evaluating to NULL
+passes, and `char_length(trim(null))` is NULL, so testing the trimmed length
+alone would have let a null note through on a `note_added` row — the exact case
+the constraint exists to prevent. pgTAP covers empty, whitespace-only, and null
+separately (89 assertions, up from 86).
+
 ### ✅ Auth forms survive a failed submit (2026-08-01)
 Both `useActionState` forms lost every field whenever the action came back with
 an error — a mistyped phone on `/signup` cost the user all four. Not a Next.js
@@ -520,18 +568,6 @@ one as a duplicate.
 **Done when:** a whitespace-only value is rejected on every required text column,
 with a pgTAP assertion each.
 
-### 🟡 Reject empty/whitespace notes on the activity trail (issue #76)
-**Why:** `activity_note_requires_text` only checks `note is not null`, and the
-length check is `<= 2000`, so `''` and `'   '` both insert. The trail is
-append-only for **everyone** — no UPDATE/DELETE policy, plus a forbid trigger —
-so a blank note is permanent and unfixable, in the table `CLAUDE.md` §5 calls a
-product feature.
-**Do:** new migration tightening the constraint to require non-blank text on
-`note_added` (`char_length(trim(note)) > 0`), matching the vendor-contact
-`nullif(trim(...), '')` idiom. Mirror it in the Phase 3 zod schema so the client
-rejects it before the round trip.
-**Done when:** inserting a blank or whitespace-only note fails, covered by pgTAP.
-
 ### 🟡 Scope the sign-out action to the current session
 **Why:** `src/server/actions/auth.ts` calls `supabase.auth.signOut()` with no
 options, and `@supabase/auth-js` (2.110.7) declares that as
@@ -645,10 +681,16 @@ activity log reflects it → manager sees it. Exercises auth, RLS, mutations, st
 session-gated shell, and the work-order **list**, with Playwright driving both
 seeded roles against a real stack. That covers auth and RLS-on-read.
 
-**Still open — the whole write half:** create a work order · assign a vendor ·
-vendor updates status + uploads a photo · the activity trail rendered back to
-the manager. Nothing here has a mutation path yet, so storage, the audit trail,
-and the vendor column-guard trigger are all still unexercised from the app.
+**Done 2026-08-02 (see ✅ above):** the staff write path — create a work order ·
+assign a vendor · the activity trail rendered back, including notes. That
+exercises RLS-on-write, the column grants, and the activity triggers from the
+app for the first time.
+
+**Still open — the vendor half:** the magic-link invite, the vendor's status
+update, and the photo upload. Storage and the vendor column-guard trigger are
+still unexercised from the app, and `supabase/functions/` and `src/app/api/`
+remain the two unbuilt `CLAUDE.md` §3 folders — the invite's `/auth/confirm`
+route handler is the first thing that will need the latter.
 
 The vendor half is **magic-link, not a signup** — vendors get a real auth user reached by a unique
 link (a "Copy vendor link" button in Phase 3; delivered over SMS in Phase 5). Design per
@@ -690,8 +732,15 @@ unknown-account alike; nothing role-shaped in the signup metadata), plus
 `src/schemas/auth.test.ts` and a `LoginForm` RTL suite. 66 unit tests across 9
 files; `tests/unit/harness.test.tsx` retired.
 
-**Still open:** work-order state transitions — there is no mutation path yet, so
-there is nothing to test. Lands with the write half of the vertical slice.
+**Done 2026-08-02:** the staff-side state transitions.
+`src/schemas/work-order.test.ts` (the DB CHECKs mirrored, plus the `guid`/`uuid`
+regression) and `src/server/actions/work-orders.test.ts` (invalid input never
+reaches Supabase; the insert carries only the granted columns; `assignVendor`
+leaves a non-`open` status alone; a note never sets `action` or `actor_id`).
+115 unit tests across 12 files.
+
+**Still open:** the vendor-side transition — `in_progress`/`completed` through
+`guard_work_order_update()`. Lands with the vendor half.
 
 ### 🟢 Phase 4 — Observability & deploy (issue #36)
 `@sentry/nextjs`, Vercel PR preview deploys, prod deploys only from `main`. Keep a working

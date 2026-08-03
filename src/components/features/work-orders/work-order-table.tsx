@@ -1,3 +1,10 @@
+import Link from "next/link";
+
+import {
+  PRIORITY_LABEL,
+  PRIORITY_VARIANT,
+  STATUS_LABEL,
+} from "@/components/features/work-orders/labels";
 import { Badge } from "@/components/ui/badge";
 import {
   Table,
@@ -7,30 +14,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import type { Enums } from "@/lib/database.types";
 import type { WorkOrderListItem } from "@/server/queries/work-orders";
-
-/**
- * Only `urgent` and `high` earn a loud treatment — badging every row the same
- * weight would make the column decorative instead of informative.
- */
-const PRIORITY_VARIANT: Record<
-  Enums<"work_order_priority">,
-  "default" | "secondary" | "destructive" | "outline"
-> = {
-  urgent: "destructive",
-  high: "default",
-  medium: "secondary",
-  low: "outline",
-};
-
-const STATUS_LABEL: Record<Enums<"work_order_status">, string> = {
-  open: "Open",
-  assigned: "Assigned",
-  in_progress: "In progress",
-  completed: "Completed",
-  cancelled: "Cancelled",
-};
 
 function formatLocation(workOrder: WorkOrderListItem) {
   // A work order may be property-level, with no unit.
@@ -60,7 +44,17 @@ export function WorkOrderTable({
         <TableBody>
           {workOrders.map((workOrder) => (
             <TableRow key={workOrder.id}>
-              <TableCell className="font-medium">{workOrder.title}</TableCell>
+              <TableCell className="font-medium">
+                {/* The whole row is the target in spirit, but only the title is
+                    a link: a <tr> cannot contain an <a> wrapping every cell
+                    without producing invalid table markup. */}
+                <Link
+                  href={`/work-orders/${workOrder.id}`}
+                  className="underline-offset-4 hover:underline"
+                >
+                  {workOrder.title}
+                </Link>
+              </TableCell>
               <TableCell className="text-muted-foreground">
                 {formatLocation(workOrder) || "—"}
               </TableCell>
@@ -71,7 +65,7 @@ export function WorkOrderTable({
               </TableCell>
               <TableCell>
                 <Badge variant={PRIORITY_VARIANT[workOrder.priority]}>
-                  {workOrder.priority}
+                  {PRIORITY_LABEL[workOrder.priority]}
                 </Badge>
               </TableCell>
               <TableCell className="text-muted-foreground">

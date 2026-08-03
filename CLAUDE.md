@@ -164,13 +164,34 @@ Verify before assuming they exist:
   options, and auth-js defaults that to **global** scope, so signing out on one
   device revokes the account's sessions everywhere. It should pass
   `{ scope: "local" }`.
-- **Phase 3 (the vertical slice) is in progress.** UI toolkit and the auth loop
-  both landed 2026-07-27; next is the work-order half — create a work order,
-  assign a vendor, vendor status update + photo upload, activity trail. SSO
-  (Google first, then Microsoft, then Apple) is queued as the next PR. Both are
-  tracked in `docs/backlog.md`, along with schema-review follow-ups that are
-  fill-in work, not blockers.
-- **Not yet created:** `supabase/functions/`, `src/app/api/`.
+- **In place — staff write path (2026-08-02):** `src/schemas/work-order.ts`,
+  `src/server/actions/work-orders.ts` (`createWorkOrder` · `assignVendor` ·
+  `addNote`), `src/server/queries/` (`properties.ts` · `vendors.ts`, plus
+  `getWorkOrder` / `listWorkOrderActivity`), `/work-orders/new` and
+  `/work-orders/[id]`, and `src/components/features/work-orders/`. Three rules
+  worth carrying into the vendor half. **Use `z.guid()`, never `z.uuid()`**, for
+  anything that lands in a Postgres `uuid` column: zod v4's `uuid()` enforces
+  RFC 9562 version/variant nibbles that Postgres does not, and it rejects every
+  id in `seed.sql`. **Resolve actor names through `public.staff_directory`**,
+  never a `profiles` embed — a vendor has no SELECT policy on staff profile
+  rows, so the embed silently renders staff actions anonymously. And **forms use
+  a native `<select>`** (`src/components/ui/native-select.tsx`), not shadcn's
+  Radix Select, so they submit with the server action and work before
+  hydration. Forward migration
+  `20260802143000_require_non_blank_activity_note.sql` closes the blank-note
+  hole (issue #76).
+- **Phase 3 (the vertical slice) is in progress.** UI toolkit and auth loop
+  landed 2026-07-27, the staff write path 2026-08-02; what remains is the
+  **vendor half** — magic-link invite, vendor status update, photo upload. That
+  needs a `SUPABASE_SECRET_KEY` server-only admin client, because
+  `work_order_attachments` has no client INSERT grant by design and
+  `auth.admin.generateLink` is privileged. SSO (Google first, then Microsoft,
+  then Apple) is queued after. All tracked in `docs/backlog.md`, along with
+  schema-review follow-ups that are fill-in work, not blockers.
+- **Not yet created:** `supabase/functions/`, `src/app/api/`. Neither is a
+  gap to fill on its own — edge functions are Phase 5 (§6 SMS), and route
+  handlers arrive with the vendor invite's `/auth/confirm` and the SSO
+  callback. Do not scaffold either speculatively (§3/§8).
 - When you add the next missing piece, follow §3/§5 exactly (e.g.
   `src/server/` as the trust boundary; schema changes only as new migrations
   with RLS alongside).
