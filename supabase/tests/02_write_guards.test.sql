@@ -8,7 +8,7 @@ begin;
 create extension if not exists pgtap with schema extensions;
 set search_path to public, extensions;
 
-select plan(68);
+select plan(73);
 
 -- ── vendor write surface ────────────────────────────────────────────────────
 do $$
@@ -113,6 +113,56 @@ select throws_ok(
     values ('40000000-0000-0000-0000-000000000003', '   ')$$,
   '23514', null,
   'a whitespace-only note is refused by activity_note_requires_text'
+);
+
+-- Spaces are the easy case. trim()'s default character set is the ASCII space
+-- alone, so a note of tabs or newlines comes back from it unchanged and clears
+-- any length test built on it — and `authenticated` holds
+-- `insert (work_order_id, note)`, so that note reaches the table through a
+-- direct Data API call with the zod schema nowhere in the path. These are the
+-- cases that say the predicate is whitespace-aware and not merely space-aware.
+select throws_ok(
+  $$insert into public.work_order_activity (work_order_id, note)
+    values ('40000000-0000-0000-0000-000000000003',
+            U&'!0009!0009' UESCAPE '!')$$,
+  '23514', null,
+  'a tab-only note is refused by activity_note_requires_text'
+);
+
+select throws_ok(
+  $$insert into public.work_order_activity (work_order_id, note)
+    values ('40000000-0000-0000-0000-000000000003',
+            U&'!000A!000D!000A' UESCAPE '!')$$,
+  '23514', null,
+  'a newline-only note is refused by activity_note_requires_text'
+);
+
+select throws_ok(
+  $$insert into public.work_order_activity (work_order_id, note)
+    values ('40000000-0000-0000-0000-000000000003',
+            U&'!0020!0009!000A!000B!000C!000D!0020' UESCAPE '!')$$,
+  '23514', null,
+  'a mixed ASCII-whitespace note is refused by activity_note_requires_text'
+);
+
+-- The Unicode half of the set String.prototype.trim() removes, so the
+-- constraint and addNoteSchema agree on a non-breaking space pasted out of a
+-- rich-text editor rather than one of them accepting what the other rejects.
+select throws_ok(
+  $$insert into public.work_order_activity (work_order_id, note)
+    values ('40000000-0000-0000-0000-000000000003',
+            U&'!00A0!2003!FEFF' UESCAPE '!')$$,
+  '23514', null,
+  'a Unicode-whitespace-only note is refused by activity_note_requires_text'
+);
+
+-- The other direction: padding is not the offence, emptiness is. A note with
+-- real text inside surrounding whitespace still writes.
+select lives_ok(
+  $$insert into public.work_order_activity (work_order_id, note)
+    values ('40000000-0000-0000-0000-000000000003',
+            U&'!0009 padded but real !000A' UESCAPE '!')$$,
+  'a whitespace-padded note with real text is still accepted'
 );
 
 -- The null arm still has to fail on its own: a CHECK evaluating to NULL passes,
