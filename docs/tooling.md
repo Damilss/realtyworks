@@ -268,6 +268,34 @@ What was checked, and what's worth re-checking next time:
 - `@img/sharp-libvips-*` moved 1.2.4 → **1.3.2 for every platform** in the
   lockfile, `linux-x64` included — CI builds there, not on darwin-arm64.
 
+**When the override *is* the blocker (2026-08-03).** Three advisories landed at
+once — two high, one moderate — and every one was a follow-up to an advisory
+this file already records:
+
+| Advisory | Package | Patched | Parent's range | Fix |
+|---|---|---|---|---|
+| GHSA-7p8r-x3mc-p8w7 | `fast-uri` 3.1.4 | `>=3.1.5` | `ajv` wants `^3.0.1` — **in range** | `pnpm update fast-uri --depth Infinity` |
+| GHSA-rgw5-rvv9-x895 | `brace-expansion` 5.0.8 | `>=5.0.9` | `minimatch@10` wants `^5.0.5` — **in range** | delete the stale override, then refresh |
+| GHSA-fxqj-rqcc-2cmp | `postcss` 8.5.22 | `>=8.5.23` | `next` exact-pins 8.4.31 — **out of range** | raise the override floor to `postcss@<8.5.23: ^8.5.23` |
+
+`fast-uri` was the stale-pin case for a third time — a refresh, no manifest
+change. The other two carry the new lesson: **an override with an exact version
+becomes the thing pinning the vulnerable release in place.**
+`brace-expansion@<5.0.8: 5.0.8` was written when 5.0.8 was the only patched
+build. GHSA-rgw5-rvv9-x895 then landed as a *bypass of that very fix*, and
+because the key `<5.0.8` no longer matched and the value was an exact `5.0.8`,
+`pnpm update --depth Infinity` had nothing it was allowed to move. Every
+consumer declares `^5.0.5`, which 5.0.9 satisfies, so the override had outlived
+its reason: deleting it and refreshing was the fix, not bumping it. Its
+companion `minimatch@<9: ^10.0.0` stays — that one is still out of range and is
+what keeps the CJS `minimatch@3` line off 5.x's ESM-only export.
+
+Two habits follow. Prefer a **range** value (`^5.0.9`) over an exact one unless
+the exact version is genuinely the only patched build, so the next patch can
+flow in on a refresh. And when an advisory names a package already in
+`overrides`, re-check whether the override is still *needed* before raising it —
+if the patch is in the parent's range, the entry should be deleted, not bumped.
+
 ### Why the gate requires pnpm 11 (`packageManager` pin)
 
 npm retired the legacy audit endpoints (`/-/npm/v1/security/audits` and
