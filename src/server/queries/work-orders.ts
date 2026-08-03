@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 
 import type { Enums, Json } from "@/lib/database.types";
 import { createClient } from "@/lib/supabase/server";
+import { workOrderIdSchema } from "@/schemas/work-order";
 import { requireSession } from "@/server/queries/session";
 
 export type WorkOrderListItem = {
@@ -90,6 +91,16 @@ export type WorkOrderDetail = WorkOrderListItem & {
  */
 export async function getWorkOrder(id: string): Promise<WorkOrderDetail> {
   await requireSession();
+
+  // Before the query, not after: `id` comes off the URL, and Postgres compares
+  // `uuid` to `uuid`, so /work-orders/not-a-uuid fails the cast with 22P02 and
+  // takes the error branch below — a 500 on an address anyone can type. A
+  // malformed id names no work order, which is the same answer as an id that
+  // names one the caller may not see.
+  if (!workOrderIdSchema.safeParse(id).success) {
+    notFound();
+  }
+
   const supabase = await createClient();
 
   const { data, error } = await supabase
@@ -221,6 +232,14 @@ export async function listWorkOrderActivity(
   workOrderId: string,
 ): Promise<ActivityEntry[]> {
   await requireSession();
+
+  // Same 22P02 guard as getWorkOrder(). An empty trail rather than notFound()
+  // because this one answers a narrower question — the page it feeds already
+  // 404s on the work order itself, and a list has a truthful empty answer.
+  if (!workOrderIdSchema.safeParse(workOrderId).success) {
+    return [];
+  }
+
   const supabase = await createClient();
 
   const [

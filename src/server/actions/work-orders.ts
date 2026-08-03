@@ -70,21 +70,42 @@ function submittedValues(
 /**
  * Turns a refusal from Postgres into something a user can act on. The database
  * is doing the enforcing, so these are translations, not policy.
+ *
+ * `foreignKeyMessage` is a parameter because 23503 is not one situation. A work
+ * order can point at a property that was deleted since the page loaded, at a
+ * unit that belongs to a different property, or at a vendor that no longer
+ * exists, and an activity row can point at a work order someone removed
+ * mid-edit — all the same SQLSTATE, arriving at the same mapper. Deciding the
+ * sentence here meant every one of them read as a unit/property mismatch, which
+ * is unactionable advice for a form with no unit on it.
  */
-function describeError(error: { code?: string; message?: string }): string {
+function describeError(
+  error: { code?: string; message?: string },
+  foreignKeyMessage: string,
+): string {
   switch (error.code) {
     // RLS or a missing column grant, and the vendor guard trigger's own raise.
     case "42501":
       return "You do not have permission to make that change.";
-    // Composite FK: the chosen unit does not belong to the chosen property.
     case "23503":
-      return "That unit does not belong to the selected property.";
+      return foreignKeyMessage;
     case "23514":
       return "That change is not allowed for this work order.";
     default:
       return "Something went wrong. Try again.";
   }
 }
+
+/**
+ * `work_orders_vendor_id_fkey`, the only foreign key an assignment can break:
+ * the vendor was deleted between the page rendering the option and the form
+ * posting it. A landlord can delete a vendor directly, so this is a real race,
+ * not a theoretical one.
+ */
+const VENDOR_GONE = "That vendor is no longer available.";
+
+/** `work_order_activity_work_order_id_fkey` — the job was deleted mid-note. */
+const WORK_ORDER_GONE = "That work order is no longer available.";
 
 const CREATE_FIELDS = [
   "propertyId",
@@ -135,7 +156,19 @@ export async function createWorkOrder(
     console.error("[work-orders] Failed to create work order", {
       code: error.code,
     });
-    return { error: describeError(error), values };
+    // Two different constraints answer with 23503 here — the property FK and the
+    // composite unit-in-property one — so the sentence follows what was actually
+    // on the form. Naming a unit to someone who chose "Whole property" sends
+    // them looking for a field they never touched.
+    return {
+      error: describeError(
+        error,
+        parsed.data.unitId
+          ? "That unit does not belong to the selected property, or one of them has been removed."
+          : "That property is no longer available.",
+      ),
+      values,
+    };
   }
 
   revalidatePath("/dashboard");
@@ -171,11 +204,11 @@ export async function assignVendor(
     console.error("[work-orders] Failed to read work order before assigning", {
       code: readError.code,
     });
-    return { error: describeError(readError), values };
+    return { error: describeError(readError, VENDOR_GONE), values };
   }
 
   if (!current) {
-    return { error: "That work order is no longer available.", values };
+    return { error: WORK_ORDER_GONE, values };
   }
 
   // Advance an untouched work order to 'assigned', but never rewind one that is
@@ -202,7 +235,7 @@ export async function assignVendor(
     console.error("[work-orders] Failed to assign vendor", {
       code: error.code,
     });
-    return { error: describeError(error), values };
+    return { error: describeError(error, VENDOR_GONE), values };
   }
 
   revalidatePath(`/work-orders/${parsed.data.workOrderId}`);
@@ -237,7 +270,7 @@ export async function addNote(
 
   if (error) {
     console.error("[work-orders] Failed to add note", { code: error.code });
-    return { error: describeError(error), values };
+    return { error: describeError(error, WORK_ORDER_GONE), values };
   }
 
   revalidatePath(`/work-orders/${parsed.data.workOrderId}`);

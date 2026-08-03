@@ -189,8 +189,22 @@ describe("createWorkOrder", () => {
     const state = await createWorkOrder({}, formData(validCreate));
 
     expect(state.error).toBe(
-      "That unit does not belong to the selected property.",
+      "That unit does not belong to the selected property, or one of them has been removed.",
     );
+  });
+
+  // Same SQLSTATE, different constraint: with no unit on the form the only
+  // foreign key left to break is the property's, and naming a unit there sends
+  // the user hunting for a field they never filled in.
+  it("blames the property, not a unit, when no unit was chosen", async () => {
+    stubSupabase({ data: null, error: { code: "23503" } });
+
+    const state = await createWorkOrder(
+      {},
+      formData({ ...validCreate, unitId: "" }),
+    );
+
+    expect(state.error).toBe("That property is no longer available.");
   });
 });
 
@@ -252,6 +266,20 @@ describe("assignVendor", () => {
     expect(state.fieldErrors?.vendorId).toBeDefined();
     expect(from).not.toHaveBeenCalled();
   });
+
+  // work_orders_vendor_id_fkey: a landlord can delete a vendor directly, so the
+  // option the page rendered can be gone by the time the form posts. Same 23503
+  // the create path sees, and it has nothing to do with units.
+  it("names the vendor when the vendor is the foreign key that broke", async () => {
+    stubSupabase({ data: { status: "open" } }, { error: { code: "23503" } });
+
+    const state = await assignVendor(
+      {},
+      formData({ workOrderId: WORK_ORDER_ID, vendorId: VENDOR_ID }),
+    );
+
+    expect(state.error).toBe("That vendor is no longer available.");
+  });
 });
 
 describe("addNote", () => {
@@ -300,5 +328,18 @@ describe("addNote", () => {
     );
 
     expect(state.values).toBeUndefined();
+  });
+
+  // The third 23503 in this file, and the third meaning: the work order itself
+  // was deleted while the note was being typed.
+  it("names the work order when its foreign key is the one that broke", async () => {
+    stubSupabase({ error: { code: "23503" } });
+
+    const state = await addNote(
+      {},
+      formData({ workOrderId: WORK_ORDER_ID, note: "Still leaking." }),
+    );
+
+    expect(state.error).toBe("That work order is no longer available.");
   });
 });

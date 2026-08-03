@@ -18,6 +18,9 @@ const SEED_PASSWORD = "password123";
 const SEED_VENDOR_NAME = "Bob's Handyman Services";
 const SEED_PROPERTY = "Maple Court Apartments";
 
+/** The other seeded property, so a select reverting to the first one is visible. */
+const SEED_SECOND_PROPERTY = "Oak Street House";
+
 /**
  * `profiles.full_name` for manager@realtyworks.test. The trail resolves it
  * through `staff_directory`, so asserting on it is asserting that the view
@@ -205,6 +208,62 @@ test("assignment is what makes a work order visible to the vendor", async ({
 
   // Assignment is not authorship: the vendor gets no assign control.
   await expect(page.getByLabel("Vendor")).toHaveCount(0);
+});
+
+/**
+ * The failed-submit preservation rule (CLAUDE.md §0), for the fields it is
+ * hardest to keep. React resets an uncontrolled form after every action, and a
+ * <select> does not follow a changed `defaultValue` once mounted — nor a changed
+ * `value`, which is why "make it controlled" is not the fix. Only a real browser
+ * shows this: the component renders the right thing either way, and it is the
+ * DOM that disagrees.
+ */
+test("a failed submit keeps the select choices, not just the text", async ({
+  page,
+}) => {
+  await signIn(page, "manager@realtyworks.test");
+  await page.goto("/work-orders/new");
+
+  // A whitespace title clears HTML `required` and fails the schema, which is the
+  // cheapest way to reach the same post-action reset a server-side failure takes.
+  await page.getByLabel("Title").fill("   ");
+  // The second property, so a revert to the first one is visible.
+  await page
+    .getByLabel("Property")
+    .selectOption({ label: SEED_SECOND_PROPERTY });
+  await page.getByLabel("Unit").selectOption({ index: 1 });
+  await page.getByLabel("Priority").selectOption("urgent");
+  await page.getByLabel("Description").fill("Reported by the tenant.");
+
+  const chosenProperty = await page.getByLabel("Property").inputValue();
+  const chosenUnit = await page.getByLabel("Unit").inputValue();
+
+  await page.getByRole("button", { name: "Create work order" }).click();
+  await expect(page.getByText("Enter a title.")).toBeVisible();
+
+  await expect(page.getByLabel("Property")).toHaveValue(chosenProperty);
+  await expect(page.getByLabel("Unit")).toHaveValue(chosenUnit);
+  await expect(page.getByLabel("Priority")).toHaveValue("urgent");
+
+  // The fields that already worked, so a regression here is distinguishable
+  // from one in the selects.
+  await expect(page.getByLabel("Title")).toHaveValue("   ");
+  await expect(page.getByLabel("Description")).toHaveValue(
+    "Reported by the tenant.",
+  );
+});
+
+test("a malformed work-order id is a 404, not a server error", async ({
+  page,
+}) => {
+  await signIn(page, "manager@realtyworks.test");
+
+  // Postgres compares uuid to uuid, so an id that is not that shape fails the
+  // cast rather than returning no rows — which reached the user as a 500 on an
+  // address anyone can type. It names no work order, so it is a 404 like any
+  // other.
+  const refused = await page.goto("/work-orders/not-a-uuid");
+  expect(refused?.status()).toBe(404);
 });
 
 test("a vendor cannot open the create form", async ({ page }) => {
