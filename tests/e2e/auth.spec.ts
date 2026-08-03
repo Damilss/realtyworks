@@ -11,9 +11,25 @@ import { test, expect, type Page } from "@playwright/test";
 
 const SEED_PASSWORD = "password123";
 
-// Seeded work orders, by who may see them (supabase/seed.sql).
-const STAFF_ONLY_WORK_ORDER = "Repaint hallway scuffs";
-const VENDOR_ASSIGNED_WORK_ORDER = "Water heater not heating";
+/**
+ * The seeded work orders, split by who may see them (supabase/seed.sql).
+ *
+ * Asserted by identity, never by row count. playwright.config.ts runs fully
+ * parallel against one shared database and the work-order specs write to it, so
+ * "every work order" is the seed plus whatever another spec has committed by
+ * then — and a CI retry re-runs against the rows the failed attempt left behind,
+ * which turns one flake into a guaranteed failure. Identity is the stronger
+ * claim anyway: a count of five never said it was the right five.
+ */
+const STAFF_ONLY_WORK_ORDERS = [
+  "Dripping kitchen faucet",
+  "Repaint hallway scuffs",
+];
+const VENDOR_ASSIGNED_WORK_ORDERS = [
+  "Water heater not heating",
+  "Roof leak above back bedroom",
+  "Gutter cleaning — full exterior",
+];
 
 async function signIn(page: Page, email: string, password = SEED_PASSWORD) {
   await page.goto("/login");
@@ -41,9 +57,14 @@ test("manager signs in and sees every work order", async ({ page }) => {
   ).toBeVisible();
   await expect(page.getByText("manager", { exact: true })).toBeVisible();
 
-  // All five seeded work orders, header row excluded.
-  await expect(page.locator("tbody tr")).toHaveCount(5);
-  await expect(page.getByText(STAFF_ONLY_WORK_ORDER)).toBeVisible();
+  // Every seeded work order, including the two nobody is assigned to — staff
+  // scope is "all of them", not "the ones with my name on them".
+  for (const workOrder of [
+    ...STAFF_ONLY_WORK_ORDERS,
+    ...VENDOR_ASSIGNED_WORK_ORDERS,
+  ]) {
+    await expect(page.getByText(workOrder)).toBeVisible();
+  }
 });
 
 test("vendor signs in and sees only their assigned work orders", async ({
@@ -52,12 +73,16 @@ test("vendor signs in and sees only their assigned work orders", async ({
   await signIn(page, "vendor@realtyworks.test");
 
   await expect(page).toHaveURL("/dashboard");
-  await expect(page.locator("tbody tr")).toHaveCount(3);
-  await expect(page.getByText(VENDOR_ASSIGNED_WORK_ORDER)).toBeVisible();
+
+  for (const workOrder of VENDOR_ASSIGNED_WORK_ORDERS) {
+    await expect(page.getByText(workOrder)).toBeVisible();
+  }
 
   // The RLS boundary, observed through the UI: an unassigned work order is not
   // merely hidden by the view, it never reaches the client.
-  await expect(page.getByText(STAFF_ONLY_WORK_ORDER)).toHaveCount(0);
+  for (const workOrder of STAFF_ONLY_WORK_ORDERS) {
+    await expect(page.getByText(workOrder)).toHaveCount(0);
+  }
 });
 
 test("a self-registration lands with no access at all", async ({
@@ -87,7 +112,15 @@ test("a self-registration lands with no access at all", async ({
   await expect(
     page.getByRole("heading", { name: /isn't linked yet/i }),
   ).toBeVisible();
-  await expect(page.getByText(STAFF_ONLY_WORK_ORDER)).toHaveCount(0);
+  for (const workOrder of [
+    ...STAFF_ONLY_WORK_ORDERS,
+    ...VENDOR_ASSIGNED_WORK_ORDERS,
+  ]) {
+    await expect(page.getByText(workOrder)).toHaveCount(0);
+  }
+
+  // Safe to count here, unlike the two specs above: this account is linked to
+  // nothing, so RLS returns zero rows no matter what another spec writes.
   await expect(page.locator("tbody tr")).toHaveCount(0);
 });
 
