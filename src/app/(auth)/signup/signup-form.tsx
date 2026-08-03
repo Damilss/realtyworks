@@ -24,6 +24,10 @@ export function SignupForm() {
           type="text"
           autoComplete="name"
           required
+          // React resets an uncontrolled form after every action, error paths
+          // included. Without these defaults one bad phone number costs the
+          // user every field on the form.
+          defaultValue={state.values?.fullName}
           aria-invalid={Boolean(state.fieldErrors?.fullName)}
         />
         <FieldError messages={state.fieldErrors?.fullName} />
@@ -37,6 +41,7 @@ export function SignupForm() {
           type="email"
           autoComplete="email"
           required
+          defaultValue={state.values?.email}
           aria-invalid={Boolean(state.fieldErrors?.email)}
         />
         <FieldError messages={state.fieldErrors?.email} />
@@ -51,6 +56,9 @@ export function SignupForm() {
           autoComplete="tel"
           placeholder="+1 555 123 4567"
           required
+          // As typed, not normalized — the number being corrected should read
+          // back the way it was entered.
+          defaultValue={state.values?.phone}
           aria-invalid={Boolean(state.fieldErrors?.phone)}
         />
         <FieldError messages={state.fieldErrors?.phone} />
@@ -64,6 +72,8 @@ export function SignupForm() {
           type="password"
           autoComplete="new-password"
           required
+          // No defaultValue on purpose: the action never echoes a password
+          // back, so this one field clears on failure.
           aria-invalid={Boolean(state.fieldErrors?.password)}
         />
         <FieldError messages={state.fieldErrors?.password} />
