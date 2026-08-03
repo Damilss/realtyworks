@@ -500,29 +500,6 @@ required-check names are unchanged; the OSV scan surfaces as a non-required
 
 ## 🟠 High
 
-### 🟠 Fix invalid `Slot.Root` usage in the Badge component
-**Why:** `src/components/ui/badge.tsx` treats the imported Radix `Slot`
-component as a namespace and selects `Slot.Root` when `asChild` is true. The
-import does not expose a `Root` member, so the polymorphic rendering path can
-fail type-checking or attempt to render an undefined component at runtime.
-**Do:** select `Slot` directly in the `asChild` branch:
-`const Comp = asChild ? Slot : "span";`. Add coverage that renders a Badge with
-`asChild` and confirms its child is used as the rendered element.
-**Done when:** Badge passes type-checking and renders correctly with both the
-default `span` path and `asChild` enabled.
-
-### 🟠 Fix invalid `LabelPrimitive.Root` usage in the Label component
-**Why:** `src/components/ui/label.tsx` imports `LabelPrimitive` as a component
-but treats it as a namespace by typing props from and rendering
-`LabelPrimitive.Root`. The imported component has no `Root` member, which can
-fail type-checking and rendering.
-**Do:** type the props as
-`React.ComponentProps<typeof LabelPrimitive>` and render `LabelPrimitive`
-directly. Add a focused render test that verifies the wrapper forwards its
-props to the underlying label component.
-**Done when:** Label passes type-checking, renders without referencing a
-nonexistent `Root` property, and continues to forward its props correctly.
-
 ### 🟠 Turn on email confirmations before the Phase 4 public deploy
 **Why:** `[auth.email] enable_confirmations = false` was harmless while signup
 was invite-only. Since signup opened (2026-07-27) it means **anyone can create
