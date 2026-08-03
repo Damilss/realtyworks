@@ -144,6 +144,41 @@ describe("signIn", () => {
     expect(mockedRedirect).toHaveBeenCalledWith("/dashboard");
   });
 
+  it("hands the submitted email back so the reset does not clear it", async () => {
+    // React resets an uncontrolled form after every action, so an error state
+    // that carries no values wipes the field the user has to correct.
+    stubSupabase({
+      signInWithPassword: vi.fn().mockResolvedValue({
+        error: { message: "Invalid login credentials", status: 400 },
+      }),
+    });
+
+    const state = await signIn({}, formData(validLogin));
+
+    expect(state.values).toEqual({ email: "manager@realtyworks.test" });
+  });
+
+  it("hands it back on a validation failure too", async () => {
+    const state = await signIn(
+      {},
+      formData({ email: "not-an-email", password: "" }),
+    );
+
+    expect(state.values?.email).toBe("not-an-email");
+  });
+
+  it("never echoes the password back to the browser", async () => {
+    stubSupabase({
+      signInWithPassword: vi
+        .fn()
+        .mockResolvedValue({ error: { message: "nope", status: 400 } }),
+    });
+
+    const state = await signIn({}, formData(validLogin));
+
+    expect(JSON.stringify(state)).not.toContain(validLogin.password);
+  });
+
   it("passes the trimmed email through to Supabase", async () => {
     const auth = stubSupabase();
 
@@ -206,6 +241,47 @@ describe("signUp", () => {
 
     expect(metadataKeys).toEqual(["full_name", "phone"]);
     expect(JSON.stringify(sent)).not.toContain("landlord");
+  });
+
+  it("hands every non-secret field back, as typed", async () => {
+    stubSupabase({
+      signUp: vi.fn().mockResolvedValue({
+        error: { message: "User already registered", status: 422 },
+      }),
+    });
+
+    const state = await signUp({}, formData(validSignup));
+
+    expect(state.values).toEqual({
+      fullName: "New Person",
+      email: "new@realtyworks.test",
+      // Not "+15551234567" — the user corrects what they typed, not what the
+      // schema normalized it into.
+      phone: "+1 (555) 123-4567",
+    });
+    expect(JSON.stringify(state)).not.toContain(validSignup.password);
+  });
+
+  it("hands back the fields that validated alongside the one that did not", async () => {
+    const state = await signUp({}, formData({ ...validSignup, phone: "12" }));
+
+    expect(state.fieldErrors?.phone).toBeDefined();
+    expect(state.values?.fullName).toBe("New Person");
+    expect(state.values?.email).toBe("new@realtyworks.test");
+    expect(state.values?.phone).toBe("12");
+  });
+
+  it("bounds what it echoes, and drops a field that is not text", async () => {
+    const data = formData({ ...validSignup, email: "nope" });
+    data.set("fullName", "a".repeat(400));
+    // A server action is a public POST endpoint: a caller can send a file part
+    // where the form sends text, and String()-ing one yields "[object File]".
+    data.set("phone", new File(["x"], "phone.txt"));
+
+    const state = await signUp({}, data);
+
+    expect(state.values?.fullName).toHaveLength(256);
+    expect(state.values?.phone).toBeUndefined();
   });
 
   it("does not confirm whether an email is already registered", async () => {

@@ -96,6 +96,51 @@ test("a wrong password is refused without saying why", async ({ page }) => {
 
   await expect(page).toHaveURL("/login");
   await expect(formAlert(page)).toHaveText("Invalid email or password.");
+
+  // The half of this only a real browser can prove: React resets an
+  // uncontrolled form after every action, so without the values the action
+  // echoes back, the address would be gone by the time the error rendered.
+  await expect(page.getByLabel("Email")).toHaveValue(
+    "manager@realtyworks.test",
+  );
+  await expect(page.getByLabel("Password")).toHaveValue("");
+});
+
+test("a rejected signup keeps everything but the password", async ({
+  page,
+}) => {
+  // Both rejection paths, in the order a real user hits them. Nothing here
+  // writes — the address is a seeded one, so the second attempt fails on the
+  // duplicate — which keeps this off the fresh-seed state the self-registration
+  // spec depends on.
+  await page.goto("/signup");
+  await page.getByLabel("Full name").fill("Already Registered");
+  await page.getByLabel("Email").fill("manager@realtyworks.test");
+  await page.getByLabel("Phone").fill("12");
+  await page.getByLabel("Password").fill(SEED_PASSWORD);
+  await page.getByRole("button", { name: "Create account" }).click();
+
+  // Rejected by the schema, before Supabase. The field the user has to fix is
+  // the only thing they should have to look at.
+  await expect(page.getByText("Enter a valid phone number.")).toBeVisible();
+  await expect(page.getByLabel("Full name")).toHaveValue("Already Registered");
+  await expect(page.getByLabel("Email")).toHaveValue(
+    "manager@realtyworks.test",
+  );
+  await expect(page.getByLabel("Phone")).toHaveValue("12");
+  await expect(page.getByLabel("Password")).toHaveValue("");
+
+  // Rejected by GoTrue this time, which is a different return path in the
+  // action and resets the form just the same.
+  await page.getByLabel("Phone").fill("+1 (555) 123-9999");
+  await page.getByLabel("Password").fill(SEED_PASSWORD);
+  await page.getByRole("button", { name: "Create account" }).click();
+
+  await expect(formAlert(page)).toContainText("Could not create that account");
+  await expect(page.getByLabel("Full name")).toHaveValue("Already Registered");
+  // As typed, not the normalized +15551239999 the schema would have produced.
+  await expect(page.getByLabel("Phone")).toHaveValue("+1 (555) 123-9999");
+  await expect(page.getByLabel("Password")).toHaveValue("");
 });
 
 test("the dashboard is unreachable while signed out", async ({ page }) => {

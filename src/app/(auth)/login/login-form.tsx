@@ -24,6 +24,11 @@ export function LoginForm() {
           type="email"
           autoComplete="email"
           required
+          // React resets an uncontrolled form after every action, error paths
+          // included, so a failed sign-in would otherwise clear this field.
+          // The reset restores each input to its default, and the default is
+          // updated from state in the same commit.
+          defaultValue={state.values?.email}
           aria-invalid={Boolean(state.fieldErrors?.email)}
         />
         <FieldError messages={state.fieldErrors?.email} />
@@ -37,6 +42,8 @@ export function LoginForm() {
           type="password"
           autoComplete="current-password"
           required
+          // No defaultValue on purpose: the action never echoes a password
+          // back, so this one field clears on failure.
           aria-invalid={Boolean(state.fieldErrors?.password)}
         />
         <FieldError messages={state.fieldErrors?.password} />

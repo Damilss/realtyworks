@@ -53,6 +53,19 @@ describe("LoginForm", () => {
     );
   });
 
+  it("restores the submitted email, because React resets the form on error", () => {
+    renderWith({
+      error: "Invalid email or password.",
+      values: { email: "manager@realtyworks.test" },
+    });
+
+    expect(screen.getByLabelText("Email")).toHaveValue(
+      "manager@realtyworks.test",
+    );
+    // The one field that is meant to clear.
+    expect(screen.getByLabelText("Password")).toHaveValue("");
+  });
+
   it("disables the submit button while the action is pending", () => {
     renderWith({}, true);
 
