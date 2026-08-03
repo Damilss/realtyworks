@@ -28,6 +28,13 @@ export function AssignVendorForm({
     initialState,
   );
 
+  // Echoed and keyed together. React's post-action reset puts a <select> back to
+  // the option it mounted with, and neither a changed `defaultValue` nor a
+  // controlled `value` moves an already-mounted one — so without the key a
+  // failed assignment drops the vendor just chosen and silently shows the
+  // current one again. The full reasoning is on the create form.
+  const defaultVendorId = state.values?.vendorId ?? currentVendorId ?? "";
+
   return (
     <form action={formAction} className="flex flex-col gap-3">
       <input type="hidden" name="workOrderId" value={workOrderId} />
@@ -35,10 +42,11 @@ export function AssignVendorForm({
       <div className="flex flex-col gap-2">
         <Label htmlFor="vendorId">Vendor</Label>
         <NativeSelect
+          key={`vendorId:${defaultVendorId}`}
           id="vendorId"
           name="vendorId"
           required
-          defaultValue={state.values?.vendorId ?? currentVendorId ?? ""}
+          defaultValue={defaultVendorId}
           aria-invalid={Boolean(state.fieldErrors?.vendorId)}
         >
           {/* No "unassign" option: clearing vendor_id would violate

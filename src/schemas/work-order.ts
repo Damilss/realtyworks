@@ -52,6 +52,15 @@ const id = (message?: string) => z.guid(message);
 const optionalId = z.preprocess(emptyToNull, id().nullable());
 
 /**
+ * For validating an id that arrived as a route parameter rather than a form
+ * field. Postgres compares `uuid` to `uuid`, so a URL segment that is not that
+ * shape is a 22P02 cast failure, not an empty result — which surfaces as a 500
+ * on a URL a user can type. Checking the shape first turns it back into what it
+ * actually is: a work order that is not there.
+ */
+export const workOrderIdSchema = id();
+
+/**
  * `<input type="date">` posts `YYYY-MM-DD`, which is exactly what a Postgres
  * `date` wants. Validating the shape here keeps a hand-edited POST from turning
  * into a 22007 the user cannot act on.

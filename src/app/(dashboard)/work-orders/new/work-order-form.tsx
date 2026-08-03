@@ -34,12 +34,35 @@ export function WorkOrderForm({
     initialState,
   );
 
-  // The unit list depends on the chosen property, and the whole property/unit
-  // set already arrived as props — so this filters locally rather than
-  // re-fetching per change. Controlled rather than echoed like the rest of the
-  // form: React state survives the post-action reset on its own, and the same
-  // value has to drive the unit list anyway.
-  const [propertyId, setPropertyId] = useState(properties[0]?.id ?? "");
+  /**
+   * Echoed back after a failed submit, exactly like the inputs — but a <select>
+   * needs the `key` alongside it to actually move.
+   *
+   * React resets an uncontrolled form after every action, error paths included.
+   * For an <input> that is harmless, because React writes `defaultValue` through
+   * to the DOM on every render, so the reset restores the echoed value. It does
+   * not do the same for a <select>: the mount-time `defaultValue` is what sets
+   * `defaultSelected` on the options, and later renders leave it alone — so the
+   * reset returns the field to whatever it mounted with, and the echo is
+   * invisible. Making the select controlled does not fix it either: after the
+   * reset the `value` prop is unchanged from the previous render, so React's
+   * diff writes nothing to the DOM and the element sits desynced from the state
+   * that is supposedly driving it — which is worse, because the form then posts
+   * a value the user cannot see.
+   *
+   * Keying on the echoed value remounts the field whenever it differs from what
+   * is currently mounted, and a remount is the one moment `defaultValue` is
+   * read. When the value is unchanged the reset restores it anyway, so both
+   * paths land on the same answer.
+   */
+  const defaultPropertyId = state.values?.propertyId ?? properties[0]?.id ?? "";
+  const defaultUnitId = state.values?.unitId ?? "";
+  const defaultPriority = state.values?.priority ?? "medium";
+
+  // Mirrors the property select rather than controlling it: the unit list is
+  // filtered locally, because the whole property/unit set already arrived as
+  // props and re-fetching per change would be a round trip for data we hold.
+  const [propertyId, setPropertyId] = useState(defaultPropertyId);
 
   const units = properties.find((p) => p.id === propertyId)?.units ?? [];
 
@@ -64,10 +87,11 @@ export function WorkOrderForm({
         <div className="flex flex-col gap-2">
           <Label htmlFor="propertyId">Property</Label>
           <NativeSelect
+            key={`propertyId:${defaultPropertyId}`}
             id="propertyId"
             name="propertyId"
             required
-            value={propertyId}
+            defaultValue={defaultPropertyId}
             onChange={(event) => setPropertyId(event.target.value)}
             aria-invalid={Boolean(state.fieldErrors?.propertyId)}
           >
@@ -82,10 +106,17 @@ export function WorkOrderForm({
 
         <div className="flex flex-col gap-2">
           <Label htmlFor="unitId">Unit</Label>
+          {/* Keyed on the property too: the options below belong to it, so a
+              different property has to re-read the default rather than keep an
+              index into a list that no longer exists. A unit from the old
+              property matches no option and the browser falls back to "Whole
+              property", which is the right answer for a selection the composite
+              FK would reject anyway. */}
           <NativeSelect
+            key={`unitId:${propertyId}:${defaultUnitId}`}
             id="unitId"
             name="unitId"
-            defaultValue={state.values?.unitId}
+            defaultValue={defaultUnitId}
             aria-invalid={Boolean(state.fieldErrors?.unitId)}
           >
             {/* A work order may be property-level: unit_id is nullable, and the
@@ -118,9 +149,10 @@ export function WorkOrderForm({
         <div className="flex flex-col gap-2">
           <Label htmlFor="priority">Priority</Label>
           <NativeSelect
+            key={`priority:${defaultPriority}`}
             id="priority"
             name="priority"
-            defaultValue={state.values?.priority ?? "medium"}
+            defaultValue={defaultPriority}
             aria-invalid={Boolean(state.fieldErrors?.priority)}
           >
             {Constants.public.Enums.work_order_priority.map((priority) => (
