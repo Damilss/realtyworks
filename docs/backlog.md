@@ -76,6 +76,38 @@ Pick them off at your discretion.
 
 ## ✅ Done (kept for the paper trail)
 
+### ✅ Auth forms survive a failed submit (2026-08-01)
+Both `useActionState` forms lost every field whenever the action came back with
+an error — a mistyped phone on `/signup` cost the user all four. Not a Next.js
+behaviour but a React one, and unconditional: in `react-dom@19.2.4`,
+`startHostTransition` calls `requestFormReset` **before** running a function
+action, and the commit that renders the error state is the same one that calls
+`form.reset()`. Success paths were never affected — `redirect()` throws
+`NEXT_REDIRECT`, so the form unmounts instead of returning.
+
+`src/server/actions/auth.ts` now echoes the non-sensitive submitted values
+(`fullName` · `email` · `phone`) back in `AuthFormState.values` from all four
+error returns, and the inputs read them as `defaultValue`. That works *because*
+of the same commit ordering: React writes the new default to the DOM during the
+mutation phase, and the reset then restores each input to it. Values are echoed
+**as typed**, not from `parsed.data` — which does not exist when validation is
+what failed, and which has already normalized the phone number the user is being
+asked to fix — bounded at 256 characters (past every field's own maximum) since
+the action is a public POST endpoint, and skipped for any entry that is not a
+string, so a file part cannot come back as `"[object File]"`.
+
+**Passwords are never echoed** and that field alone clears — round-tripping a
+credential through the action response to save retyping one field is the wrong
+trade. Controlled inputs were the other option and are worse here: a programmatic
+`reset()` schedules no re-render, so React state and the DOM can desync.
+
+Covered at three levels: the action tests, an RTL suite per form (new
+`signup-form.test.tsx`), and Playwright — the only place the real reset runs —
+where the wrong-password spec now asserts the address survives, plus a new spec
+signing up with a seeded address (fails on the duplicate, writes nothing, keeps
+its fields). 78 unit tests across 10 files; `auth.spec.ts` is up to 8 specs.
+**The convention holds for the Phase 3 write-half forms** — see `CLAUDE.md` §0.
+
 ### ✅ Phase 3 — Auth loop + self-service signup (2026-07-27)
 Login → signup → session-gated shell → work-order list, end to end over real
 RLS. `src/schemas/auth.ts` (zod v4 `loginSchema` / `signupSchema` /

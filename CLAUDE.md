@@ -143,8 +143,13 @@ Verify before assuming they exist:
   primitives: `input`, `label`, `card`, `table`, `badge`; new deps: `zod`,
   `server-only`. **Auth checks live in pages and the DAL, never in a layout** —
   Next.js Partial Rendering means a layout check stops running on client-side
-  navigation between sibling routes. Self-service signup opened in the same
-  change; the fail-safe is that a self-registration is a `vendor` with no
+  navigation between sibling routes. **Every `useActionState` form echoes its
+  non-sensitive submitted values back** in the action's state and reads them as
+  `defaultValue` (fixed 2026-08-01) — React resets an uncontrolled form after
+  *every* function action, error paths included, so anything not echoed is
+  retyped after a failed submit. Passwords are never echoed; that one field
+  clears. Follow this in the Phase 3 write-half forms. Self-service signup
+  opened in the same change; the fail-safe is that a self-registration is a `vendor` with no
   `vendors` row, so `current_vendor_id()` is NULL and every vendor-scoped
   policy arm returns nothing (pinned by
   `supabase/tests/03_signup_defaults.test.sql`). Forward migration

@@ -4,7 +4,7 @@ End-to-end tests for RealtyWorks. Playwright drives a real browser against the
 running app to verify user-facing behavior.
 
 **Current scope (since 2026-07-27):** the boot smoke test, plus
-`tests/e2e/auth.spec.ts` — 7 specs driving the Phase 3 auth loop against a
+`tests/e2e/auth.spec.ts` — 8 specs driving the Phase 3 auth loop against a
 **real, seeded Supabase stack**. The rest of the vertical slice (create work
 order → assign vendor → status + photo → activity trail) joins as it is built —
 see `CLAUDE.md` §4.
@@ -106,7 +106,8 @@ playwright.config.ts        # config: testDir, baseURL, browser, webServer auto-
 tests/e2e/                  # E2E specs (*.spec.ts)
 tests/e2e/smoke.spec.ts     # the app boots + serves a page
 tests/e2e/auth.spec.ts      # the auth loop: sign in as each seeded role, self-register,
-                            # wrong password, signed-out redirect, root redirect, sign out
+                            # wrong password, rejected signup keeps its fields,
+                            # signed-out redirect, root redirect, sign out
 ```
 
 Test runners stay separated by directory: **Vitest** collects `src/**` and
