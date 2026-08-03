@@ -59,9 +59,20 @@ async function signOut(page: Page) {
 /**
  * Unique per worker rather than per wall-clock: stable enough to assert on,
  * distinct enough that parallel workers do not read each other's rows.
+ *
+ * The attempt index is in there because these rows outlive a failed attempt.
+ * Without it a CI retry (playwright.config.ts sets retries: 2) would re-create a
+ * title the first attempt already committed and assert against two rows —
+ * turning one transient flake into a run that cannot recover. Locally retries
+ * are 0, so the title is byte-identical to before and a database that was never
+ * reset still fails loudly instead of quietly passing.
  */
-function title(testInfo: { workerIndex: number }, label: string) {
-  return `${label} (w${testInfo.workerIndex})`;
+function title(
+  testInfo: { workerIndex: number; retry: number },
+  label: string,
+) {
+  const attempt = testInfo.retry > 0 ? `-r${testInfo.retry}` : "";
+  return `${label} (w${testInfo.workerIndex}${attempt})`;
 }
 
 async function createWorkOrder(page: Page, workOrderTitle: string) {
