@@ -312,4 +312,4 @@ history is cosmetic, and a rewrite that makes you feel better while the live key
 still works is the worst outcome.
 
 Reporting a vulnerability, what the automated gates already cover, and the
-triage runbook: [`SECURITY.md`](SECURITY.md).
+triage runbook: [`SECURITY.md`](SECURITY.md). 
