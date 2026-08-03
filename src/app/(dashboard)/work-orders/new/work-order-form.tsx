@@ -2,13 +2,14 @@
 
 import { useActionState, useState } from "react";
 
+import { PRIORITY_LABEL } from "@/components/features/work-orders/labels";
 import { Button } from "@/components/ui/button";
 import { FieldError, FormError } from "@/components/ui/form-feedback";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { NativeSelect } from "@/components/ui/native-select";
 import { Textarea } from "@/components/ui/textarea";
-import { Constants, type Enums } from "@/lib/database.types";
+import { Constants } from "@/lib/database.types";
 import {
   createWorkOrder,
   type WorkOrderFormState,
@@ -16,13 +17,6 @@ import {
 import type { PropertyOption } from "@/server/queries/properties";
 
 const initialState: WorkOrderFormState = {};
-
-const PRIORITY_LABEL: Record<Enums<"work_order_priority">, string> = {
-  low: "Low",
-  medium: "Medium",
-  high: "High",
-  urgent: "Urgent",
-};
 
 export function WorkOrderForm({
   properties,
