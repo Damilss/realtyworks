@@ -8,7 +8,7 @@ begin;
 create extension if not exists pgtap with schema extensions;
 set search_path to public, extensions;
 
-select plan(65);
+select plan(68);
 
 -- ── vendor write surface ────────────────────────────────────────────────────
 do $$
@@ -96,6 +96,32 @@ select lives_ok(
   $$insert into public.work_order_activity (work_order_id, note)
     values ('40000000-0000-0000-0000-000000000003', 'vendor note via client path')$$,
   'vendor may add a note to an assigned work order'
+);
+
+-- A blank note is permanent and unfixable once written: the trail has no
+-- UPDATE or DELETE path for anyone. `note is not null` alone let '' and '   '
+-- through (issue #76).
+select throws_ok(
+  $$insert into public.work_order_activity (work_order_id, note)
+    values ('40000000-0000-0000-0000-000000000003', '')$$,
+  '23514', null,
+  'an empty note is refused by activity_note_requires_text'
+);
+
+select throws_ok(
+  $$insert into public.work_order_activity (work_order_id, note)
+    values ('40000000-0000-0000-0000-000000000003', '   ')$$,
+  '23514', null,
+  'a whitespace-only note is refused by activity_note_requires_text'
+);
+
+-- The null arm still has to fail on its own: a CHECK evaluating to NULL passes,
+-- so a predicate testing only the trimmed length would let this through.
+select throws_ok(
+  $$insert into public.work_order_activity (work_order_id, note)
+    values ('40000000-0000-0000-0000-000000000003', null)$$,
+  '23514', null,
+  'a null note on a note_added row is still refused'
 );
 
 -- Attachment metadata is a service-role-only write via the coordinated upload

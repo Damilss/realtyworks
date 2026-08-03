@@ -1,7 +1,7 @@
 /**
- * Error rendering shared by the login and signup forms. Both are announced with
- * `aria-live="polite"`: the messages appear after an async round trip, so a
- * screen-reader user gets nothing without it.
+ * Error rendering shared by every `useActionState` form — auth and work orders
+ * alike. Both are announced with `aria-live="polite"`: the messages appear after
+ * an async round trip, so a screen-reader user gets nothing without it.
  */
 
 export function FieldError({ messages }: { messages?: string[] }) {

@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 
 import { WorkOrderTable } from "@/components/features/work-orders/work-order-table";
+import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
@@ -63,13 +65,21 @@ export default async function DashboardPage() {
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex flex-col gap-1">
-        <h1 className="text-2xl font-semibold tracking-tight">Work orders</h1>
-        <p className="text-muted-foreground text-sm">
-          {isStaff(profile)
-            ? "Every work order across all properties."
-            : "Work orders assigned to you."}
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div className="flex flex-col gap-1">
+          <h1 className="text-2xl font-semibold tracking-tight">Work orders</h1>
+          <p className="text-muted-foreground text-sm">
+            {isStaff(profile)
+              ? "Every work order across all properties."
+              : "Work orders assigned to you."}
+          </p>
+        </div>
+
+        {isStaff(profile) ? (
+          <Button asChild size="sm">
+            <Link href="/work-orders/new">New work order</Link>
+          </Button>
+        ) : null}
       </div>
 
       {workOrders.length === 0 ? (
