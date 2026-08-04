@@ -60,6 +60,14 @@ next-env.d.ts
 # submodule with no .gitmodules entry, which breaks fresh clones.
 /wt-*/
 
+# Claude Code's local state. Every current occupant is per-machine rather than
+# project configuration: `settings.json` (harness behaviour, e.g. whether a
+# background job edits this checkout directly), a scheduler lock, and
+# `worktrees/` — which is the same gitlink hazard the `/wt-*/` rule above
+# exists to prevent, just at a path that rule does not match. Negate a specific
+# file here if shared project settings are ever worth committing.
+/.claude/
+
 # editor swap files
 *.swp
 *.swo
