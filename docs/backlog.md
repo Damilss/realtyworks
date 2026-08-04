@@ -539,6 +539,80 @@ required-check names are unchanged; the OSV scan surfaces as a non-required
 
 ## 🟠 High
 
+### 🟠 Reject backslash-based external redirects in `/auth/confirm` (PR review, P2)
+**Why:** `safeNext()` in `src/app/auth/confirm/route.ts` is meant to guarantee
+the post-verification redirect stays same-origin, and it does not.
+`next=%2F%5Cevil.example` decodes to `/\evil.example` — starts with `/`, does not
+start with `//`, so it passes and is written straight to `Location`. Browsers
+treat `\` as `/` in the authority position (WHATWG URL), so it normalizes to
+`//evil.example` and the user lands off-site. Backslash is the headline case, not
+the only one: `/\/evil.example` and tab/newline variants (`/%09/evil.example`,
+`/%0d/evil.example`, both stripped by the parser before it runs) get through the
+same way.
+
+The root cause is **string-matching a value that a URL parser will later
+reinterpret**. Any allowlist built on `startsWith` eventually loses that
+argument, so the fix is not another prefix case.
+
+This is the one endpoint in the app that mints a session, and the redirect fires
+*after* a successful `verifyOtp` — so the victim is genuinely logged in when they
+land on the attacker's page, which is what makes a "session expired, sign in
+again" page work. Exploitability is bounded: it needs a **valid, unspent** magic
+link, since a failed verification redirects to `/login` and never reads `next`.
+But that is the normal state of an invite in transit, and
+`docs/vendor-access.md` §3a sets the threat model as *assume the link reaches
+someone it shouldn't* — a forwarded invite re-crafted with a hostile `next` is
+exactly the scenario. P2 is right: not remotely exploitable, real once a link
+leaks.
+
+**Two things hid this, both worth fixing with it.** The doc comment calls the
+check "the cheap, complete defence", which is an overclaim that reads as
+assurance. And the e2e spec
+(`tests/e2e/vendor-loop.spec.ts`, "refuses an off-site redirect") passes
+`token_hash=bogus` — so verification fails, the handler redirects to
+`/login?error=invalid-link`, and `next` **is never read**. It asserts we stayed
+on our own host, which we did for unrelated reasons; deleting `safeNext()`
+outright would leave it green. Same shape as the `z.uuid()` regression: a green
+test over a fixture that cannot reach the code under test.
+
+**Do:** stop string-matching. Parse with the same parser the browser will use,
+compare origins, and never emit a host:
+
+```ts
+function safeNext(next: string | null, origin: string): string {
+  if (!next) return "/dashboard";
+
+  let url: URL;
+  try {
+    url = new URL(next, origin);
+  } catch {
+    return "/dashboard";
+  }
+
+  if (url.origin !== origin) return "/dashboard";
+
+  // Path only — a host is never emitted, so even a spoofed Host header cannot
+  // turn this into an off-site Location.
+  return `${url.pathname}${url.search}${url.hash}`;
+}
+```
+
+Called as `safeNext(searchParams.get("next"), request.nextUrl.origin)`. This
+closes the class rather than the reported instance — `/\evil.example` resolves to
+origin `http://evil.example` and fails the comparison, absolute URLs fail it, and
+tab/newline injections are stripped before comparison. Returning only
+`pathname + search + hash` is the load-bearing part: because the result is always
+a bare path, the guard degrades safely even if `nextUrl.origin` were influenced
+by a spoofed `Host`. Rewrite the doc comment to describe parse-and-compare and
+drop the completeness claim.
+
+**Done when:** `next=%2F%5Cevil.example` lands on `/dashboard`; the e2e spec
+exercises the guard with a **real, valid token** so the redirect line actually
+executes, tabling `//evil.example`, `%2F%5Cevil.example`, `/%09/evil.example`,
+`https://evil.example`, and one legitimate `/work-orders/<id>` to prove
+deep-linking still works; and deleting `safeNext()` makes that spec fail —
+confirmed by actually doing it once, given the above.
+
 ### 🟠 Turn on email confirmations before the Phase 4 public deploy
 **Why:** `[auth.email] enable_confirmations = false` was harmless while signup
 was invite-only. Since signup opened (2026-07-27) it means **anyone can create
@@ -548,11 +622,13 @@ nothing (`supabase/tests/03_signup_defaults.test.sql`) — but on a public
 deployment it is an address-squatting and pretext vector, and it silently
 becomes worse the moment anything is keyed on a user's email. This is a Phase 4
 gate, not a Phase 4 nice-to-have.
-**Do:** flip `enable_confirmations = true` in `supabase/config.toml`; add an
-`/auth/confirm` route handler that calls `verifyOtp` with the `token_hash` +
-`type` from the link and redirects on success (the default email template uses
-the implicit-flow `{{ .ConfirmationURL }}`, which the `@supabase/ssr` client
-cannot consume, so the template has to be repointed at the new route);
+**Do:** flip `enable_confirmations = true` in `supabase/config.toml`. **The
+`/auth/confirm` route handler this item used to call for now exists** — it
+shipped with the vendor invite on 2026-08-03 and already does the
+`verifyOtp({ token_hash, type })` exchange, so this is a matter of adding
+`signup` to its `ALLOWED_TYPES` rather than writing anything new. The default
+email template still has to be repointed at it: `{{ .ConfirmationURL }}` is the
+implicit flow, which the `@supabase/ssr` client cannot consume. Then
 configure production SMTP (the built-in service is rate-limited and explicitly
 not for real users); **drop `inbucket` from the `-x` list in the CI `e2e` job**,
 since signup will then send mail and the self-registration spec has to read the
