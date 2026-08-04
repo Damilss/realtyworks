@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 
 import { ActivityTrail } from "@/components/features/work-orders/activity-trail";
+import { AttachmentList } from "@/components/features/work-orders/attachment-list";
 import {
   PRIORITY_LABEL,
   PRIORITY_VARIANT,
@@ -20,10 +21,14 @@ import { listVendors } from "@/server/queries/vendors";
 import {
   getWorkOrder,
   listWorkOrderActivity,
+  listWorkOrderAttachments,
 } from "@/server/queries/work-orders";
 
 import { AddNoteForm } from "./add-note-form";
 import { AssignVendorForm } from "./assign-vendor-form";
+import { AttachmentUpload } from "./attachment-upload";
+import { InviteVendorPanel } from "./invite-vendor-panel";
+import { StatusForm } from "./status-form";
 
 export const metadata: Metadata = {
   title: "Work order · RealtyWorks",
@@ -61,11 +66,26 @@ export default async function WorkOrderPage({
   // gets past this line. Vendors are fetched only for the assign control, which
   // only staff see — `vendors_select_staff_or_self` would hand a vendor just
   // their own row anyway.
-  const [workOrder, activity, vendors] = await Promise.all([
+  const [workOrder, activity, attachments, vendors] = await Promise.all([
     getWorkOrder(id),
     listWorkOrderActivity(id),
+    listWorkOrderAttachments(id),
     staff ? listVendors() : Promise.resolve([]),
   ]);
+
+  // The assigned vendor, and only them: `guard_work_order_update()` restricts
+  // the status choices by role, and this decides whether to offer the control at
+  // all. Not a gate — the trigger is — just a reason not to render a form the
+  // database would refuse.
+  const isAssignedVendor =
+    !staff &&
+    workOrder.vendorId !== null &&
+    workOrder.vendorId === profile.vendorId;
+
+  const assignedVendor =
+    workOrder.vendorId === null
+      ? undefined
+      : vendors.find((vendor) => vendor.id === workOrder.vendorId);
 
   const location = [workOrder.propertyName, workOrder.unitLabel]
     .filter(Boolean)
@@ -118,6 +138,22 @@ export default async function WorkOrderPage({
 
           <Card>
             <CardHeader>
+              <CardTitle>Attachments</CardTitle>
+              <CardDescription>
+                Photos and receipts for this job. Links expire after a few
+                minutes — reload the page for fresh ones.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="flex flex-col gap-6">
+              <AttachmentList attachments={attachments} />
+              <div className="border-t pt-4">
+                <AttachmentUpload workOrderId={workOrder.id} />
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
               <CardTitle>Activity</CardTitle>
               <CardDescription>
                 Every change to this work order, oldest first. Entries cannot be
@@ -140,7 +176,7 @@ export default async function WorkOrderPage({
                 only this one.
               </CardDescription>
             </CardHeader>
-            <CardContent>
+            <CardContent className="flex flex-col gap-4">
               {vendors.length === 0 ? (
                 <p className="text-muted-foreground text-sm">
                   No vendors have been added yet.
@@ -152,6 +188,37 @@ export default async function WorkOrderPage({
                   currentVendorId={workOrder.vendorId}
                 />
               )}
+
+              {/* Only once someone is assigned: the link deep-links this job,
+                  and `can_access_work_order()` admits only the current
+                  assignee — so an invite before assignment would land the
+                  vendor on a 404 (docs/vendor-access.md §3b). */}
+              {assignedVendor ? (
+                <InviteVendorPanel
+                  workOrderId={workOrder.id}
+                  vendorId={assignedVendor.id}
+                  vendorName={assignedVendor.name}
+                  invited={assignedVendor.profileId !== null}
+                />
+              ) : null}
+            </CardContent>
+          </Card>
+        ) : null}
+
+        {isAssignedVendor ? (
+          <Card className="h-fit">
+            <CardHeader>
+              <CardTitle>Your job</CardTitle>
+              <CardDescription>
+                Mark this as started or finished. Every change is recorded in
+                the activity trail.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <StatusForm
+                workOrderId={workOrder.id}
+                currentStatus={workOrder.status}
+              />
             </CardContent>
           </Card>
         ) : null}

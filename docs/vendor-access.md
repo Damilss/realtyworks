@@ -113,8 +113,7 @@ once that vendor is invited. Contact-first, auth-on-invite.
 Sketch — the `vendors` half shipped 2026-07-17 as
 `supabase/migrations/20260717120400_create_vendors.sql` (contact-first,
 auth-on-invite, exactly as below: phone-OR-email required, partial unique on
-`profile_id`, no client grant on the auth link); `vendor_access` remains a
-Phase 3 decision (§6):
+`profile_id`, no client grant on the auth link).
 
 ```
 vendors
@@ -123,7 +122,7 @@ vendors
 - profile_id, optional           # → profiles/auth user, set on first invite
 - created_by, created_at, ...
 
-vendor_access (only if we mint/track our own tokens — see §6 mechanism)
+vendor_access                    # ← NOT BUILT. See §6; kept for the paper trail.
 - id
 - vendor_id
 - work_order_id, optional        # deep-link target
@@ -133,12 +132,14 @@ vendor_access (only if we mint/track our own tokens — see §6 mechanism)
 - revoked_at                     # server-checked; §3c
 ```
 
-Whether `vendor_access` exists at all depends on the mechanism in §6: if we lean
-on Supabase-native magic links, most of this is Supabase's `auth` schema and we
-store little. If we mint our own signed tokens, this table is where revocation
-and the audit trail live. **RLS is unchanged either way** — `auth.uid()` is
-present, policies stay uniform, and `current_app_role()` returns `'vendor'` as
-§4 of the schema doc assumes.
+**`vendor_access` was rejected at Phase 3 and does not exist** (2026-08-03). It
+was only ever needed on the "mint our own signed tokens" branch of §6, and that
+branch lost: Supabase-native magic links keep the token in Supabase's own `auth`
+schema, so there is nothing left for this table to hold. Revocation — the one
+requirement §3c actually stated — lives in `vendors.profile_id`, which is a
+server-checked row that takes effect on the next request. **RLS is unchanged
+either way**: `auth.uid()` is present, policies stay uniform, and
+`current_app_role()` returns `'vendor'` as §4 of the schema doc assumes.
 
 **Receipts are attachments, full stop.** A vendor uploading a receipt is the
 nose of the Phase 6 accounting camel. Store it as a `work_order_attachments`
@@ -150,12 +151,14 @@ deferred / §4 Phase 6).
 
 The auth model is the thing; SMS is just the delivery channel. Split them:
 
-- **Phase 3 (build the model) — now underway.** Build the tokenized link + vendor session now,
-  delivered by a **"Copy vendor link"** button. The entire flow — vendor opens
-  link, gets a real session, updates status, uploads a photo/receipt, activity
-  trail records it — is testable with **no Twilio account, no 10DLC
-  registration, and zero spend.** This is the Phase 3 vertical slice's vendor
-  half (`CLAUDE.md` §4, backlog "Phase 3 — The one vertical slice").
+- **Phase 3 (build the model) — shipped 2026-08-03.** The tokenized link +
+  vendor session, delivered by a **"Copy sign-in link"** button on the work
+  order. The whole flow — vendor opens link, gets a real session, updates
+  status, uploads a photo/receipt, activity trail records it — runs with **no
+  Twilio account, no 10DLC registration, and zero spend**, exactly as this
+  section predicted. It is driven end to end by
+  `tests/e2e/vendor-loop.spec.ts`, which redeems a real token in a second
+  browser context.
 - **Phase 5 (swap in SMS delivery).** SMS becomes the delivery channel — and the
   link send is a **§6 send like any other**: it logs to `messages`, respects
   `notification_preferences`, and consent/STOP/10DLC apply even to a login link
@@ -164,26 +167,68 @@ The auth model is the thing; SMS is just the delivery channel. Split them:
   later channel *upgrade* (branded sender, richer cards) that changes nothing
   structural. Bank it.
 
-## 6. Open questions to settle at Phase 2/3
+## 6. Settled at Phase 3 (2026-08-03)
 
-Per `AGENTS.md`, verify these against the Supabase auth docs at build time —
-don't assume the training-data API.
+All four were open questions until the invite shipped. Each was verified against
+the running stack rather than against the docs, per `AGENTS.md` — the notes below
+record what was actually observed.
 
-- **Exact magic-link mechanism.** Supabase's built-in **phone** auth sends OTP
-  **codes, not tappable links**. A tappable SMS link is therefore either (a) an
-  **email-type magic link** (`auth.admin.generateLink`) delivered over our own
-  SMS provider, or (b) a **self-minted signed token** that a server action
-  exchanges for a session. Pick one at Phase 3; it decides whether
-  `vendor_access` (§4) exists.
-- **Vendor identity: phone-first or synthetic email?** If the mechanism needs an
-  email, does each vendor get a placeholder/synthetic one, or do we key auth off
-  phone? Settle at Phase 3 with the invite flow — the shipped `vendors` table
-  deliberately supports either (phone OR email required, both individually
-  nullable).
-- **Link lifetime & re-issue.** Expiry window; one-time vs. reusable-until-
-  revoked; the manager's "re-send link" flow.
-- **Sensitive-field gating (§3a).** Final call on what the vendor view hides,
-  and whether first-open device binding (a one-time SMS code) is MVP or later.
+- **Magic-link mechanism: (a), an email-type magic link.**
+  `auth.admin.generateLink({ type: 'magiclink' })` mints the token; we take
+  `properties.hashed_token` and build our own URL at **`/auth/confirm`**, which
+  calls `verifyOtp({ token_hash, type })`.
+
+  Deliberately **not** `properties.action_link`. That one points at GoTrue's
+  `/auth/v1/verify`, which hands the session back in a URL *fragment* for a
+  browser-side client to pick up — the implicit flow. This app keeps its session
+  in cookies written server-side (`@supabase/ssr`), so the token has to be
+  redeemed by our own route handler. `createClient()` from
+  `src/lib/supabase/server.ts` needs no variant for this: its readonly-cookie
+  guard only swallows the Server Component case, and in a route handler
+  `cookieStore.set()` genuinely writes.
+
+  Two behaviours worth recording because the design leans on them, both
+  confirmed against the local stack:
+  - **`generateLink` sends no email.** Mailpit stayed at zero messages across a
+    full invite. That is what lets the CI `e2e` job keep excluding the mail
+    container, and what makes "Copy link" cost nothing to run.
+  - **The token is single use.** A replayed `token_hash` comes back
+    `otp_expired`. Pinned by `tests/e2e/vendor-loop.spec.ts`.
+
+  A third: `generateLink` will *implicitly create* an unknown user (because
+  `[auth] enable_signup = true`), but with **no `app_role` and no name**. The
+  invite therefore calls `auth.admin.createUser` explicitly first — that is what
+  stamps `app_metadata.app_role` (the only source `handle_new_user()` reads for
+  the role) and `user_metadata.full_name`, and it keeps the flow working if
+  signup is ever closed again.
+
+- **`vendor_access` does not exist**, and the sketch in §4 should be read as
+  rejected. Revocation already lives in `vendors.profile_id`: unlink it, or
+  delete the row, and `current_vendor_id()` resolves NULL on the very next
+  request — mid-session, no waiting for an expiry. A separate table would add a
+  second thing to keep in step with the first, and §3c only ever asked for
+  *server-checked revocation*, which this is.
+
+- **Vendor identity: a real email address is required to invite.** No synthetic
+  or placeholder addresses — a fake address is an account nobody can recover and
+  a notification channel that silently blackholes. A phone-only vendor row stays
+  perfectly valid (`vendors_contact_method` wants either), it simply cannot be
+  invited until SMS delivery lands in Phase 5; the UI says exactly that rather
+  than hiding the button.
+
+- **Link lifetime: unchanged, `[auth.email] otp_expiry = 3600`.** One hour,
+  single use, no `config.toml` change. Re-issue is just pressing the button
+  again — the link is shown once, stored nowhere, and never written to the
+  activity trail or the logs, because it is a bearer credential for one login.
+
+- **Sensitive-field gating (§3a): nothing to gate today.** The vendor view
+  exposes title, description, status, priority, and the property/unit label.
+  There is no gate-code column, no lockbox column, and no tenant PII anywhere in
+  the schema — so there is currently nothing that §3a's "not recoverable if
+  leaked" list applies to. This is a statement about the schema as it stands,
+  **not** a decision that gating is unnecessary: the first column that holds an
+  access instruction or a tenant's contact details re-opens this question, and
+  device binding on first open is the option to weigh then.
 
 ---
 

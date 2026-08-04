@@ -4,11 +4,15 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 
+import { ATTACHMENTS_BUCKET } from "@/lib/attachments";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import {
   addNoteSchema,
   assignVendorSchema,
   createWorkOrderSchema,
+  recordAttachmentSchema,
+  updateStatusSchema,
 } from "@/schemas/work-order";
 
 /**
@@ -277,5 +281,183 @@ export async function addNote(
 
   // No echoed values: on success the textarea should end up empty, and React's
   // post-action reset already does that.
+  return {};
+}
+
+/**
+ * The vendor's half of the slice: report progress on an assigned job.
+ *
+ * Nothing here re-implements the rule. `guard_work_order_update()` is a
+ * BEFORE UPDATE trigger that raises 42501 if a vendor touches any column but
+ * `status`, or moves status anywhere but `in_progress`/`completed`; the UPDATE
+ * grant excludes `created_by` and the timestamps outright; and
+ * `work_orders_update_staff_or_assigned` decides whose rows are even visible.
+ * This action posts a status and translates the refusal.
+ *
+ * It is deliberately not staff-gated in the UI *or* here — staff status editing
+ * is a separate decision, and the trigger's vendor arm simply does not apply to
+ * them, so nothing about this path is unsafe for a manager who posts to it.
+ */
+export async function updateWorkOrderStatus(
+  _prevState: WorkOrderFormState,
+  formData: FormData,
+): Promise<WorkOrderFormState> {
+  const values = submittedValues(formData, ["status"]);
+  const parsed = updateStatusSchema.safeParse({
+    workOrderId: formData.get("workOrderId"),
+    status: formData.get("status"),
+  });
+
+  if (!parsed.success) {
+    return { fieldErrors: z.flattenError(parsed.error).fieldErrors, values };
+  }
+
+  const supabase = await createClient();
+
+  const { error } = await supabase
+    .from("work_orders")
+    .update({ status: parsed.data.status })
+    .eq("id", parsed.data.workOrderId);
+
+  if (error) {
+    console.error("[work-orders] Failed to update status", {
+      code: error.code,
+    });
+    return { error: describeError(error, WORK_ORDER_GONE), values };
+  }
+
+  revalidatePath(`/work-orders/${parsed.data.workOrderId}`);
+  revalidatePath("/dashboard");
+
+  return {};
+}
+
+/**
+ * The metadata half of the coordinated trusted upload path.
+ *
+ * The bytes never pass through here. The browser has already put the object in
+ * Storage under its own session, where `wo_attachments_insert` checked that the
+ * caller may reach that work order. This function records the row that makes the
+ * object visible to the app — a **service-role write**, because
+ * `work_order_attachments` carries no client INSERT grant by design: a client
+ * able to insert metadata could register a row with no file behind it, which
+ * would 404 on download, emit an immutable `attachment_added` trail entry, and
+ * be undeletable through any client surface
+ * (`20260717120700_create_work_order_attachments.sql`).
+ *
+ * Bypassing RLS is the entire point of the privileged client, which is exactly
+ * why it must not be the thing that decides whether the caller was allowed. The
+ * order below is load-bearing: **establish access with the session client
+ * first**, and only then reach for the admin client.
+ */
+export async function recordAttachment(input: {
+  workOrderId: string;
+  attachmentId: string;
+  storagePath: string;
+  fileName: string;
+  kind: "photo" | "receipt" | "invoice" | "document";
+}): Promise<{ error?: string }> {
+  const parsed = recordAttachmentSchema.safeParse(input);
+
+  if (!parsed.success) {
+    console.error("[work-orders] Rejected an attachment record", {
+      issues: z.flattenError(parsed.error).fieldErrors,
+    });
+    return { error: "That upload could not be recorded." };
+  }
+
+  const { workOrderId, attachmentId, storagePath, fileName, kind } =
+    parsed.data;
+  const supabase = await createClient();
+
+  // Resolved before anything else, because it is required and unfaked-able:
+  // `uploaded_by` is NOT NULL with a FK to profiles and no default, so an
+  // absent actor has to stop the request here rather than fail the insert after
+  // the object is already stored.
+  const { data: claims } = await supabase.auth.getClaims();
+  const uploadedBy = claims?.claims?.sub;
+
+  if (!uploadedBy) {
+    return { error: "Your session has expired. Sign in again." };
+  }
+
+  // Access, decided by the database, through the caller's own session. This is
+  // the same predicate the storage policy used to admit the object, asked again
+  // because the upload and this call are two separate requests.
+  const { data: allowed, error: accessError } = await supabase.rpc(
+    "can_access_work_order",
+    { p_work_order_id: workOrderId },
+  );
+
+  if (accessError || allowed !== true) {
+    if (accessError) {
+      console.error("[work-orders] Failed to check attachment access", {
+        code: accessError.code,
+      });
+    }
+    return { error: "You do not have access to that work order." };
+  }
+
+  // Read the object back rather than trusting the caller's description of it.
+  // This proves the object exists — the metadata row must never point at a 404,
+  // the mirror image of the orphan the missing INSERT grant prevents — and it
+  // yields the true content type and size, which the client is in no position
+  // to be believed about once the row is written with the service role.
+  const { data: object, error: infoError } = await supabase.storage
+    .from(ATTACHMENTS_BUCKET)
+    .info(storagePath);
+
+  if (infoError || !object) {
+    console.error("[work-orders] Attachment object not found after upload", {
+      message: infoError?.message,
+    });
+    return { error: "That upload could not be found. Try again." };
+  }
+
+  const admin = createAdminClient();
+
+  // `id` and `uploaded_by` have no database defaults, on purpose. A generated id
+  // would never match the one already baked into the object name, and under the
+  // service role `auth.uid()` is NULL — so a default could not supply the actor
+  // anyway, it would only let this compile without one. The trail trigger
+  // coalesces auth.uid() to this value, which is what keeps the entry attributed
+  // to the vendor rather than to the system.
+  const { error: insertError } = await admin
+    .from("work_order_attachments")
+    .insert({
+      id: attachmentId,
+      work_order_id: workOrderId,
+      kind,
+      storage_path: storagePath,
+      file_name: fileName,
+      mime_type: object.contentType ?? "application/octet-stream",
+      size_bytes: object.size ?? null,
+      uploaded_by: uploadedBy,
+    });
+
+  if (insertError) {
+    console.error("[work-orders] Failed to record attachment metadata", {
+      code: insertError.code,
+    });
+
+    // Remove the object we just failed to register. Clients have no delete
+    // surface on either layer, so without this the failure leaves a file nothing
+    // references and nothing can ever clean up.
+    const { error: cleanupError } = await admin.storage
+      .from(ATTACHMENTS_BUCKET)
+      .remove([storagePath]);
+
+    if (cleanupError) {
+      console.error("[work-orders] Failed to remove the orphaned object", {
+        path: storagePath,
+        message: cleanupError.message,
+      });
+    }
+
+    return { error: "That upload could not be recorded." };
+  }
+
+  revalidatePath(`/work-orders/${workOrderId}`);
+
   return {};
 }

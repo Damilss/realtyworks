@@ -2,6 +2,7 @@ import "server-only";
 
 import { notFound } from "next/navigation";
 
+import { ATTACHMENTS_BUCKET } from "@/lib/attachments";
 import type { Enums, Json } from "@/lib/database.types";
 import { createClient } from "@/lib/supabase/server";
 import { workOrderIdSchema } from "@/schemas/work-order";
@@ -296,5 +297,98 @@ export async function listWorkOrderActivity(
     createdAt: entry.created_at,
     from: readDetail(entry.old_value),
     to: readDetail(entry.new_value),
+  }));
+}
+
+export type WorkOrderAttachment = {
+  id: string;
+  kind: Enums<"attachment_kind">;
+  fileName: string;
+  mimeType: string;
+  sizeBytes: number | null;
+  createdAt: string;
+  /** A short-lived signed URL, or null if one could not be minted. */
+  url: string | null;
+};
+
+/**
+ * How long a download link stays good. Short because the page mints fresh ones
+ * on every render anyway — the URL only has to outlive the click that follows
+ * it, and a link pasted into a chat should stop working quickly.
+ */
+const SIGNED_URL_TTL_SECONDS = 300;
+
+/**
+ * The files attached to one work order, each with a URL that can actually fetch
+ * it.
+ *
+ * The bucket is private, so a path is not a link — every read is authorized.
+ * Both halves here go through the **caller's session**, never the admin client:
+ * `attachments_select_wo_access` scopes the metadata rows, and
+ * `wo_attachments_select` re-derives object access from the path when the signed
+ * URL is minted. Signing with the service role instead would hand out URLs that
+ * RLS had just refused, which is the one mistake this whole design is arranged
+ * to prevent.
+ */
+export async function listWorkOrderAttachments(
+  workOrderId: string,
+): Promise<WorkOrderAttachment[]> {
+  await requireSession();
+
+  // Same 22P02 guard as the other two: the id comes off the URL.
+  if (!workOrderIdSchema.safeParse(workOrderId).success) {
+    return [];
+  }
+
+  const supabase = await createClient();
+
+  const { data, error } = await supabase
+    .from("work_order_attachments")
+    .select(
+      "id, kind, file_name, mime_type, size_bytes, storage_path, created_at",
+    )
+    .eq("work_order_id", workOrderId)
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    console.error("[work-orders] Failed to load attachments", error);
+    throw new Error("Could not load the attachments.");
+  }
+
+  if (data.length === 0) {
+    return [];
+  }
+
+  // One round trip for every path, rather than one per file.
+  const { data: signed, error: signError } = await supabase.storage
+    .from(ATTACHMENTS_BUCKET)
+    .createSignedUrls(
+      data.map((row) => row.storage_path),
+      SIGNED_URL_TTL_SECONDS,
+    );
+
+  // A signing failure degrades to a listed-but-unopenable file. The row is the
+  // record; dropping the whole list because a URL could not be minted would
+  // hide the fact that an attachment exists at all.
+  if (signError) {
+    console.error("[work-orders] Failed to sign attachment URLs", signError);
+  }
+
+  const urls = new Map<string, string>();
+
+  for (const entry of signed ?? []) {
+    if (entry.path && entry.signedUrl && !entry.error) {
+      urls.set(entry.path, entry.signedUrl);
+    }
+  }
+
+  return data.map((row) => ({
+    id: row.id,
+    kind: row.kind,
+    fileName: row.file_name,
+    mimeType: row.mime_type,
+    sizeBytes: row.size_bytes,
+    createdAt: row.created_at,
+    url: urls.get(row.storage_path) ?? null,
   }));
 }

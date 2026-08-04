@@ -42,3 +42,38 @@ export async function listVendors(): Promise<VendorOption[]> {
     profileId: row.profile_id,
   }));
 }
+
+export type VendorRow = VendorOption & {
+  phone: string | null;
+  createdAt: string;
+};
+
+/**
+ * The same rows with the contact details the `/vendors` table renders. Kept
+ * separate from `listVendors()` rather than widening it: the assign `<select>`
+ * needs a name and an id, and shipping a phone number into a page that never
+ * shows one is the kind of over-fetch that only ever becomes a leak later.
+ */
+export async function listVendorRows(): Promise<VendorRow[]> {
+  await requireSession();
+  const supabase = await createClient();
+
+  const { data, error } = await supabase
+    .from("vendors")
+    .select("id, name, phone, email, profile_id, created_at")
+    .order("name", { ascending: true });
+
+  if (error) {
+    console.error("[vendors] Failed to list vendor rows", error);
+    throw new Error("Could not load vendors.");
+  }
+
+  return data.map((row) => ({
+    id: row.id,
+    name: row.name,
+    phone: row.phone,
+    email: row.email,
+    profileId: row.profile_id,
+    createdAt: row.created_at,
+  }));
+}

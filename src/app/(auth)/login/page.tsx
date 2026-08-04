@@ -18,12 +18,26 @@ export const metadata: Metadata = {
   title: "Sign in · RealtyWorks",
 };
 
-export default async function LoginPage() {
+/**
+ * The only value `/auth/confirm` ever redirects with. Matched exactly rather
+ * than rendered, so a hand-written `?error=<anything>` cannot put arbitrary text
+ * on the sign-in page.
+ */
+const INVALID_LINK = "invalid-link";
+
+/** `searchParams` is a Promise in Next 16 — it must be awaited. */
+export default async function LoginPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ error?: string }>;
+}) {
   // In the page rather than the (auth) layout: Partial Rendering means a layout
   // check stops running once the user is navigating client-side.
   if (await getSession()) {
     redirect("/dashboard");
   }
+
+  const { error } = await searchParams;
 
   return (
     <Card>
@@ -33,7 +47,12 @@ export default async function LoginPage() {
           Enter your email and password to continue.
         </CardDescription>
       </CardHeader>
-      <CardContent>
+      <CardContent className="flex flex-col gap-4">
+        {error === INVALID_LINK ? (
+          <p className="text-destructive text-sm" role="alert">
+            That link has expired or has already been used. Ask for a new one.
+          </p>
+        ) : null}
         <LoginForm />
       </CardContent>
       <CardFooter>
