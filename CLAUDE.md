@@ -11,7 +11,7 @@ Read this fully before generating code, scaffolding, or migrations.
 
 **Package manager is `pnpm` (`pnpm@11.13.1`), not npm.** Node is pinned to
 **24** (`.nvmrc`, matched by CI). Stack versions are new and have breaking
-changes: **Next.js 16.2.6**, **React 19.2.4**. Per `AGENTS.md`, read the
+changes: **Next.js 16.2.11**, **React 19.2.4**. Per `AGENTS.md`, read the
 relevant guide in `node_modules/next/dist/docs/` (`01-app`, `02-pages`,
 `03-architecture`, …) before writing Next.js code — do not assume
 training-data APIs.
@@ -19,13 +19,14 @@ training-data APIs.
 ### Commands
 ```bash
 pnpm install            # install deps (CI uses --frozen-lockfile)
-pnpm dev                # dev server, http://localhost:3000
+pnpm dev                # dev server, http://127.0.0.1:3000 (matches [auth] site_url)
 pnpm build              # production build (next build)
 pnpm start              # serve the production build
 pnpm lint               # eslint (next core-web-vitals + typescript)
 pnpm typecheck          # tsc --noEmit (strict)
 pnpm test               # vitest run --passWithNoTests
-pnpm test:e2e           # playwright smoke test (also runs in CI; boots the dev server itself)
+pnpm test:e2e           # playwright auth-loop suite (also runs in CI; boots the dev
+                        # server itself, but needs a seeded local stack + .env.local)
 pnpm format             # prettier --write .
 pnpm format:check       # prettier --check . (CI gate; *.md is ignored)
 ```
@@ -55,11 +56,16 @@ via the `@/*` alias (`@/* → ./src/*`, `tsconfig.json`).
 **CI** (`.github/workflows/ci.yml`, on PR + push to `main`/`dev`): the `verify` job
 runs lint → format:check → typecheck → test → build → audit. Each check step
 after the first uses `if: !cancelled()` so one run reports *every* failure, not
-just the first. A parallel `e2e` job runs the Playwright smoke test (boots the
-app, Chromium only, HTML report uploaded as an artifact) — proving the app
-*runs*, not just that it compiles. A parallel `db` job boots the local Supabase
-stack and runs the pgTAP suite (`supabase test db`), so an RLS or write-guard
-regression fails CI instead of merging green.
+just the first. A parallel `e2e` job boots a local Supabase stack
+(`supabase start -x …` → `db reset` → write `.env.local` from `supabase
+status`) and runs the Playwright auth-loop specs against it (Chromium only,
+HTML report uploaded as an artifact) — proving the app *runs* and that RLS
+holds through a real session, not just that it compiles. That job sets no
+`NEXT_PUBLIC_SUPABASE_*` of its own on purpose: process env outranks
+`.env.local`, so a leftover placeholder would silently outrank the real values.
+A parallel `db` job boots the same stack and runs the pgTAP suite
+(`supabase test db`), so an RLS or write-guard regression fails CI instead of
+merging green.
 The audit step (`pnpm audit --audit-level=high`) is blocking — CI fails on any
 high/critical advisory. Two more workflows: gitleaks secret scan + Semgrep
 SAST (`security.yml`, PR + push to `main`/`dev`; semgrep is blocking, findings
@@ -76,8 +82,9 @@ old `CI/CD` type is retired in favor of `ci` — see `commitlint.config.mjs`).
 
 ### Current state vs. the target in §3
 
-The repo is at **Phase 3 (the vertical slice), in progress as of 2026-07-27** —
-Phases 1 and 2 are complete. The schema shipped 2026-07-17 and **merged to
+The repo is at **Phase 3 (the vertical slice), complete as of 2026-08-03** —
+Phases 1, 2 and 3 are done; **Phase 4 (hosted deployment) is next**. The schema
+shipped 2026-07-17 and **merged to
 `main` 2026-07-21** (PR #78), so `main` is the migration baseline: every schema
 change from here is a *new* forward migration, never an edit to a merged one.
 Parts of §3's *application* tree are still the **target**, not yet present.
@@ -93,10 +100,14 @@ Verify before assuming they exist:
   deletes + role management; work-order delete only through the coordinated
   server action); all staff see all properties; vendors scoped to assigned work
   orders (columns guarded by trigger); coordinated work-order hard delete
-  removes Storage objects before cascading activity/attachment metadata. Signup
-  is invite-only (`[auth] enable_signup =
-  false`; `[auth.email].enable_signup` must STAY true — off kills logins,
-  see config.toml).
+  removes Storage objects before cascading activity/attachment metadata.
+  **Signup is open** as of 2026-07-27 (`[auth] enable_signup = true`), reversing
+  the earlier invite-only call — safe because the role comes only from
+  server-set `raw_app_meta_data`, so a self-registration is an unlinked
+  `vendor` that can read nothing (see the auth-loop bullet below, and
+  `docs/schema/my_schema_writeup.md` for the reversal's paper trail).
+  Unchanged gotcha: `[auth.email].enable_signup` must STAY `true` — off kills
+  logins, see config.toml.
 - **In place — foundations:** Husky (pre-commit + commit-msg), commitlint,
   lint-staged, Vitest DOM harness (`tests/unit/`), Playwright
   (+ `tests/e2e/smoke.spec.ts`), gitleaks (CI + pre-commit), Semgrep SAST
@@ -121,10 +132,96 @@ Verify before assuming they exist:
   `shadcn` CLI dropped the classic zinc/neutral base colors for named
   "presets", so the toolkit was scaffolded from the registry's zinc tokens
   directly — add further primitives with `pnpm dlx shadcn@latest add <name>`.)
-- **Phase 3 (the vertical slice) is in progress.** UI toolkit landed
-  2026-07-27; the auth loop (login → session-gated shell) is the next work.
-  Schema-review follow-ups are tracked in `docs/backlog.md`, not blockers on it.
-- **Not yet created:** `src/server/`, `src/schemas/`, `supabase/functions/`.
+- **In place — auth loop (2026-07-27):** `src/schemas/auth.ts` (zod v4
+  `loginSchema` / `signupSchema` / `normalizePhone`), `src/server/queries/`
+  (`session.ts` — the DAL: `getSession`, `requireSession`, `getCurrentProfile`,
+  `isStaff`, `cache()`-memoized behind `import "server-only"`; `work-orders.ts`
+  — `listWorkOrders()`), `src/server/actions/auth.ts` (`signIn` · `signUp` ·
+  `signOut`), the `(auth)` route group (`/login` + `/signup`, `useActionState`
+  client forms), the `(dashboard)` shell (name, role badge, sign-out **form
+  POST**) and `/dashboard` (work-order list, plus a pending-access state for an
+  account nothing is linked to). `/` is now just `redirect("/dashboard")`. New
+  primitives: `input`, `label`, `card`, `table`, `badge`; new deps: `zod`,
+  `server-only`. **Auth checks live in pages and the DAL, never in a layout** —
+  Next.js Partial Rendering means a layout check stops running on client-side
+  navigation between sibling routes. **Every `useActionState` form echoes its
+  non-sensitive submitted values back** in the action's state and reads them as
+  `defaultValue` (fixed 2026-08-01) — React resets an uncontrolled form after
+  *every* function action, error paths included, so anything not echoed is
+  retyped after a failed submit. Passwords are never echoed; that one field
+  clears. Follow this in the Phase 3 write-half forms. Self-service signup
+  opened in the same change; the fail-safe is that a self-registration is a `vendor` with no
+  `vendors` row, so `current_vendor_id()` is NULL and every vendor-scoped
+  policy arm returns nothing (pinned by
+  `supabase/tests/03_signup_defaults.test.sql`). Forward migration
+  `20260727140000_handle_new_user_phone_from_metadata.sql` makes
+  `handle_new_user()` read the signup form's phone out of `raw_user_meta_data`
+  (`auth.users.phone` still wins when set) and store whitespace-only name/phone
+  as NULL. Two accepted risks, both in `docs/backlog.md`:
+  `[auth.email] enable_confirmations` is still `false` (must be on before the
+  Phase 4 public deploy), and there is no CAPTCHA —
+  `[auth.rate_limit] sign_in_sign_ups` is the only brake. One known **defect**
+  is filed alongside them (nobody chose this one): `signOut()` passes no
+  options, and auth-js defaults that to **global** scope, so signing out on one
+  device revokes the account's sessions everywhere. It should pass
+  `{ scope: "local" }`.
+- **In place — staff write path (2026-08-02):** `src/schemas/work-order.ts`,
+  `src/server/actions/work-orders.ts` (`createWorkOrder` · `assignVendor` ·
+  `addNote`), `src/server/queries/` (`properties.ts` · `vendors.ts`, plus
+  `getWorkOrder` / `listWorkOrderActivity`), `/work-orders/new` and
+  `/work-orders/[id]`, and `src/components/features/work-orders/`. Three rules
+  worth carrying into the vendor half. **Use `z.guid()`, never `z.uuid()`**, for
+  anything that lands in a Postgres `uuid` column: zod v4's `uuid()` enforces
+  RFC 9562 version/variant nibbles that Postgres does not, and it rejects every
+  id in `seed.sql`. **Resolve actor names through `public.staff_directory`**,
+  never a `profiles` embed — a vendor has no SELECT policy on staff profile
+  rows, so the embed silently renders staff actions anonymously. And **forms use
+  a native `<select>`** (`src/components/ui/native-select.tsx`), not shadcn's
+  Radix Select, so they submit with the server action and work before
+  hydration. Forward migration
+  `20260802143000_require_non_blank_activity_note.sql` closes the blank-note
+  hole (issue #76).
+- **In place — the vendor half (2026-08-03), which completes Phase 3:**
+  `src/lib/supabase/admin.ts` (the privileged client), `src/lib/attachments.ts`
+  (the shared upload contract), `src/schemas/vendor.ts`,
+  `src/server/actions/vendors.ts` (`createVendor` · `inviteVendor`),
+  `updateWorkOrderStatus` + `recordAttachment` in the work-order actions,
+  `src/app/auth/confirm/route.ts`, and `/vendors`. **No migration** — every
+  policy, grant and trigger this needed was already on `main`, which is what the
+  Phase 2 design was for. Four rules to carry forward:
+
+  **`SUPABASE_SECRET_KEY` is read lazily, inside `createAdminClient()`.** Never
+  at module scope: the CI `verify` job runs `next build` with no stack and no
+  secret, and a module-scope read fails that build the moment any page's import
+  graph reaches the file. It also refuses a `sb_publishable_`-prefixed value,
+  and it lives in `admin.ts` rather than `env.ts` because `env.ts` is imported
+  by the browser client.
+
+  **Reach for the admin client last, never first.** It bypasses RLS by
+  definition, so the caller's access is established with the *session* client
+  first — `can_access_work_order()` for an upload, `is_staff()` for an invite —
+  and only then is the privileged client created. Signed download URLs are
+  minted with the session client for the same reason: signing with the service
+  role would hand out URLs RLS had just refused.
+
+  **`inviteVendor` is the one action with its own authorization check**, and the
+  exception is real rather than sloppy: `vendors.profile_id` has no client write
+  grant, so the write goes through the service role and there is no policy left
+  to lean on. `vendors_select_staff_or_self` is not a substitute — its
+  `or profile_id = auth.uid()` arm means a read succeeding proves nothing.
+
+  **The magic link is ours, not GoTrue's.** `generateLink` mints the token; we
+  build a `/auth/confirm` URL from `properties.hashed_token` and redeem it with
+  `verifyOtp`. `properties.action_link` is the implicit flow and returns the
+  session in a URL fragment, which a cookie-session app cannot use. Verified
+  against the running stack: `generateLink` **sends no email**, and the token is
+  **single use**. Full reasoning and the other settled questions:
+  `docs/vendor-access.md` §6.
+- **Not yet created:** `supabase/functions/`, `src/app/api/`. Neither is a gap
+  to fill on its own — edge functions are Phase 5 (§6 SMS), and the only route
+  handler that exists is `src/app/auth/confirm/route.ts`, which is deliberately
+  *not* under `api/`. The SSO callback will be the next one. Do not scaffold
+  either speculatively (§3/§8).
 - When you add the next missing piece, follow §3/§5 exactly (e.g.
   `src/server/` as the trust boundary; schema changes only as new migrations
   with RLS alongside).
@@ -143,13 +240,14 @@ work orders, vendor coordination, documentation, and audit-ready records.
 
 ### Timeline — we are on a clock
 
-**Target: past MVP by early August 2026** (~1 week out as of 2026-07-27). The
-§1 MVP scope needs to be built, deployed, and usable by then — Phases 1–5 of
-§4, not just the foundations. As of 2026-07-27 Phases 1 and 2 are complete and
-**Phase 3 (the vertical slice) is underway** — the Tailwind + shadcn/ui toolkit
-landed 2026-07-27 and the auth loop is the current focus. It is the largest
-remaining unknown — schema polish competes with it for the same window, so
-treat backlog follow-ups as fill-in work, not the critical path.
+**Target: past MVP by early August 2026** — i.e. now. The §1 MVP scope needs to
+be built, deployed, and usable, which is Phases 1–5 of §4, not just the
+foundations. As of 2026-08-03 **Phases 1–3 are complete**: the toolkit and auth
+loop landed 2026-07-27, the staff write path 2026-08-02, and the vendor half
+2026-08-03, closing the vertical slice end to end. **Phase 4 (hosted deployment)
+is the critical path now** — the largest remaining unknown, and the one thing
+that turns a working local app into a usable one. Treat backlog follow-ups as
+fill-in work around it, not as the main line.
 
 **This does not lower the bar.** Rigor is what keeps a two-week push from
 becoming a four-week one. RLS still ships in the same migration as its table,
@@ -254,8 +352,11 @@ that belong in them — no speculative/empty folders.
 ```
 realtyworks/
 ├── .github/
+│   ├── ISSUE_TEMPLATE/             # bug · feature · chore issue forms + config.yml
 │   ├── workflows/                  # ci.yml (main gate — see §0) · security.yml · osv-scanner.yml
-│   └── dependabot.yml              # weekly npm + github-actions updates
+│   ├── CODEOWNERS                  # * @Damilss — ownership record, NOT a required review
+│   ├── dependabot.yml              # weekly npm + github-actions updates
+│   └── pull_request_template.md    # self-review checklist (paper trail, not a gate)
 ├── .husky/                         # pre-commit (lint-staged + gitleaks), commit-msg (commitlint)
 ├── docs/                           # tooling.md · playwright.md · backlog.md · commit-messages.md · dependency-version-management.md · pwa.md · vendor-access.md · reports/
 │   └── schema/                     # schema-brainstorming.md (the method) · my_schema_writeup.md (workflows → design → Phase 2 plan)
@@ -263,8 +364,9 @@ realtyworks/
 ├── src/
 │   ├── app/                        # App Router
 │   │   ├── (auth)/                 # route group: login, signup
-│   │   ├── (dashboard)/            # route group: authed app shell
-│   │   ├── api/                    # route handlers (webhooks etc.)
+│   │   ├── (dashboard)/            # route group: authed app shell (work orders, vendors)
+│   │   ├── auth/confirm/route.ts   # redeems a magic link → session cookies
+│   │   ├── api/                    # route handlers (webhooks etc.) — not created yet
 │   │   ├── layout.tsx
 │   │   ├── page.tsx
 │   │   └── globals.css
@@ -275,8 +377,10 @@ realtyworks/
 │   │   ├── supabase/
 │   │   │   ├── client.ts           # browser client
 │   │   │   ├── server.ts           # server client (cookies/SSR)
+│   │   │   ├── admin.ts            # PRIVILEGED — secret key, bypasses RLS (§2)
 │   │   │   ├── proxy.ts            # session refresh (called by src/proxy.ts)
 │   │   │   └── env.ts              # validated NEXT_PUBLIC_SUPABASE_* config
+│   │   ├── attachments.ts          # upload contract shared by browser + server
 │   │   ├── database.types.ts       # GENERATED — never hand-edit
 │   │   └── utils.ts
 │   ├── server/                     # SERVER-ONLY — never imported by client
@@ -306,12 +410,19 @@ realtyworks/
 ├── vitest.config.ts
 ├── package.json
 ├── pnpm-workspace.yaml             # pnpm settings (allowBuilds — reviewed install scripts)
+├── CONTRIBUTING.md                 # setup · branch naming · commits · PR flow · schema rules
+├── SECURITY.md                     # vulnerability reporting · gate coverage · triage runbook
 └── README.md
 ```
 
 ### Structure rules
-- `src/server/` is the trust boundary. Client components must never import from
-  it. Enforce with an ESLint import restriction once real code exists.
+- `src/server/` is the trust boundary, with one deliberate seam.
+  `src/server/queries/**` is server-only — every module opens with
+  `import "server-only"`, so pulling one into client code fails the build.
+  `src/server/actions/**` is the exception: client components are *meant* to
+  import server actions, because `"use server"` swaps the body for an RPC
+  reference and the implementation never ships. A lint rule blocking all of
+  `@/server/*` would break the login form; scope one to `queries/` (backlog).
 - `src/schemas/` (zod) is imported by both client and server: validate in both,
   trust only the server. Schemas do NOT live in `src/server/`.
 - `database.types.ts` is generated via `supabase gen types typescript`.
@@ -342,13 +453,18 @@ the table it protects. Seed file with 3 test users (landlord, manager, vendor),
 sample properties, a vendor, work orders in varied states. One command resets
 local to a known-good state.
 
-**Phase 3 — One vertical slice** *(in progress — started 2026-07-27; UI toolkit landed)*
+**Phase 3 — One vertical slice** *(complete 2026-08-03)*
 Exactly one full path, nothing else: manager logs in → creates work order →
 assigns vendor → vendor logs in → vendor updates status + uploads photo →
-activity log reflects all of it → manager sees it. Exercises auth, RLS,
-mutations, storage, activity trail before the pattern is duplicated.
+activity log reflects all of it → manager sees it. Exercised auth, RLS,
+mutations, storage, and the activity trail before the pattern gets duplicated —
+which was the point of doing it as one path instead of five half-features.
+Landed in three parts: the toolkit + auth loop (2026-07-27), the staff write
+path (2026-08-02), and the vendor half (2026-08-03). `tests/e2e/` drives the
+whole thing against a seeded stack, including redeeming a real magic link in a
+second browser context.
 
-**Phase 4 — Hosted deployment**
+**Phase 4 — Hosted deployment** *(next)*
 Vercel + Supabase Cloud free tier. PR preview deploys, Sentry wired, prod
 deploys only from `main`.
 

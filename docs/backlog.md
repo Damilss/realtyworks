@@ -15,15 +15,19 @@ Pick them off at your discretion.
 
 ---
 
-## State verified (2026-07-27)
+## State verified (2026-08-01)
 
-- `next 16.2.6` / `react 19.2.4` / `pnpm@11.13.1`, Node pinned to 24 (`.nvmrc`).
+- `next 16.2.11` / `react 19.2.4` / `pnpm@11.13.1`, Node pinned to 24 (`.nvmrc`).
 - CI runs `lint → format:check → typecheck → test → build → audit` — with
   `!cancelled()`, concurrency-cancel, `permissions: contents: read`, and
   pnpm + Next build caching. The audit step is **blocking** (fails on any
-  high/critical advisory; see `docs/tooling.md`). A parallel **`e2e` job** runs
-  the Playwright smoke test on every PR/push to `main`/`dev` (Chromium only,
-  HTML report artifact).
+  high/critical advisory; see `docs/tooling.md`). A parallel **`e2e` job** now
+  boots its own Supabase stack, resets it to the seed, and runs the Playwright
+  specs on every PR/push to `main`/`dev` (Chromium only, HTML report artifact) —
+  so RLS is gated through the UI, not just through pgTAP. Since 2026-08-03 that
+  job's `.env.local` also carries `SUPABASE_SECRET_KEY` (renamed from the CLI's
+  `SECRET_KEY`); the step's grep stays an **allowlist**, so `SERVICE_ROLE_KEY`
+  and `JWT_SECRET` still never reach a file `next build` reads.
 - Security workflows live: **gitleaks** on PR/push to `main`/`dev`
   (+ pre-commit layer), **Semgrep SAST** (blocking, PR annotations), weekly
   **osv-scanner** lockfile scan (+ a scan on every PR into `main`). Every
@@ -37,7 +41,15 @@ Pick them off at your discretion.
   (9 migrations, seed, pgTAP suite via `pnpm exec supabase test db`), generated
   `src/lib/database.types.ts`, supabase CLI pinned as a devDependency. See ✅.
   `main` is now the migration baseline — every schema change from here is a new
-  forward migration, never an edit to a merged file.
+  forward migration, never an edit to a merged file. Five such forward
+  migrations now exist: the 2026-07-27 last-landlord delete guard and signup-phone
+  metadata fix, two 2026-08-01 migrations narrowing `service_role` to row
+  DML and making the activity trail append-only even for the service key, and the
+  2026-08-02 non-blank-note constraint. pgTAP is up to **94 assertions** across
+  three files, including `03_signup_defaults.test.sql`. The 2026-08-03 vendor
+  half added **no** migration — the Phase 2 schema already carried every policy
+  and grant it needed, which is the clearest evidence so far that shipping RLS
+  with its table was the right call.
 - **pgTAP `db` job** running in CI on `main`/`dev` (issue #72) — not yet a
   *required* check. See ✅.
 - **Branch protection on `main`** enabled 2026-07-20 (web UI). See ✅.
@@ -49,6 +61,18 @@ Pick them off at your discretion.
   colors for named presets); `components.json`, `postcss.config.mjs`,
   `src/lib/utils.ts`, and `src/components/ui/button.tsx` added; class order
   enforced by `prettier-plugin-tailwindcss`. **Phase 3 has started.** See ✅.
+- **Auth loop shipped 2026-07-27** — `/login`, `/signup`, the session-gated
+  dashboard, and the work-order list, over `src/schemas/`, `src/server/queries/`
+  (server-only DAL) and `src/server/actions/`. Both folders now exist. Of
+  `CLAUDE.md` §3, only `supabase/functions/` is still unbuilt (Phase 5 SMS) —
+  `src/app/api/` is too, but the route handler that arrived on 2026-08-03 landed
+  at `src/app/auth/confirm/route.ts`, since it is an auth endpoint rather than an
+  API surface. See ✅.
+- **Signup is open** (`[auth] enable_signup = true`, 2026-07-27) — reverses the
+  2026-07-17 invite-only call. Every self-registration is an unlinked `vendor`
+  that can read nothing; roles come only from server-set `raw_app_meta_data`.
+  Reversal + reasoning: `docs/schema/my_schema_writeup.md`, last section. The
+  two costs are filed as 🟠 (email confirmations) and 🟡 (CAPTCHA).
 
 ### Sharp edges these issues address
 - Native GitHub security features (CodeQL, secret-scanning push-protection,
@@ -59,6 +83,255 @@ Pick them off at your discretion.
 ---
 
 ## ✅ Done (kept for the paper trail)
+
+### ✅ Phase 3 — the vendor half, closing the vertical slice (2026-08-03)
+Magic-link invite → vendor session → status update → photo upload → activity
+trail, plus the `/vendors` page staff needed to add a vendor at all (the
+`vendors_insert_staff` policy had shipped with no form behind it). New:
+`src/lib/supabase/admin.ts`, `src/lib/attachments.ts`, `src/schemas/vendor.ts`,
+`src/server/actions/vendors.ts`, `updateWorkOrderStatus` + `recordAttachment`,
+`src/app/auth/confirm/route.ts`, `/vendors`, and
+`tests/e2e/vendor-loop.spec.ts` (6 specs; 22 e2e total, 150 unit tests).
+
+**No migration.** Every policy, grant, trigger and constraint this needed was
+already on `main` from Phase 2 — the stage was application code finally using
+them. pgTAP is unchanged at 94 assertions, and the vendor guard and attachment
+invariants were already covered there.
+
+**`generateLink` sends no email, and its token is single use** — both verified
+against the running stack before any UI was written, because the design leans
+on both. The no-email finding is what lets the CI `e2e` job keep excluding the
+mail container. Related correction: `inbucket` *is* still a valid `-x` name in
+CLI 2.109.1 (`supabase start --help` lists it), so the exclusion lists in both
+jobs were left alone.
+
+**The admin client reads `SUPABASE_SECRET_KEY` lazily, inside the factory.** At
+module scope it would break `next build` in the `verify` job, which has no
+stack and no secret — pinned by a test asserting the module imports cleanly with
+both variables unset, and confirmed by building with the key removed.
+
+**`inviteVendor` carries an explicit `is_staff()` check**, the only action in
+the repo that does. `vendors.profile_id` has no client write grant, so the write
+goes through the service role and there is no policy left to lean on;
+`vendors_select_staff_or_self` is not a substitute because its
+`or profile_id = auth.uid()` arm means a successful read proves nothing.
+
+### ✅ Phase 3 — the staff write path (2026-08-02)
+Create a work order → assign a vendor → activity trail, over real RLS.
+`src/schemas/work-order.ts`, `src/server/actions/work-orders.ts`
+(`createWorkOrder` · `assignVendor` · `addNote`), `src/server/queries/`
+(`properties.ts`, `vendors.ts`, plus `getWorkOrder` / `listWorkOrderActivity`),
+`/work-orders/new` and `/work-orders/[id]`, and
+`src/components/features/work-orders/` (`activity-trail`, shared `labels`). New
+primitives: `textarea` and `native-select`; `form-feedback` moved out of the
+`(auth)` route group to `src/components/ui/` now that both halves use it.
+
+**A `<select>`, not shadcn's Radix Select.** The Radix one renders divs and
+needs a hidden native control to take part in a form POST at all. A real
+`<select>` submits with the server action, works before hydration, and gives
+phone users their platform picker — which matters for the vendor half.
+
+**`z.guid()`, not `z.uuid()` — this one cost an e2e run to find.** Zod v4's
+`uuid()` enforces RFC 9562 version and variant nibbles; Postgres's `uuid` type
+enforces neither and stores any 128-bit value. Every id in `seed.sql`
+(`10000000-0000-0000-0000-000000000001`) has version/variant nibbles of `0`, so
+`uuid()` rejected the whole fixture set and the create form could not be
+submitted at all against a seeded stack. The unit tests passed throughout,
+because their fixtures were invented v4-shaped ids — so those fixtures are now
+the real seeded ones, with a regression case pinning all three shapes.
+
+**Actor names resolve through `staff_directory`, never a `profiles` embed.** A
+vendor has no SELECT policy on staff profile rows, so an embed renders every
+staff action anonymously for exactly the person who needs to know who assigned
+them the job. Pinned by an e2e assertion on the specific trail entry.
+
+`assignVendor` moves status to `assigned` only from `open`, so reassigning a
+job mid-repair changes the vendor and not the state. 115 unit tests across 12
+files; `tests/e2e/work-orders.spec.ts` adds 5 specs (14 e2e total).
+**The vendor half followed on 2026-08-03 — see the ✅ entry above.**
+
+### ✅ Reject empty/whitespace notes on the activity trail (2026-08-02, issue #76)
+Forward migration `20260802143000_require_non_blank_activity_note.sql` tightens
+`activity_note_requires_text` from `note is not null` to
+`note is not null and char_length(trim(note)) > 0`. Landed with the note form —
+the first client that could ever write one — and mirrored in `addNoteSchema` so
+the form says so before the round trip.
+
+**The null arm has to stay in the predicate.** A CHECK evaluating to NULL
+passes, and `char_length(trim(null))` is NULL, so testing the trimmed length
+alone would have let a null note through on a `note_added` row — the exact case
+the constraint exists to prevent. pgTAP covers empty, whitespace-only, and null
+separately (89 assertions, up from 86).
+
+### ✅ Auth forms survive a failed submit (2026-08-01)
+Both `useActionState` forms lost every field whenever the action came back with
+an error — a mistyped phone on `/signup` cost the user all four. Not a Next.js
+behaviour but a React one, and unconditional: in `react-dom@19.2.4`,
+`startHostTransition` calls `requestFormReset` **before** running a function
+action, and the commit that renders the error state is the same one that calls
+`form.reset()`. Success paths were never affected — `redirect()` throws
+`NEXT_REDIRECT`, so the form unmounts instead of returning.
+
+`src/server/actions/auth.ts` now echoes the non-sensitive submitted values
+(`fullName` · `email` · `phone`) back in `AuthFormState.values` from all four
+error returns, and the inputs read them as `defaultValue`. That works *because*
+of the same commit ordering: React writes the new default to the DOM during the
+mutation phase, and the reset then restores each input to it. Values are echoed
+**as typed**, not from `parsed.data` — which does not exist when validation is
+what failed, and which has already normalized the phone number the user is being
+asked to fix — bounded at 256 characters (past every field's own maximum) since
+the action is a public POST endpoint, and skipped for any entry that is not a
+string, so a file part cannot come back as `"[object File]"`.
+
+**Passwords are never echoed** and that field alone clears — round-tripping a
+credential through the action response to save retyping one field is the wrong
+trade. Controlled inputs were the other option and are worse here: a programmatic
+`reset()` schedules no re-render, so React state and the DOM can desync.
+
+Covered at three levels: the action tests, an RTL suite per form (new
+`signup-form.test.tsx`), and Playwright — the only place the real reset runs —
+where the wrong-password spec now asserts the address survives, plus a new spec
+signing up with a seeded address (fails on the duplicate, writes nothing, keeps
+its fields). 78 unit tests across 10 files; `auth.spec.ts` is up to 8 specs.
+**The convention holds for the Phase 3 write-half forms** — see `CLAUDE.md` §0.
+
+### ✅ Phase 3 — Auth loop + self-service signup (2026-07-27)
+Login → signup → session-gated shell → work-order list, end to end over real
+RLS. `src/schemas/auth.ts` (zod v4 `loginSchema` / `signupSchema` /
+`normalizePhone`), `src/server/queries/session.ts` (the DAL: `getSession`,
+`requireSession`, `getCurrentProfile`, `isStaff` — `cache()`-memoized behind
+`import "server-only"`), `src/server/queries/work-orders.ts`
+(`listWorkOrders()`), `src/server/actions/auth.ts` (`signIn` · `signUp` ·
+`signOut`), the `(auth)` and `(dashboard)` route groups with `useActionState`
+client forms, `work-order-table.tsx`, and five more shadcn primitives (`input`,
+`label`, `card`, `table`, `badge`). `/` is now `redirect("/dashboard")`. New
+deps: `zod`, `server-only`.
+
+**Auth checks live in pages and the DAL, never in a layout.** Next.js Partial
+Rendering means a layout does not re-render on client-side navigation, so a
+check placed there silently stops running as the user moves between sibling
+routes. The dashboard layout still calls the DAL for the header — convenience,
+not the gate.
+
+**Signup was opened in the same change** (`[auth] enable_signup` `false` →
+`true`), reversing the 2026-07-17 invite-only decision; the paper trail is the
+last section of `docs/schema/my_schema_writeup.md`. Safe because
+`handle_new_user()` takes the role only from server-set `raw_app_meta_data` — a
+client's `signUp({ options: { data } })` lands in `raw_user_meta_data`, which is
+never consulted for role. So every self-registration is an unlinked `vendor`,
+`current_vendor_id()` resolves to NULL, and every vendor-scoped policy arm
+returns nothing; staff roles still come only from a server-side admin
+create/invite or `set_user_role()`. Pinned by
+`supabase/tests/03_signup_defaults.test.sql` (9 assertions — the headline one
+registers a user claiming `"app_role": "landlord"` in client metadata and
+asserts the profile comes out `vendor`).
+
+Forward migration `20260727140000_handle_new_user_phone_from_metadata.sql`: the
+trigger read phone from `new.phone` — the `auth.users.phone` column, which only
+SMS signup populates — so a phone typed into the email signup form was accepted
+and silently dropped. It now falls back to `raw_user_meta_data ->> 'phone'`
+(`auth.users.phone` still wins when set), and `nullif(trim(...), '')` stops a
+whitespace-only name or phone from satisfying the length CHECKs.
+
+**CI changed with it.** The `e2e` job — now *E2E (Playwright auth loop)*,
+`timeout-minutes: 20` — boots a real stack (`supabase start -x …` → `db reset` →
+`.env.local` written from `supabase status -o env | grep '^NEXT_PUBLIC_'`). Its
+placeholder `NEXT_PUBLIC_SUPABASE_*` env was **removed, not updated**: process
+env outranks `.env.local` in Next, so a leftover placeholder would have
+outranked the real values and pointed the app at a stack that isn't there.
+`tests/e2e/auth.spec.ts` (7 specs) covers both seeded roles, self-registration,
+a wrong password, the signed-out redirect, the root redirect, and sign-out;
+`smoke.spec.ts` stays. `playwright.config.ts` `baseURL` moved
+`localhost` → `127.0.0.1` to match `[auth] site_url` (cookies are per-host, so
+an auth redirect across the two hostnames would strand the session), with a
+matching `allowedDevOrigins` in `next.config.ts`. On the unit side,
+`tests/unit/harness.test.tsx` was deleted — real component tests replaced the
+placeholder — and `tests/unit/server-only-stub.ts` is aliased in
+`vitest.config.ts` so Vitest can import modules guarded by `server-only`
+without switching React to its server build.
+
+**Two accepted risks came with opening signup**, both filed above: email
+confirmations are still off (🟠 High, must be on before the Phase 4 public
+deploy) and there is no CAPTCHA (🟡).
+
+### ✅ Typed env vars + committed `.env.example` — closed, solved another way (2026-07-27)
+Closed rather than completed as written. The ask was `@t3-oss/env-nextjs` + zod;
+what shipped instead (2026-07-21, issue #37) is `src/lib/supabase/env.ts` plus a
+`supabaseEnv()` call at the top of `next.config.ts` — a missing variable throws
+while the config loads, so an unusable bundle is never emitted, and the key is
+additionally rejected unless it is specifically `sb_publishable_…` (a secret key
+on a `NEXT_PUBLIC_*` var would be inlined into the browser bundle and bypass
+RLS — stricter than "is it set?"). `.env.example` is committed, via the
+`!.env.example` negation in `.gitignore`.
+
+Adding t3-env now would be a second mechanism for a solved problem, over two
+environment variables. `zod` **is** installed as of 2026-07-27 — as a direct
+dependency for `src/schemas/`, which is what the §3 half of the original line
+was actually about. Revisit only if the env surface grows past a handful of
+vars.
+
+### ✅ Narrow `service_role` table privileges (2026-08-01)
+Two forward migrations replace the seven application tables' `GRANT ALL`
+surface with their documented row operations. `work_order_activity` is now
+strictly `SELECT, INSERT` for `service_role`, with `UPDATE, DELETE, TRUNCATE`
+explicitly revoked so the append-only audit guarantee no longer depends on RLS
+that the service key bypasses. The coordinated work-order hard delete still
+works: the privilege on the parent authorizes its `ON DELETE CASCADE` activity
+cleanup without any direct child `DELETE` grant.
+
+The required six-table sweep found the same administration-level overgrant on
+every sibling table. A separate migration keeps their ordinary
+`SELECT, INSERT, UPDATE, DELETE` lifecycle surface while removing `TRUNCATE`,
+`REFERENCES`, `TRIGGER`, `MAINTAIN`, and future privileges implied by `ALL`.
+`DELETE` remains deliberate on `work_orders` and `work_order_attachments` for
+the coordinated cleanup flows; `TRUNCATE` never was, and on attachment metadata
+it could orphan Storage objects. pgTAP pins each exact grant set, explicitly
+checks that the activity trail cannot be deleted or truncated through
+`service_role`, and exercises the parent cascade. `db reset` and all 86 database
+assertions pass locally.
+
+### ✅ Guard deletion of the final landlord profile (2026-07-27)
+A forward migration chose the database hard-block semantics from the review:
+`BEFORE DELETE` now refuses to remove the final landlord profile with a loud
+`42501`, including when the delete reaches `profiles` through the
+`auth.users` cascade. Landlord deletes take the same transaction advisory lock
+as demotions before checking for a replacement, so concurrent removals are
+serialized against each other. An administrator must promote another landlord
+before deleting the current final one. pgTAP exercises a successful non-final
+direct delete, a refused final direct delete, and the `auth.users` cascade while
+confirming the auth user and profile both survive the failed transaction.
+
+### ✅ GitHub repo scaffolding (2026-07-27, issue #31)
+`.github/pull_request_template.md`, three issue forms (`bug` · `feature` ·
+`chore`) plus `config.yml`, `.github/CODEOWNERS`, `CONTRIBUTING.md`, and
+`SECURITY.md`. Issue forms mirror this file's **Why / Do / Done when** shape, so
+a block here copies straight across.
+
+Three things worth keeping. **Every template renders from the default branch
+only** — the issue forms, `config.yml`, *and* `pull_request_template.md` all do
+nothing until they are on `main`, so "it's on `dev`" is not done. GitHub's
+wording for the PR template is the same as for the issue forms: "available to
+collaborators when they are merged into the repository's default branch."
+`CODEOWNERS` is the lone exception and works the other way round — it is read
+from a PR's **base** branch, so it takes effect on `dev` a merge earlier than
+the templates do. **A label named in a form
+that doesn't exist is silently dropped** — the issue just opens unlabeled, no
+error anywhere; the forms only auto-apply `bug` and `enhancement`, both GitHub
+defaults, and `chore.yml` ships label-free on purpose.
+
+And **`CODEOWNERS` is a record, not a gate.** GitHub never requests review from
+a PR's own author, so `* @Damilss` is inert on self-authored PRs and only fires
+on Dependabot's. "Require review from Code Owners" stays **off**: it could never
+be satisfied solo, so every merge would become an admin override and branch
+protection would stop meaning anything.
+
+`SECURITY.md` names an email channel because **GitHub private vulnerability
+reporting and repository security advisories are both public-repository
+features** — per GitHub's docs, "Owners and administrators of public
+repositories can enable private vulnerability reporting." Same GHAS-on-private
+wall as CodeQL and push protection. The switch-over triggers (repo goes public,
+or issue #74 fills the `TOS.md` contact placeholder) are written into the policy
+itself.
 
 ### ✅ Supabase clients — Phase 2 complete (2026-07-21, issue #37)
 `@supabase/ssr` + `@supabase/supabase-js` installed; `src/lib/supabase/`
@@ -165,8 +438,10 @@ profile reads); attachment `storage_path` CHECK enforces the exact
 serialize on an advisory lock (concurrent-demotion race); attachment deletes
 have **no client surface** on either layer — coordinated Phase 3 server
 action only (`storage.protect_delete()` makes a transactional DB-side revoke
-impossible, so one-sided deletes are simply removed). Signup is invite-only (`[auth] enable_signup = false`) — gotcha:
-`[auth.email].enable_signup` must stay `true`, turning it off disables the
+impossible, so one-sided deletes are simply removed). Signup shipped
+invite-only (`[auth] enable_signup = false`) — **reversed 2026-07-27, see the
+auth-loop entry above**; the surviving gotcha is that
+`[auth.email].enable_signup` must stay `true`, since turning it off disables the
 whole email provider including logins (documented in `config.toml`). Full
 design + decisions: `docs/schema/my_schema_writeup.md`.
 
@@ -264,51 +539,109 @@ required-check names are unchanged; the OSV scan surfaces as a non-required
 
 ## 🟠 High
 
-### 🟠 Restrict `service_role` privileges on `work_order_activity`
-**Why:** The table grants `ALL` to `service_role`, which bypasses RLS — and `ALL`
-includes `DELETE` and `TRUNCATE`. A mistaken or compromised server action can
-therefore erase the audit trail despite the documented append-only guarantee and
-the absence of any DELETE policy: that guarantee currently rests on a policy
-`service_role` never consults. The coordinated work-order hard delete does not
-need the privilege — `ON DELETE CASCADE` is authorized by the grant on the
-*parent* table, not the child. Audit trail is a product feature (`CLAUDE.md` §5)
-and this is a §2 trust-rule surface.
-`supabase/migrations/20260717120600_create_work_order_activity.sql:123`
-(PR review `dev` → `main`, 2026-07-21).
-**Do:** new migration narrowing the grant to the operations actually used
-(`SELECT, INSERT` if the trail is strictly append-only), explicitly `REVOKE`ing
-`DELETE, TRUNCATE` so the intent is legible in the file. Confirm the coordinated
-work-order delete still cascades under the narrower grant. Sweep the other six
-tables for the same `GRANT ALL … service_role` pattern — separate migration if
-any share it, keep this one scoped.
-**Done when:** pgTAP asserts `service_role` cannot `DELETE`/`TRUNCATE`
-`work_order_activity` and that the coordinated parent delete still removes its
-child rows — so re-widening the grant fails CI.
+### 🟠 Reject backslash-based external redirects in `/auth/confirm` (PR review, P2)
+**Why:** `safeNext()` in `src/app/auth/confirm/route.ts` is meant to guarantee
+the post-verification redirect stays same-origin, and it does not.
+`next=%2F%5Cevil.example` decodes to `/\evil.example` — starts with `/`, does not
+start with `//`, so it passes and is written straight to `Location`. Browsers
+treat `\` as `/` in the authority position (WHATWG URL), so it normalizes to
+`//evil.example` and the user lands off-site. Backslash is the headline case, not
+the only one: `/\/evil.example` and tab/newline variants (`/%09/evil.example`,
+`/%0d/evil.example`, both stripped by the parser before it runs) get through the
+same way.
+
+The root cause is **string-matching a value that a URL parser will later
+reinterpret**. Any allowlist built on `startsWith` eventually loses that
+argument, so the fix is not another prefix case.
+
+This is the one endpoint in the app that mints a session, and the redirect fires
+*after* a successful `verifyOtp` — so the victim is genuinely logged in when they
+land on the attacker's page, which is what makes a "session expired, sign in
+again" page work. Exploitability is bounded: it needs a **valid, unspent** magic
+link, since a failed verification redirects to `/login` and never reads `next`.
+But that is the normal state of an invite in transit, and
+`docs/vendor-access.md` §3a sets the threat model as *assume the link reaches
+someone it shouldn't* — a forwarded invite re-crafted with a hostile `next` is
+exactly the scenario. P2 is right: not remotely exploitable, real once a link
+leaks.
+
+**Two things hid this, both worth fixing with it.** The doc comment calls the
+check "the cheap, complete defence", which is an overclaim that reads as
+assurance. And the e2e spec
+(`tests/e2e/vendor-loop.spec.ts`, "refuses an off-site redirect") passes
+`token_hash=bogus` — so verification fails, the handler redirects to
+`/login?error=invalid-link`, and `next` **is never read**. It asserts we stayed
+on our own host, which we did for unrelated reasons; deleting `safeNext()`
+outright would leave it green. Same shape as the `z.uuid()` regression: a green
+test over a fixture that cannot reach the code under test.
+
+**Do:** stop string-matching. Parse with the same parser the browser will use,
+compare origins, and never emit a host:
+
+```ts
+function safeNext(next: string | null, origin: string): string {
+  if (!next) return "/dashboard";
+
+  let url: URL;
+  try {
+    url = new URL(next, origin);
+  } catch {
+    return "/dashboard";
+  }
+
+  if (url.origin !== origin) return "/dashboard";
+
+  // Path only — a host is never emitted, so even a spoofed Host header cannot
+  // turn this into an off-site Location.
+  return `${url.pathname}${url.search}${url.hash}`;
+}
+```
+
+Called as `safeNext(searchParams.get("next"), request.nextUrl.origin)`. This
+closes the class rather than the reported instance — `/\evil.example` resolves to
+origin `http://evil.example` and fails the comparison, absolute URLs fail it, and
+tab/newline injections are stripped before comparison. Returning only
+`pathname + search + hash` is the load-bearing part: because the result is always
+a bare path, the guard degrades safely even if `nextUrl.origin` were influenced
+by a spoofed `Host`. Rewrite the doc comment to describe parse-and-compare and
+drop the completeness claim.
+
+**Done when:** `next=%2F%5Cevil.example` lands on `/dashboard`; the e2e spec
+exercises the guard with a **real, valid token** so the redirect line actually
+executes, tabling `//evil.example`, `%2F%5Cevil.example`, `/%09/evil.example`,
+`https://evil.example`, and one legitimate `/work-orders/<id>` to prove
+deep-linking still works; and deleting `safeNext()` makes that spec fail —
+confirmed by actually doing it once, given the above.
+
+### 🟠 Turn on email confirmations before the Phase 4 public deploy
+**Why:** `[auth.email] enable_confirmations = false` was harmless while signup
+was invite-only. Since signup opened (2026-07-27) it means **anyone can create
+an account against an email address they do not own**, and be signed in
+immediately. Today the blast radius is nil — an unlinked self-registration reads
+nothing (`supabase/tests/03_signup_defaults.test.sql`) — but on a public
+deployment it is an address-squatting and pretext vector, and it silently
+becomes worse the moment anything is keyed on a user's email. This is a Phase 4
+gate, not a Phase 4 nice-to-have.
+**Do:** flip `enable_confirmations = true` in `supabase/config.toml`. **The
+`/auth/confirm` route handler this item used to call for now exists** — it
+shipped with the vendor invite on 2026-08-03 and already does the
+`verifyOtp({ token_hash, type })` exchange, so this is a matter of adding
+`signup` to its `ALLOWED_TYPES` rather than writing anything new. The default
+email template still has to be repointed at it: `{{ .ConfirmationURL }}` is the
+implicit flow, which the `@supabase/ssr` client cannot consume. Then
+configure production SMTP (the built-in service is rate-limited and explicitly
+not for real users); **drop `inbucket` from the `-x` list in the CI `e2e` job**,
+since signup will then send mail and the self-registration spec has to read the
+mailbox; and re-check the signup error copy in `src/server/actions/auth.ts` —
+it currently notes that GoTrue returns `user_already_exists` *because*
+confirmations are off, and that response shape changes when they are on.
+**Done when:** a new account cannot sign in until the emailed link is followed —
+locally and on the hosted deploy — with the e2e signup spec updated to walk the
+mailbox instead of landing straight on `/dashboard`.
 
 ---
 
 ## 🟡 Medium
-
-### 🟡 Guard deletion of the final landlord profile
-**Why:** The last-landlord guard is an `UPDATE`-only trigger, so deletion walks
-around it. An auth-admin flow deleting a landlord with no RESTRICT-linked history
-cascades `auth.users` → a profile `DELETE` and the trigger never fires. Deleting
-the final landlord leaves **no caller able to use `set_user_role`** — role
-management bricked with no in-app recovery — and the `DELETE` path also bypasses
-the advisory lock that serializes concurrent demotions.
-`supabase/migrations/20260717120100_create_profiles.sql:123-125`
-(PR review `dev` → `main`, 2026-07-21).
-**Do:** new migration extending the guard to `DELETE` under the **same advisory
-lock** as the UPDATE path. Settle the semantics first: (a) `BEFORE DELETE` raises
-on the last landlord — safest, forces promoting a replacement, and makes the
-`auth.users` cascade error rather than silently proceed; or (b) enforce it in
-every admin deletion path, leaving the DB permissive — weaker, and `CLAUDE.md` §2
-puts integrity in the DB, so (a) is the default unless the cascade makes it
-unworkable. Verify the choice against the `auth.users` cascade specifically —
-that's the path that doesn't go through app code.
-**Done when:** deleting the last landlord fails on both the direct and
-`auth.users`-cascade paths, covered by pgTAP, with the chosen semantics recorded
-in the migration comment.
 
 ### 🟡 Trim required text fields before the length CHECK (issues #75, #77)
 **Why:** Round 5 fixed `city`/`state`/`postal_code` with `char_length(trim(...)) > 0`
@@ -327,17 +660,32 @@ one as a duplicate.
 **Done when:** a whitespace-only value is rejected on every required text column,
 with a pgTAP assertion each.
 
-### 🟡 Reject empty/whitespace notes on the activity trail (issue #76)
-**Why:** `activity_note_requires_text` only checks `note is not null`, and the
-length check is `<= 2000`, so `''` and `'   '` both insert. The trail is
-append-only for **everyone** — no UPDATE/DELETE policy, plus a forbid trigger —
-so a blank note is permanent and unfixable, in the table `CLAUDE.md` §5 calls a
-product feature.
-**Do:** new migration tightening the constraint to require non-blank text on
-`note_added` (`char_length(trim(note)) > 0`), matching the vendor-contact
-`nullif(trim(...), '')` idiom. Mirror it in the Phase 3 zod schema so the client
-rejects it before the round trip.
-**Done when:** inserting a blank or whitespace-only note fails, covered by pgTAP.
+### 🟡 Scope the sign-out action to the current session
+**Why:** `src/server/actions/auth.ts` calls `supabase.auth.signOut()` with no
+options, and `@supabase/auth-js` (2.110.7) declares that as
+`signOut(options = { scope: 'global' })` — it revokes **every** refresh token the
+account holds, not just this browser's. The library's own JSDoc on the method
+says `{ scope: 'local' }` is what apps usually want on a "Sign out" button. So a
+manager signed in on a laptop and a phone who clicks the ordinary button
+(`src/app/(dashboard)/layout.tsx`) on one is signed out of the other — but not
+immediately: global scope revokes the *refresh* token while the access-token JWT
+stays valid until `jwt_expiry` (3600s, `supabase/config.toml`). The second device
+therefore works normally for up to an hour, then `src/proxy.ts` fails its refresh
+and bounces it to `/login`. The delayed, apparently random logout is what makes
+this worth fixing rather than documenting. The control is labeled "Sign out", not
+"Sign out everywhere". It fails in the **safe** direction — over-revoking, never
+under — which is why this is 🟡 and not a security item.
+**Do:** pass `{ scope: "local" }` in `signOut()` (`src/server/actions/auth.ts`),
+and tighten the assertion in `src/server/actions/auth.test.ts` from
+`toHaveBeenCalledOnce()` to `toHaveBeenCalledWith({ scope: "local" })` so the
+global default cannot creep back silently. Extend the comment above the redirect,
+which today explains the failure path but says nothing about scope. A deliberate
+"sign out everywhere" control is **not** in scope — that is a Phase 5
+account-settings affordance, and `scope: "others"` exists for it when wanted
+(`CLAUDE.md` §8: smallest change that satisfies the requirement).
+**Done when:** two concurrent sessions for the same seeded account exist, and
+signing out of one leaves the other able to load `/dashboard`; pinned by the unit
+assertion above.
 
 ### 🟡 Finish the ToS + Privacy Policy drafts (issue #74)
 **Why:** Required before any public or multi-tenant launch; both are currently
@@ -351,28 +699,71 @@ counsel review.
 **Done when:** both documents are placeholder-free, counsel-approved, and linked
 from the app.
 
+### 🟡 Extract the thrice-copied `submittedValues()` form-echo helper
+**Why:** `CLAUDE.md` §0 requires every `useActionState` form to echo its
+non-sensitive submitted values back, because React resets an uncontrolled form
+after *every* function action. The helper that does it now exists in **three**
+action modules — `auth.ts`, `work-orders.ts`, and (since 2026-08-03)
+`vendors.ts` — which is exactly the "3+ real things" threshold §3 names for
+extracting. It was left duplicated deliberately while the vendor half was in
+flight: the copies differ (one is typed to `AuthFormValues`, the others to
+`Record<string, string>`; `MAX_ECHOED_LENGTH` is 256 in two and 2100 in the
+other, tracking each module's longest field), and unifying them mid-stage would
+have widened a feature diff into a refactor of two files it did not otherwise
+touch.
+**The actual risk is drift**, not the duplication itself: three copies of a rule
+about *not losing user input* will eventually disagree about which fields are
+sensitive, and the failure is silent — a password echoed back, or a field
+quietly dropped on error.
+**Do:** one `submittedValues(formData, names, maxLength)` in a shared module
+(`src/server/actions/form-state.ts` is the obvious home), generic over the value
+shape, with the per-module maximum passed in rather than baked in. Keep the
+three `FormState` types where they are — they are genuinely different shapes.
+**Done when:** one implementation, all three modules using it, and the existing
+action tests still pass unchanged.
+
 ### 🟡 Coverage visibility (not a gate)
 **Why:** See what's tested without chasing a %.
 **Do:** `pnpm add -D @vitest/coverage-v8`; `pnpm test -- --coverage`; report in CI, no threshold yet.
 **Done when:** a coverage summary prints in CI logs.
 
-### 🟡 ESLint import boundary for `src/server/`
-**Why:** `CLAUDE.md` §3: `src/server/` is the trust boundary; client must never import it.
-**Do:** add a `no-restricted-imports` (or `eslint-plugin-boundaries`) rule blocking
-`@/server/*` from client components. Land it now so it's ready when `src/server/` appears.
-**Done when:** importing `@/server/...` into a client component fails lint.
+### 🟡 ESLint import boundary for `src/server/queries/`
+**Why:** `CLAUDE.md` §3: `src/server/` is the trust boundary. **Amended
+2026-07-27 — the original wording of this item was wrong** and would now break
+the app. It said "block `@/server/*` from client components"; but client
+components are *supposed* to import server actions — `"use server"` swaps the
+body for an RPC reference, so the implementation never ships — and the login and
+signup forms do exactly that. Blocking all of `@/server/*` would fail lint on
+working, correct code. The boundary that needs enforcing is
+`src/server/queries/**` only.
+**Do:** `no-restricted-imports` (or `eslint-plugin-boundaries`) blocking
+`@/server/queries/*` from files carrying `"use client"`; leave
+`@/server/actions/*` alone.
+**Note:** mostly solved already — every module in `src/server/queries/` opens
+with `import "server-only"`, which fails the **build** if client code pulls it
+in. Lint would move that failure earlier and give it a better message, so this
+is now DX polish, not a hole. (Vitest imports those modules via the
+`server-only` alias in `vitest.config.ts` — don't let a lint rule catch the
+test files.)
+**Done when:** importing `@/server/queries/...` into a client component fails
+lint, and the login form still builds.
 
-### 🟡 Typed env vars + committed `.env.example`
-**Why:** Enforces the "everything via env vars" rule and fails fast on a missing var.
-**Do:** `pnpm add @t3-oss/env-nextjs zod`; define a typed env module; commit `.env.example`.
-**Note:** `.gitignore` has `.env*` — add `!.env.example` or it won't commit.
-**Done when:** a missing required var throws at build/start; `.env.example` is tracked.
-
-### 🟡 GitHub repo scaffolding (paper trail)
-**Why:** Templates + ownership records make the solo workflow auditable and consistent.
-**Do:** add `.github/pull_request_template.md`, `.github/ISSUE_TEMPLATE/{bug,feature,chore}.yml`,
-`CODEOWNERS` (`* @yourname`), `CONTRIBUTING.md`, `SECURITY.md`.
-**Done when:** new PRs/issues open with the templates prefilled.
+### 🟡 CAPTCHA on signup
+**Why:** With self-registration open, `[auth.rate_limit] sign_in_sign_ups` — 30
+per 5 minutes per IP — is the *only* brake on automated account creation. That
+is a speed bump, not a defense: every bot account becomes a row in `auth.users`
+and `profiles` that a human eventually has to look at and decide about. Low
+urgency while the app is unlisted; do it before or with the Phase 4 public
+deploy, alongside email confirmations.
+**Do:** Supabase Auth supports hCaptcha and Cloudflare Turnstile natively — the
+`[auth.captcha]` block is already in `config.toml`, commented out. Enable it
+with the secret read from an env var (`CLAUDE.md` §5, never a literal), render
+the widget on the signup form, and pass the token through
+`signUp({ options: { captchaToken } })`. Keep it off locally so the e2e suite
+still runs unattended. Login probably does not need it — the rate limit plus
+the deliberately opaque failure message already cover credential stuffing.
+**Done when:** a signup submission without a valid captcha token is rejected in
+a captcha-enabled environment, and `pnpm test:e2e` still passes locally.
 
 ### 🟡 `.editorconfig` + package.json `engines`
 **Why:** Keep formatting/runtime consistent across machines and warn on wrong Node.
@@ -397,15 +788,74 @@ CLI replaced the classic base colors with named presets, so the toolkit was buil
 from the registry's zinc tokens directly — add further primitives with
 `pnpm dlx shadcn@latest add <name>`.
 
-### 🟢 Phase 3 — The one vertical slice
+### ✅ Phase 3 — The one vertical slice *(complete 2026-08-03)*
 manager logs in → creates work order → assigns vendor → vendor updates status + uploads photo →
-activity log reflects it → manager sees it. Exercises auth, RLS, mutations, storage, audit once.
-The vendor half is **magic-link, not a signup** — vendors get a real auth user reached by a unique
-link (a "Copy vendor link" button in Phase 3; delivered over SMS in Phase 5). Design per
-`docs/vendor-access.md`.
+activity log reflects it → manager sees it. Exercised auth, RLS, mutations, storage, audit once.
 
-### 🟢 Phase 3 — First real unit tests
+Landed in three parts, each with its own ✅ entry above: the auth half
+(2026-07-27), the staff write path (2026-08-02), and the vendor half
+(2026-08-03). Every layer the slice was meant to prove has now been exercised
+from the app rather than only from SQL — including Storage and the vendor
+column-guard trigger, which were the last two.
+
+One §3 folder is still unbuilt and that is correct: `supabase/functions/` waits
+for Phase 5 SMS. `src/app/api/` is also still absent — the magic-link redemption
+route landed at `src/app/auth/confirm/route.ts` instead, since it is an auth
+endpoint rather than an API surface. The SSO callback will sit beside it.
+
+### 🟢 Phase 3 — SSO (Google first, then Microsoft, then Apple)
+**Why:** Password auth works, but staff sign-in is the friction that gets a tool
+abandoned, and "sign in with Google" removes both the password and the reset
+flow we would otherwise have to build. Prioritized Google → Microsoft (`azure`)
+→ Apple by who our users actually have accounts with. Queued as the **next PR**
+after the auth loop.
+**Do:** `src/app/auth/callback/route.ts` calling `exchangeCodeForSession` (the
+PKCE code arrives as a query param; the SSR client needs the route handler, not
+a client-side hash parse); `[auth.external.google]` / `.azure` / `.apple` blocks
+in `config.toml` with `client_id` and `secret` read from env vars via `env(...)`
+— **never literals**, the file is committed; extend `additional_redirect_urls`
+to cover the callback; and `skip_nonce_check = true` for the local Google
+provider only. Roles are unaffected: an SSO signup is a self-registration like
+any other, so it lands as an unlinked `vendor` (the fail-safe in
+`03_signup_defaults.test.sql` covers it).
+**Blocked on:** the maintainer registering an OAuth app with each provider — one
+per provider, and none of it is code. Apple additionally needs a **paid
+developer account** and its client secret **expires every 6 months**, so it is a
+recurring operational chore; weigh that against how many users would actually
+use it before doing Apple at all.
+**Done when:** a Google account can sign in and reach `/dashboard`, with the
+callback covered by an e2e spec or, if provider auth can't run in CI, a
+documented manual check.
+
+### 🟢 Phase 3 — First real unit tests *(auth half done — still open)*
 Work-order state transitions + permission checks — the "test what matters" targets (`CLAUDE.md` §5).
+
+**Done 2026-07-27:** the permission-check half. `src/server/queries/session.test.ts`
+(fail-closed behaviour, including that a live session with no profile row returns
+null rather than redirecting into a loop), `src/server/actions/auth.test.ts`
+(invalid input never reaches Supabase; one message for wrong-password and
+unknown-account alike; nothing role-shaped in the signup metadata), plus
+`src/schemas/auth.test.ts` and a `LoginForm` RTL suite. 66 unit tests across 9
+files; `tests/unit/harness.test.tsx` retired.
+
+**Done 2026-08-02:** the staff-side state transitions.
+`src/schemas/work-order.test.ts` (the DB CHECKs mirrored, plus the `guid`/`uuid`
+regression) and `src/server/actions/work-orders.test.ts` (invalid input never
+reaches Supabase; the insert carries only the granted columns; `assignVendor`
+leaves a non-`open` status alone; a note never sets `action` or `actor_id`).
+115 unit tests across 12 files.
+
+**Done 2026-08-03:** the vendor-side transition and the privileged path.
+`src/schemas/vendor.test.ts` (the contact-method rule mirrored, including the
+whitespace cases `nullif(trim(...), '')` exists to catch),
+`src/server/actions/vendors.test.ts` (a non-staff caller never reaches the admin
+client; a NULL `is_staff()` is denied like a false one; a non-`vendor` role is
+never linked; the returned link points at our own `/auth/confirm`), and
+`src/lib/supabase/admin.test.ts` (missing key, publishable key in the secret's
+place, and no environment read at import time). 150 unit tests across 15 files.
+The `in_progress`/`completed` transition itself is covered where it is actually
+enforced — pgTAP for the trigger, and `tests/e2e/vendor-loop.spec.ts` for the
+form only offering those two.
 
 ### 🟢 Phase 4 — Observability & deploy (issue #36)
 `@sentry/nextjs`, Vercel PR preview deploys, prod deploys only from `main`. Keep a working
@@ -440,10 +890,12 @@ PCI surface) is a separate go/no-go at the start of the phase.
 | ~~`@commitlint/cli` + `@commitlint/config-conventional`~~ | ✅ Installed (PR #40) | Done |
 | ~~`@testing-library/react` + `dom` + `jest-dom` + `user-event` + `happy-dom`~~ | ✅ Component test DOM harness (Vite 8 native `@/*` paths, no plugin) | Done |
 | `@vitest/coverage-v8` | Coverage visibility | Medium |
-| `@t3-oss/env-nextjs` + `zod` | Typed, validated env vars (also the shared zod schemas per §3) | Medium → Phase 3 |
+| ~~`zod`~~ | ✅ Installed 2026-07-27 — shared client+server schemas per §3 (`src/schemas/auth.ts`) | Done |
+| ~~`@t3-oss/env-nextjs`~~ | ❌ Declined — `env.ts` + `next.config.ts` already fail fast and reject a non-publishable key (see ✅) | Closed |
 | `knip` | Dead deps/exports detector | Medium (optional) |
-| `@supabase/ssr` + `@supabase/supabase-js` | Server-side auth + DB client | Phase 2 |
-| `tailwindcss` + `prettier-plugin-tailwindcss` + shadcn/ui | Decided UI stack, not yet installed | Phase 2/3 |
+| ~~`@supabase/ssr` + `@supabase/supabase-js`~~ | ✅ Installed 2026-07-21 — server-side auth + DB client | Done |
+| ~~`tailwindcss` + `prettier-plugin-tailwindcss` + shadcn/ui~~ | ✅ Installed 2026-07-27 — the decided UI stack | Done |
+| ~~`server-only`~~ | ✅ Installed 2026-07-27 — build-time guard on `src/server/queries/` | Done |
 | `@sentry/nextjs` | Error monitoring | Phase 4 |
 
 *Not npm packages, but part of the plan:* `gitleaks`, `semgrep`, `osv-scanner` (CI actions).
@@ -457,23 +909,41 @@ The `supabase` CLI is ✅ installed as a pinned devDependency (2026-07-17).
 → audit gate flipped to blocking → Dependabot tuning + `@types/node` pin →
 branch protection → pgTAP in CI → first migrations merged to `main` →
 **Supabase clients: Phase 2 complete** → **Tailwind + shadcn/ui: Phase 3
-started**.)*
+started** → **auth loop + open signup: the read half of the slice** →
+**service-role table grants narrowed**.)*
 
 1. **Make the `db` job blocking** — the job has reported a run (PR #78), so it
    is now selectable in Settings → Branches. Two minutes of web UI, and it's
-   what makes the pgTAP assertions below actually gate a merge.
-2. **The Phase 3 vertical slice** — **in progress** and the critical path. The
-   deadline (`CLAUDE.md` §1) says stay on it before the schema-polish items, and
-   trim Phase 5 breadth before trimming this. The UI toolkit landed 2026-07-27;
-   **next is the auth loop** — the clients are in place but nothing calls them
-   yet, so the auth routes (`src/app/(auth)/`) and the first server action are
-   the next keystrokes.
-3. **Restrict `service_role` on `work_order_activity`** (🟠 High) — the audit
-   trail's append-only guarantee is currently unenforced against the service
-   key. A small forward migration; do it alongside Phase 3 rather than ahead
-   of it.
+   what makes the pgTAP assertions below actually gate a merge. While in there:
+   the `e2e` job's display name changed to **"E2E (Playwright auth loop)"**, and
+   branch protection matches required checks **by name** — so if it was ever
+   selected as required, re-select it under the new name or it silently stops
+   gating.
+2. **Finish the Phase 3 vertical slice — the write half.** Still the critical
+   path (`CLAUDE.md` §1: stay on it before the schema-polish items, and trim
+   Phase 5 breadth before trimming this). Auth, the shell, and the work-order
+   list landed 2026-07-27; **next is create work order → assign vendor**, then
+   the vendor's status update + photo upload and the activity trail rendered
+   back. That is where storage, the audit trail, and the vendor column-guard
+   trigger finally get exercised from the app.
+3. **SSO (Google)** — queued as the next PR (🟢 above), and blocked on
+   registering the OAuth app, so start that registration before you need it.
+   Do it after item 2 if the two compete: the slice proves the architecture,
+   SSO only smooths the door.
+4. **Turn on email confirmations** (🟠 High) — not urgent while the app is
+   unlisted, but it is a **hard gate on the Phase 4 public deploy**, and it
+   drags in an `/auth/confirm` route, an email template, and production SMTP.
+   Don't discover that during the deploy.
+
+*Ride-along:* the sign-out scope fix (🟡 above) is one argument plus a test
+assertion. Fold it into the next change that touches `src/server/actions/auth.ts`
+rather than letting it displace item 2 — it does not deserve its own session, but
+it also should not still be here at the Phase 4 deploy.
 
 The security + CI + commit-hygiene foundation is green and the Phase 2 schema
 is **on `main`**. Apart from the schema-review follow-ups above — all of which
 are now *forward* migrations on a merged baseline — everything after this is
-Phase 2/3 application work.
+Phase 3 application work. Note what shifted on 2026-07-27: with the auth loop
+in, the open items are no longer "wire the plumbing" but "write the mutations,"
+and two of them (email confirmations, CAPTCHA) exist only because signup opened.
+Both are the price of that call, not surprises.

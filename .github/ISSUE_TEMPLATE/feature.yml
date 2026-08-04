@@ -1,0 +1,60 @@
+name: Feature
+description: A new capability, or a real improvement to an existing one
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Blocks in
+        [`docs/backlog.md`](https://github.com/Damilss/RealtyWorks/blob/main/docs/backlog.md)
+        are already written in this shape — copy one straight across.
+
+  - type: textarea
+    id: why
+    attributes:
+      label: Why
+      description: The problem or the payoff, in a sentence or two.
+    validations:
+      required: true
+
+  - type: textarea
+    id: do
+    attributes:
+      label: Do
+      description: The concrete work. Name files, commands, and packages where you can.
+    validations:
+      required: true
+
+  - type: textarea
+    id: done-when
+    attributes:
+      label: Done when
+      description: The observable end state that proves it is finished.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: phase
+    attributes:
+      label: Phase (CLAUDE.md §4)
+      options:
+        - 3 — Vertical slice (current)
+        - 4 — Hosted deploy
+        - 5 — Breadth
+        - 6 — Accounting & rent tracking
+        - 7 — Self-host
+        - Foundation / tooling — not phase-gated
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: Scope check
+      options:
+        - label: >-
+            Not a `CLAUDE.md` §1 non-goal (tenant portal, full leasing pipeline,
+            deep third-party integrations, native app / second surface,
+            dashboards beyond minimal reporting), and not a deferred item pulled
+            ahead of its phase.
+          required: true

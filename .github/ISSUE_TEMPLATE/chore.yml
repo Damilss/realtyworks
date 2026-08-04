@@ -1,0 +1,43 @@
+name: Chore
+description: Tooling, CI, dependencies, docs, or cleanup — no user-facing change
+body:
+  - type: dropdown
+    id: kind
+    attributes:
+      label: Kind
+      description: >-
+        The commitlint type this will land under — see
+        [docs/commit-messages.md](https://github.com/Damilss/RealtyWorks/blob/main/docs/commit-messages.md).
+      options:
+        - ci — workflows under .github/workflows
+        - build — build system / tooling config
+        - deps — dependency bump
+        - docs — documentation only
+        - test — tests only
+        - chore — housekeeping that fits nothing above
+    validations:
+      required: true
+
+  - type: textarea
+    id: why
+    attributes:
+      label: Why
+      description: What is annoying, risky, or wrong today.
+    validations:
+      required: true
+
+  - type: textarea
+    id: do
+    attributes:
+      label: Do
+      description: The concrete change. Files, commands, config keys.
+    validations:
+      required: true
+
+  - type: textarea
+    id: done-when
+    attributes:
+      label: Done when
+      description: Prefer something checkable — a green job, a command that exits 0.
+    validations:
+      required: true

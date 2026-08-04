@@ -8,7 +8,7 @@ begin;
 create extension if not exists pgtap with schema extensions;
 set search_path to public, extensions;
 
-select plan(46);
+select plan(73);
 
 -- ── vendor write surface ────────────────────────────────────────────────────
 do $$
@@ -96,6 +96,82 @@ select lives_ok(
   $$insert into public.work_order_activity (work_order_id, note)
     values ('40000000-0000-0000-0000-000000000003', 'vendor note via client path')$$,
   'vendor may add a note to an assigned work order'
+);
+
+-- A blank note is permanent and unfixable once written: the trail has no
+-- UPDATE or DELETE path for anyone. `note is not null` alone let '' and '   '
+-- through (issue #76).
+select throws_ok(
+  $$insert into public.work_order_activity (work_order_id, note)
+    values ('40000000-0000-0000-0000-000000000003', '')$$,
+  '23514', null,
+  'an empty note is refused by activity_note_requires_text'
+);
+
+select throws_ok(
+  $$insert into public.work_order_activity (work_order_id, note)
+    values ('40000000-0000-0000-0000-000000000003', '   ')$$,
+  '23514', null,
+  'a whitespace-only note is refused by activity_note_requires_text'
+);
+
+-- Spaces are the easy case. trim()'s default character set is the ASCII space
+-- alone, so a note of tabs or newlines comes back from it unchanged and clears
+-- any length test built on it — and `authenticated` holds
+-- `insert (work_order_id, note)`, so that note reaches the table through a
+-- direct Data API call with the zod schema nowhere in the path. These are the
+-- cases that say the predicate is whitespace-aware and not merely space-aware.
+select throws_ok(
+  $$insert into public.work_order_activity (work_order_id, note)
+    values ('40000000-0000-0000-0000-000000000003',
+            U&'!0009!0009' UESCAPE '!')$$,
+  '23514', null,
+  'a tab-only note is refused by activity_note_requires_text'
+);
+
+select throws_ok(
+  $$insert into public.work_order_activity (work_order_id, note)
+    values ('40000000-0000-0000-0000-000000000003',
+            U&'!000A!000D!000A' UESCAPE '!')$$,
+  '23514', null,
+  'a newline-only note is refused by activity_note_requires_text'
+);
+
+select throws_ok(
+  $$insert into public.work_order_activity (work_order_id, note)
+    values ('40000000-0000-0000-0000-000000000003',
+            U&'!0020!0009!000A!000B!000C!000D!0020' UESCAPE '!')$$,
+  '23514', null,
+  'a mixed ASCII-whitespace note is refused by activity_note_requires_text'
+);
+
+-- The Unicode half of the set String.prototype.trim() removes, so the
+-- constraint and addNoteSchema agree on a non-breaking space pasted out of a
+-- rich-text editor rather than one of them accepting what the other rejects.
+select throws_ok(
+  $$insert into public.work_order_activity (work_order_id, note)
+    values ('40000000-0000-0000-0000-000000000003',
+            U&'!00A0!2003!FEFF' UESCAPE '!')$$,
+  '23514', null,
+  'a Unicode-whitespace-only note is refused by activity_note_requires_text'
+);
+
+-- The other direction: padding is not the offence, emptiness is. A note with
+-- real text inside surrounding whitespace still writes.
+select lives_ok(
+  $$insert into public.work_order_activity (work_order_id, note)
+    values ('40000000-0000-0000-0000-000000000003',
+            U&'!0009 padded but real !000A' UESCAPE '!')$$,
+  'a whitespace-padded note with real text is still accepted'
+);
+
+-- The null arm still has to fail on its own: a CHECK evaluating to NULL passes,
+-- so a predicate testing only the trimmed length would let this through.
+select throws_ok(
+  $$insert into public.work_order_activity (work_order_id, note)
+    values ('40000000-0000-0000-0000-000000000003', null)$$,
+  '23514', null,
+  'a null note on a note_added row is still refused'
 );
 
 -- Attachment metadata is a service-role-only write via the coordinated upload
@@ -505,6 +581,216 @@ select is(
   array['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'application/pdf'],
   'a cleared allowed_mime_types allowlist is reasserted on conflict'
 );
+
+-- ── final-landlord deletes: direct and auth.users cascade ───────────────────
+-- Use disposable landlords with no RESTRICT-linked history so the assertions
+-- reach the profile trigger, rather than succeeding for an unrelated FK reason.
+-- Once both exist, demote the seeded landlord so these two form an isolated
+-- two-landlord state. The surrounding transaction rolls every fixture back.
+do $$
+begin
+  perform set_config('request.jwt.claims', '', true);
+end $$;
+
+insert into auth.users
+  (instance_id, id, aud, role, email, encrypted_password, email_confirmed_at,
+   raw_app_meta_data, raw_user_meta_data, created_at, updated_at,
+   confirmation_token, recovery_token, email_change, email_change_token_new,
+   email_change_token_current)
+values
+  ('00000000-0000-0000-0000-000000000000',
+   '00000000-0000-0000-0000-0000000000a1',
+   'authenticated', 'authenticated', 'landlord-delete-a@realtyworks.test',
+   extensions.crypt('password123', extensions.gen_salt('bf')), now(),
+   '{"provider": "email", "providers": ["email"], "app_role": "landlord"}',
+   '{"full_name": "Disposable Landlord A"}',
+   now(), now(), '', '', '', '', ''),
+  ('00000000-0000-0000-0000-000000000000',
+   '00000000-0000-0000-0000-0000000000a2',
+   'authenticated', 'authenticated', 'landlord-delete-b@realtyworks.test',
+   extensions.crypt('password123', extensions.gen_salt('bf')), now(),
+   '{"provider": "email", "providers": ["email"], "app_role": "landlord"}',
+   '{"full_name": "Disposable Landlord B"}',
+   now(), now(), '', '', '', '', '');
+
+update public.profiles
+set role = 'manager'
+where id = '00000000-0000-0000-0000-000000000001';
+
+set local role service_role;
+
+select lives_ok(
+  $$delete from public.profiles
+    where id = '00000000-0000-0000-0000-0000000000a1'$$,
+  'a privileged direct delete may remove a non-final landlord profile'
+);
+
+reset role;
+
+select is(
+  (select count(*) from public.profiles
+   where id = '00000000-0000-0000-0000-0000000000a1')::int,
+  0,
+  'the non-final landlord profile was deleted'
+);
+
+set local role service_role;
+
+select throws_ok(
+  $$delete from public.profiles
+    where id = '00000000-0000-0000-0000-0000000000a2'$$,
+  '42501', 'cannot delete the last landlord',
+  'a privileged direct delete cannot remove the final landlord profile'
+);
+
+reset role;
+
+select is(
+  (select count(*) from public.profiles
+   where id = '00000000-0000-0000-0000-0000000000a2')::int,
+  1,
+  'the final landlord profile survives the refused direct delete'
+);
+
+-- Supabase reserves auth-admin membership to superusers, while the CLI's pgTAP
+-- connection is intentionally non-superuser. Assert the definer boundary that
+-- lets the production auth-admin trigger inspect profiles, then delete the auth
+-- parent as the test owner to exercise the exact same FK cascade path.
+select is(
+  (select p.prosecdef
+   from pg_proc p
+   join pg_namespace n on n.oid = p.pronamespace
+   where n.nspname = 'public' and p.proname = 'guard_profile_delete'),
+  true,
+  'the delete guard runs as definer for auth-admin cascades'
+);
+
+select throws_ok(
+  $$delete from auth.users
+    where id = '00000000-0000-0000-0000-0000000000a2'$$,
+  '42501', 'cannot delete the last landlord',
+  'the auth.users cascade cannot remove the final landlord profile'
+);
+
+select is(
+  (select count(*)
+   from auth.users u
+   join public.profiles p on p.id = u.id
+   where u.id = '00000000-0000-0000-0000-0000000000a2')::int,
+  1,
+  'the refused auth-admin cascade preserves both the auth user and profile'
+);
+
+-- ── service-role table privileges: row DML, never table administration ──────
+-- Query the direct grants as an exact set so a future GRANT ALL fails even if
+-- a trigger happens to reject the attempted mutation at runtime.
+select is(
+  (select array_agg(privilege_type::text order by privilege_type)
+   from information_schema.role_table_grants
+   where grantee = 'service_role'
+     and table_schema = 'public'
+     and table_name = 'work_order_activity'),
+  array['INSERT', 'SELECT']::text[],
+  'service_role has exactly SELECT and INSERT on the append-only activity trail'
+);
+
+select is(
+  has_table_privilege('service_role', 'public.work_order_activity', 'DELETE'),
+  false,
+  'service_role cannot DELETE activity rows directly'
+);
+
+select is(
+  has_table_privilege('service_role', 'public.work_order_activity', 'TRUNCATE'),
+  false,
+  'service_role cannot TRUNCATE the activity trail'
+);
+
+select is(
+  (select array_agg(privilege_type::text order by privilege_type)
+   from information_schema.role_table_grants
+   where grantee = 'service_role'
+     and table_schema = 'public'
+     and table_name = 'profiles'),
+  array['DELETE', 'INSERT', 'SELECT', 'UPDATE']::text[],
+  'service_role has row DML, not table-administration privileges, on profiles'
+);
+
+select is(
+  (select array_agg(privilege_type::text order by privilege_type)
+   from information_schema.role_table_grants
+   where grantee = 'service_role'
+     and table_schema = 'public'
+     and table_name = 'properties'),
+  array['DELETE', 'INSERT', 'SELECT', 'UPDATE']::text[],
+  'service_role has row DML, not table-administration privileges, on properties'
+);
+
+select is(
+  (select array_agg(privilege_type::text order by privilege_type)
+   from information_schema.role_table_grants
+   where grantee = 'service_role'
+     and table_schema = 'public'
+     and table_name = 'units'),
+  array['DELETE', 'INSERT', 'SELECT', 'UPDATE']::text[],
+  'service_role has row DML, not table-administration privileges, on units'
+);
+
+select is(
+  (select array_agg(privilege_type::text order by privilege_type)
+   from information_schema.role_table_grants
+   where grantee = 'service_role'
+     and table_schema = 'public'
+     and table_name = 'vendors'),
+  array['DELETE', 'INSERT', 'SELECT', 'UPDATE']::text[],
+  'service_role has row DML, not table-administration privileges, on vendors'
+);
+
+select is(
+  (select array_agg(privilege_type::text order by privilege_type)
+   from information_schema.role_table_grants
+   where grantee = 'service_role'
+     and table_schema = 'public'
+     and table_name = 'work_orders'),
+  array['DELETE', 'INSERT', 'SELECT', 'UPDATE']::text[],
+  'service_role has row DML, not table-administration privileges, on work_orders'
+);
+
+select is(
+  (select array_agg(privilege_type::text order by privilege_type)
+   from information_schema.role_table_grants
+   where grantee = 'service_role'
+     and table_schema = 'public'
+     and table_name = 'work_order_attachments'),
+  array['DELETE', 'INSERT', 'SELECT', 'UPDATE']::text[],
+  'service_role has row DML, not table-administration privileges, on attachment metadata'
+);
+
+-- Prove the child DELETE revocation does not break the coordinated parent
+-- delete. Seeded work order 5 has activity and no attachment object to clean up,
+-- so it isolates the Postgres cascade that the server action relies on.
+select ok(
+  (select count(*) from public.work_order_activity
+   where work_order_id = '40000000-0000-0000-0000-000000000005') > 0,
+  'the cascade fixture starts with activity rows'
+);
+
+set local role service_role;
+
+select lives_ok(
+  $$delete from public.work_orders
+    where id = '40000000-0000-0000-0000-000000000005'$$,
+  'service_role may delete the parent work order through the coordinated path'
+);
+
+select is(
+  (select count(*) from public.work_order_activity
+   where work_order_id = '40000000-0000-0000-0000-000000000005')::int,
+  0,
+  'the parent delete still cascades its activity rows without child DELETE privilege'
+);
+
+reset role;
 
 select * from finish();
 

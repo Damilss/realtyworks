@@ -90,7 +90,12 @@ fine. Easiest safe habit: **write subjects in plain lower-case.**
 
   BREAKING CHANGE: `status` is now an enum, not a free string.
   ```
-- **Reference issues/PRs** in the footer: `Refs #24`, `Closes #52`.
+- **Reference issues/PRs** in the footer: `Refs #24`, `Closes #52`. The commit
+  footer is the **only** place a closing keyword works in this repo's flow — it
+  fires when the commit reaches the default branch (`main`), which the
+  `dev → main` merge does. The same keyword in a *PR description* is ignored
+  outright when the PR targets anything but the default branch, and PRs here
+  normally target `dev`. So: `Closes` in the commit, `Refs` in the PR body.
 - **Keep the header short** — aim well under 100; if you need more, that's what
   the body is for.
 

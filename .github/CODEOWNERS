@@ -1,0 +1,18 @@
+# Ownership record for the paper trail. Solo repo — the owner owns everything.
+#
+# Practical effect, so nobody re-derives it later:
+#
+#   - Your own PRs get NO review request. GitHub never requests a review from a
+#     PR's own author, even when that author is the code owner. This file is
+#     inert on self-authored PRs.
+#   - Dependabot PRs (author: dependabot[bot]) DO trigger a review request to
+#     @Damilss, on every weekly npm and github-actions batch. That is the one
+#     real behavior change.
+#   - Do NOT enable "Require review from Code Owners" in branch protection. It
+#     can never be satisfied on your own PR — GitHub will not let you approve
+#     yourself — so every solo merge would become an admin override, which turns
+#     branch protection from a signal into noise you learn to click through.
+#
+# CODEOWNERS is read from the BASE branch of a PR, not the default branch.
+
+* @Damilss

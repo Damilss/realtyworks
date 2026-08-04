@@ -13,7 +13,8 @@ the [README](../README.md#quality-gates); this is the detail.
 | commitlint | `.husky/commit-msg` | every commit |
 | Lint → format → typecheck → test → build | `.github/workflows/ci.yml` | PRs + pushes to `main`/`dev` |
 | `pnpm audit` dependency gate | `.github/workflows/ci.yml` | PRs + pushes to `main`/`dev` |
-| Playwright E2E smoke test | `.github/workflows/ci.yml` | PRs + pushes to `main`/`dev` |
+| Playwright E2E auth loop (boots its own Supabase stack) | `.github/workflows/ci.yml` | PRs + pushes to `main`/`dev` |
+| pgTAP RLS/write-guard suite (`db` job) | `.github/workflows/ci.yml` | PRs + pushes to `main`/`dev` |
 | gitleaks full-history scan | `.github/workflows/security.yml` | PRs + pushes to `main`/`dev` |
 | Semgrep SAST scan | `.github/workflows/security.yml` | PRs + pushes to `main`/`dev` |
 | osv-scanner lockfile CVE scan | `.github/workflows/osv-scanner.yml` | weekly + PRs into `main` + manual |
@@ -113,16 +114,42 @@ pnpm lint && pnpm format:check && pnpm typecheck && pnpm test && pnpm build
 
 Add `pnpm audit --audit-level=high` to preview the audit step too.
 
-### E2E smoke test (`e2e` job)
+### E2E auth loop (`e2e` job)
 
-A second job runs **in parallel** with `verify`, on the same triggers. It boots
-the app (`pnpm dev`, via `playwright.config.ts`'s `webServer`) and runs the
-single Playwright smoke spec (`tests/e2e/smoke.spec.ts`) — so CI proves the app
-*runs*, not just that `next build` compiles it. Chromium is installed with
-`playwright install --with-deps chromium` and cached on `~/.cache/ms-playwright`
-(keyed on the lockfile), and the HTML report uploads as a `playwright-report`
-artifact (`if: !cancelled()`) for debugging. Only the smoke spec runs here; real
-flows arrive as the Phase 3 vertical slice (now in progress) is built. Details: [playwright.md](playwright.md).
+A second job runs **in parallel** with `verify`, on the same triggers. Chromium
+is installed with `playwright install --with-deps chromium` and cached on
+`~/.cache/ms-playwright` (keyed on the lockfile), and the HTML report uploads as
+a `playwright-report` artifact (`if: !cancelled()`) for debugging.
+
+**Since the Phase 3 auth loop landed (2026-07-27) this job boots a real
+Supabase stack** — `supabase start -x …` → `db reset` → write `.env.local` from
+`supabase status -o env | grep '^NEXT_PUBLIC_'` — and then boots the app
+(`pnpm dev`, via `playwright.config.ts`'s `webServer`) and runs
+`tests/e2e/smoke.spec.ts` + `tests/e2e/auth.spec.ts` against it. So CI now
+proves the app *runs*, authenticates, and enforces RLS through a real session —
+not just that `next build` compiles it.
+
+Two consequences worth knowing before editing the job:
+
+- **It deliberately sets no `NEXT_PUBLIC_SUPABASE_*` env.** It used to set
+  placeholders, which were sufficient while nothing logged in (with no session
+  cookie the proxy's refresh short-circuits before any network call). They had
+  to be **removed**, not updated: process env outranks `.env.local` in Next, so
+  a leftover placeholder silently wins over the values written from
+  `supabase status`, and the app addresses a stack that isn't there — a
+  connection error that reads like an application bug. **`verify` keeps its
+  placeholders** and should: `next build` never executes the proxy, and the
+  values exist there only so `next.config.ts` can prove the build environment
+  is complete.
+- **It is no longer the fast job.** It carries the same cold Docker pulls and
+  the same `timeout-minutes: 20` backstop as `db`, for the same reason.
+
+The `-x` exclusion list mirrors the `db` job below, including the rule about
+never excluding `db` or `storage`; `inbucket` is excluded only while
+`[auth.email] enable_confirmations` is `false`. Turning confirmations on (a
+backlog item, required before the Phase 4 public deploy) means signup sends
+mail, and this job then needs the mailbox back. Details:
+[playwright.md](playwright.md).
 
 ### Database suite (`db` job)
 
@@ -155,9 +182,10 @@ Three deliberate choices:
   `config.toml` change, or a CLI bump, so gating on changed paths would miss
   cases.
 
-Cold image pulls make this the slowest job in the matrix; `timeout-minutes: 20`
-is a backstop against a container that never reaches healthy. A `docker ps -a` +
-`supabase status` step runs `if: failure()` for triage.
+Cold image pulls make this and `e2e` — which now boots a stack of its own — the
+two slow jobs in the matrix; `timeout-minutes: 20` is a backstop against a
+container that never reaches healthy. A `docker ps -a` + `supabase status` step
+runs `if: failure()` for triage.
 
 ### Dependency vulnerability gate (`pnpm audit`)
 
@@ -239,6 +267,34 @@ What was checked, and what's worth re-checking next time:
   the install is healthy.
 - `@img/sharp-libvips-*` moved 1.2.4 → **1.3.2 for every platform** in the
   lockfile, `linux-x64` included — CI builds there, not on darwin-arm64.
+
+**When the override *is* the blocker (2026-08-03).** Three advisories landed at
+once — two high, one moderate — and every one was a follow-up to an advisory
+this file already records:
+
+| Advisory | Package | Patched | Parent's range | Fix |
+|---|---|---|---|---|
+| GHSA-7p8r-x3mc-p8w7 | `fast-uri` 3.1.4 | `>=3.1.5` | `ajv` wants `^3.0.1` — **in range** | `pnpm update fast-uri --depth Infinity` |
+| GHSA-rgw5-rvv9-x895 | `brace-expansion` 5.0.8 | `>=5.0.9` | `minimatch@10` wants `^5.0.5` — **in range** | delete the stale override, then refresh |
+| GHSA-fxqj-rqcc-2cmp | `postcss` 8.5.22 | `>=8.5.23` | `next` exact-pins 8.4.31 — **out of range** | raise the override floor to `postcss@<8.5.23: ^8.5.23` |
+
+`fast-uri` was the stale-pin case for a third time — a refresh, no manifest
+change. The other two carry the new lesson: **an override with an exact version
+becomes the thing pinning the vulnerable release in place.**
+`brace-expansion@<5.0.8: 5.0.8` was written when 5.0.8 was the only patched
+build. GHSA-rgw5-rvv9-x895 then landed as a *bypass of that very fix*, and
+because the key `<5.0.8` no longer matched and the value was an exact `5.0.8`,
+`pnpm update --depth Infinity` had nothing it was allowed to move. Every
+consumer declares `^5.0.5`, which 5.0.9 satisfies, so the override had outlived
+its reason: deleting it and refreshing was the fix, not bumping it. Its
+companion `minimatch@<9: ^10.0.0` stays — that one is still out of range and is
+what keeps the CJS `minimatch@3` line off 5.x's ESM-only export.
+
+Two habits follow. Prefer a **range** value (`^5.0.9`) over an exact one unless
+the exact version is genuinely the only patched build, so the next patch can
+flow in on a refresh. And when an advisory names a package already in
+`overrides`, re-check whether the override is still *needed* before raising it —
+if the patch is in the parent's range, the entry should be deleted, not bumped.
 
 ### Why the gate requires pnpm 11 (`packageManager` pin)
 
@@ -445,6 +501,19 @@ Prettier **intentionally ignores Markdown** (`*.md` in `.prettierignore`) —
 docs are hand-formatted. The pnpm lockfile and generated Next.js output are
 ignored too. So `pnpm format:check` failures are never about docs.
 
+**YAML is the opposite case, and it has a blind spot.** Prettier *does* format
+`*.yml`/`*.yaml` (only `pnpm-lock.yaml` is exempt), and its glob traverses
+dot-directories — that is why `supabase/.temp/` needs an explicit ignore entry,
+and it means everything under `.github/` is checked. But `lint-staged` in
+`package.json` covers `*.{ts,tsx,json,css,md}` and **not `*.yml`**, so a
+mis-formatted workflow or issue-form file passes the pre-commit hook and only
+fails in CI. Run `pnpm format` after touching any YAML.
+
+Useful side effect: Prettier is the repo's YAML parser. A syntax error in an
+issue form surfaces as a Prettier parse error, so `pnpm format:check` doubles as
+a validity check — there is no `yamllint` or `actionlint` here, and neither is
+worth adding (`actionlint` doesn't understand the issue-forms schema anyway).
+
 ---
 
 ## Issues & decisions log
@@ -452,6 +521,40 @@ ignored too. So `pnpm format:check` failures are never about docs.
 Running record of problems hit and calls made, newest first. (PR numbers are
 the paper trail; see git history for the full diffs.)
 
+- **2026-07 · `e2e` job placeholders removed, not updated** — the job now boots
+  a real Supabase stack because the auth-loop specs sign in. The non-obvious
+  half was deleting its `NEXT_PUBLIC_SUPABASE_*` env: **process env takes
+  precedence over `.env.local`**, so leaving placeholders there would have
+  outranked the values written from `supabase status` and pointed the app at
+  nothing, failing as a network error that reads like an application bug.
+  Playwright's `baseURL` also moved `localhost` → `127.0.0.1` to match
+  `[auth] site_url` (cookies are per-host, so an auth redirect across the two
+  strands the session), with a matching `allowedDevOrigins` in
+  `next.config.ts`. Detail: [playwright.md](playwright.md).
+- **2026-07 · CODEOWNERS is a record, not a required review** (issue #31) —
+  added `.github/CODEOWNERS` (`* @Damilss`) with **"Require review from Code
+  Owners" deliberately left off**. GitHub never requests a review from a PR's
+  own author, so a solo code owner can never satisfy the rule on their own PR;
+  enabling it would make every self-authored merge an admin override and turn
+  branch protection into noise. The one live effect is a review request on each
+  Dependabot PR (author `dependabot[bot]`, so the owner *is* requested).
+  Two adjacent gotchas from the same work. **Every template renders from the
+  default branch only** — issue forms, `config.yml`, *and*
+  `pull_request_template.md` alike do nothing while they sit on `dev`
+  ("templates are available to collaborators when they are merged into the
+  repository's default branch"). `CODEOWNERS` is the one exception in this set
+  and works the other way round: it is read from a PR's **base** branch, so it
+  takes effect on `dev` a merge before the templates do. Second, a label named
+  in a form that doesn't exist in the repo is **silently dropped** — the issue
+  opens unlabeled with no error anywhere.
+- **2026-07 · Private vulnerability reporting is unavailable here** (issue #31)
+  — GitHub's private vulnerability reporting *and* repository security
+  advisories are both public-repository features ("Owners and administrators of
+  public repositories can enable private vulnerability reporting"). This repo is
+  private, so the Security tab offers no intake path — the same GHAS-on-private
+  wall as CodeQL, push protection, and dependency review. `SECURITY.md` uses an
+  email channel instead and records the two switch-over triggers: the repo going
+  public, or issue #74 filling the `TOS.md` contact placeholder.
 - **2026-07 · pnpm store untracked** — `.pnpm-store/v11/index.db` (pnpm's local
   content-addressable store index) had been committed by accident. Added
   `.pnpm-store` to `.gitignore` and `git rm --cached`'d the binary so it stops
