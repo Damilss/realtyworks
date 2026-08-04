@@ -197,7 +197,22 @@ export async function inviteVendor(
     };
   }
 
-  const admin = createAdminClient();
+  // `createAdminClient()` throws on a missing or swapped `SUPABASE_SECRET_KEY`,
+  // and that is a *recoverable misconfiguration*, not a bug — the secret is read
+  // nowhere else, so an environment without it runs the whole app correctly and
+  // fails only here (`.env.example` says exactly that). Left uncaught the throw
+  // escapes the action, and with no error boundary in `src/app` the manager gets
+  // a redacted crash instead of the message `VendorFormState` exists to carry.
+  let admin: ReturnType<typeof createAdminClient>;
+
+  try {
+    admin = createAdminClient();
+  } catch (error) {
+    console.error("[vendors] The privileged client is unavailable", {
+      message: error instanceof Error ? error.message : String(error),
+    });
+    return { error: "Vendor invites are not configured on this server." };
+  }
 
   // Create the account explicitly rather than letting generateLink() create it
   // implicitly. Two things depend on doing it here: `app_metadata.app_role` is

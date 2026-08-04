@@ -358,6 +358,27 @@ describe("inviteVendor", () => {
     expect(state.inviteUrl).toBeUndefined();
   });
 
+  /**
+   * `SUPABASE_SECRET_KEY` is read nowhere but `createAdminClient()`, so an
+   * environment missing it serves the whole app correctly and fails only here —
+   * `.env.example` documents that state rather than treating it as broken. It
+   * has to arrive as a message: there is no error boundary in `src/app`, so an
+   * uncaught throw becomes a redacted crash instead of a `VendorFormState`.
+   */
+  it("returns a message when the privileged client is unconfigured", async () => {
+    stubSession({ results: [assignedWorkOrder()] });
+    mockedCreateAdminClient.mockImplementation(() => {
+      throw new Error(
+        "Missing required environment variable: SUPABASE_SECRET_KEY.",
+      );
+    });
+
+    const state = await inviteVendor({}, formData(validInvite));
+
+    expect(state.error).toMatch(/not configured/i);
+    expect(state.inviteUrl).toBeUndefined();
+  });
+
   it("never returns a link when the token could not be minted", async () => {
     stubSession({ results: [assignedWorkOrder()] });
     stubAdmin({
