@@ -414,7 +414,29 @@ export async function recordAttachment(input: {
     return { error: "That upload could not be found. Try again." };
   }
 
-  const admin = createAdminClient();
+  // Same recoverable misconfiguration as in ./vendors.ts, but this site cannot
+  // fully recover: the browser already put the object in Storage before calling
+  // this action, and the orphan cleanup below needs this very client, because
+  // `20260717120800_create_storage_bucket.sql` deliberately grants no storage
+  // DELETE policy to anyone. Reordering cannot help — the upload precedes the
+  // request. So log the path loudly enough to find the object by hand, and
+  // return a message rather than crashing the caller. Left uncaught this would
+  // also break the promise attachment-upload.tsx makes ("a failure here leaves
+  // nothing behind"), since the throw lands before the cleanup can run.
+  let admin: ReturnType<typeof createAdminClient>;
+
+  try {
+    admin = createAdminClient();
+  } catch (error) {
+    console.error(
+      "[work-orders] Privileged client unavailable; object left orphaned",
+      {
+        path: storagePath,
+        message: error instanceof Error ? error.message : String(error),
+      },
+    );
+    return { error: "Uploads are not configured on this server." };
+  }
 
   // `id` and `uploaded_by` have no database defaults, on purpose. A generated id
   // would never match the one already baked into the object name, and under the
