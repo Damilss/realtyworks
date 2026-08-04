@@ -33,8 +33,16 @@ export function InviteVendorPanel({
     inviteVendor,
     initialState,
   );
-  const [copied, setCopied] = useState(false);
+  // The link that was copied, rather than a boolean. "Copied" then means "the
+  // clipboard holds the link you are looking at", which is the only claim the
+  // button can make honestly — and generating a fresh one falsifies it for free:
+  // the value below stops matching and the label falls back to "Copy" on its
+  // own. A boolean would stay true over the new link, and the operator would
+  // send the superseded token believing they had just copied this one.
+  const [copiedUrl, setCopiedUrl] = useState<string | null>(null);
   const linkRef = useRef<HTMLInputElement>(null);
+
+  const copied = copiedUrl !== null && copiedUrl === state.inviteUrl;
 
   async function copyLink() {
     const link = linkRef.current;
@@ -51,9 +59,10 @@ export function InviteVendorPanel({
 
     try {
       await navigator.clipboard.writeText(link.value);
-      setCopied(true);
+      // What actually reached the clipboard, not what is on screen now.
+      setCopiedUrl(link.value);
     } catch {
-      setCopied(false);
+      setCopiedUrl(null);
     }
   }
 
