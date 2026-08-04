@@ -193,8 +193,17 @@ export default async function WorkOrderPage({
                   and `can_access_work_order()` admits only the current
                   assignee — so an invite before assignment would land the
                   vendor on a 404 (docs/vendor-access.md §3b). */}
+              {/* Keyed by vendor, because the panel holds a bearer token.
+                  Reassigning revalidates rather than navigating, so the panel
+                  keeps its slot in the tree and useActionState survives — the
+                  outgoing vendor's link would sit under the incoming one's
+                  name, and sending it signs them in as the wrong vendor. The
+                  key is the vendor id and nothing else: fold in `invited` and
+                  minting a link would revalidate `profileId` and wipe the link
+                  the manager just asked for. */}
               {assignedVendor ? (
                 <InviteVendorPanel
+                  key={assignedVendor.id}
                   workOrderId={workOrder.id}
                   vendorId={assignedVendor.id}
                   vendorName={assignedVendor.name}
