@@ -462,18 +462,50 @@ export async function recordAttachment(input: {
       code: insertError.code,
     });
 
-    // Remove the object we just failed to register. Clients have no delete
-    // surface on either layer, so without this the failure leaves a file nothing
-    // references and nothing can ever clean up.
-    const { error: cleanupError } = await admin.storage
-      .from(ATTACHMENTS_BUCKET)
-      .remove([storagePath]);
+    // Remove the object we just failed to register — but only once it is proven
+    // to belong to *this* attempt. Clients have no delete surface on either
+    // layer, so a genuine orphan is unreachable forever without this; an
+    // over-eager version, though, is a way to destroy attachments through the
+    // one client that bypasses the deliberate no-delete policies.
+    //
+    // The attack it would otherwise enable: this action is an exposed RPC, and
+    // both halves of the path are readable from a signed URL by anyone who can
+    // already see the attachment. A caller with access to the work order can
+    // replay an existing (id, path) pair, the insert fails on the primary key or
+    // the `storage_path` unique index, and an unconditional cleanup deletes the
+    // *legitimate* object — leaving the surviving metadata row pointing at a 404
+    // and emitting no trail entry to show it ever happened.
+    //
+    // So ask the database which row owns the object instead of inferring it from
+    // the error code. `attachments_path_matches_row` and the schema's refine()
+    // happen to make 23505 the only reachable conflict today, but a branch that
+    // deletes data must not rest on two unrelated invariants staying in step.
+    // `storage_path` is UNIQUE, so at most one row can ever claim it.
+    const { data: claimedBy, error: claimError } = await admin
+      .from("work_order_attachments")
+      .select("id")
+      .eq("storage_path", storagePath)
+      .maybeSingle();
 
-    if (cleanupError) {
-      console.error("[work-orders] Failed to remove the orphaned object", {
+    if (claimError || claimedBy) {
+      // Fail closed: an unconfirmed object stays. A leaked object costs storage;
+      // a wrongly deleted one costs the record an audit trail is meant to keep.
+      console.error("[work-orders] Left the object in place", {
         path: storagePath,
-        message: cleanupError.message,
+        reason: claimError ? "ownership unconfirmed" : "claimed by another row",
+        code: claimError?.code,
       });
+    } else {
+      const { error: cleanupError } = await admin.storage
+        .from(ATTACHMENTS_BUCKET)
+        .remove([storagePath]);
+
+      if (cleanupError) {
+        console.error("[work-orders] Failed to remove the orphaned object", {
+          path: storagePath,
+          message: cleanupError.message,
+        });
+      }
     }
 
     return { error: "That upload could not be recorded." };
