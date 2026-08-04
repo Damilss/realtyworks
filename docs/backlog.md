@@ -23,8 +23,11 @@ Pick them off at your discretion.
   pnpm + Next build caching. The audit step is **blocking** (fails on any
   high/critical advisory; see `docs/tooling.md`). A parallel **`e2e` job** now
   boots its own Supabase stack, resets it to the seed, and runs the Playwright
-  **auth-loop** specs on every PR/push to `main`/`dev` (Chromium only, HTML
-  report artifact) — so RLS is gated through the UI, not just through pgTAP.
+  specs on every PR/push to `main`/`dev` (Chromium only, HTML report artifact) —
+  so RLS is gated through the UI, not just through pgTAP. Since 2026-08-03 that
+  job's `.env.local` also carries `SUPABASE_SECRET_KEY` (renamed from the CLI's
+  `SECRET_KEY`); the step's grep stays an **allowlist**, so `SERVICE_ROLE_KEY`
+  and `JWT_SECRET` still never reach a file `next build` reads.
 - Security workflows live: **gitleaks** on PR/push to `main`/`dev`
   (+ pre-commit layer), **Semgrep SAST** (blocking, PR annotations), weekly
   **osv-scanner** lockfile scan (+ a scan on every PR into `main`). Every
@@ -38,12 +41,15 @@ Pick them off at your discretion.
   (9 migrations, seed, pgTAP suite via `pnpm exec supabase test db`), generated
   `src/lib/database.types.ts`, supabase CLI pinned as a devDependency. See ✅.
   `main` is now the migration baseline — every schema change from here is a new
-  forward migration, never an edit to a merged file. Four such forward
+  forward migration, never an edit to a merged file. Five such forward
   migrations now exist: the 2026-07-27 last-landlord delete guard and signup-phone
-  metadata fix, plus two 2026-08-01 migrations narrowing `service_role` to row
-  DML and making the activity trail append-only even for the service key. pgTAP
-  is up to 86 assertions across three files, including
-  `03_signup_defaults.test.sql`.
+  metadata fix, two 2026-08-01 migrations narrowing `service_role` to row
+  DML and making the activity trail append-only even for the service key, and the
+  2026-08-02 non-blank-note constraint. pgTAP is up to **94 assertions** across
+  three files, including `03_signup_defaults.test.sql`. The 2026-08-03 vendor
+  half added **no** migration — the Phase 2 schema already carried every policy
+  and grant it needed, which is the clearest evidence so far that shipping RLS
+  with its table was the right call.
 - **pgTAP `db` job** running in CI on `main`/`dev` (issue #72) — not yet a
   *required* check. See ✅.
 - **Branch protection on `main`** enabled 2026-07-20 (web UI). See ✅.
@@ -57,9 +63,11 @@ Pick them off at your discretion.
   enforced by `prettier-plugin-tailwindcss`. **Phase 3 has started.** See ✅.
 - **Auth loop shipped 2026-07-27** — `/login`, `/signup`, the session-gated
   dashboard, and the work-order list, over `src/schemas/`, `src/server/queries/`
-  (server-only DAL) and `src/server/actions/`. Both folders now exist; only
-  `supabase/functions/` and `src/app/api/` remain unbuilt from `CLAUDE.md` §3.
-  See ✅.
+  (server-only DAL) and `src/server/actions/`. Both folders now exist. Of
+  `CLAUDE.md` §3, only `supabase/functions/` is still unbuilt (Phase 5 SMS) —
+  `src/app/api/` is too, but the route handler that arrived on 2026-08-03 landed
+  at `src/app/auth/confirm/route.ts`, since it is an auth endpoint rather than an
+  API surface. See ✅.
 - **Signup is open** (`[auth] enable_signup = true`, 2026-07-27) — reverses the
   2026-07-17 invite-only call. Every self-registration is an unlinked `vendor`
   that can read nothing; roles come only from server-set `raw_app_meta_data`.
@@ -75,6 +83,38 @@ Pick them off at your discretion.
 ---
 
 ## ✅ Done (kept for the paper trail)
+
+### ✅ Phase 3 — the vendor half, closing the vertical slice (2026-08-03)
+Magic-link invite → vendor session → status update → photo upload → activity
+trail, plus the `/vendors` page staff needed to add a vendor at all (the
+`vendors_insert_staff` policy had shipped with no form behind it). New:
+`src/lib/supabase/admin.ts`, `src/lib/attachments.ts`, `src/schemas/vendor.ts`,
+`src/server/actions/vendors.ts`, `updateWorkOrderStatus` + `recordAttachment`,
+`src/app/auth/confirm/route.ts`, `/vendors`, and
+`tests/e2e/vendor-loop.spec.ts` (6 specs; 22 e2e total, 150 unit tests).
+
+**No migration.** Every policy, grant, trigger and constraint this needed was
+already on `main` from Phase 2 — the stage was application code finally using
+them. pgTAP is unchanged at 94 assertions, and the vendor guard and attachment
+invariants were already covered there.
+
+**`generateLink` sends no email, and its token is single use** — both verified
+against the running stack before any UI was written, because the design leans
+on both. The no-email finding is what lets the CI `e2e` job keep excluding the
+mail container. Related correction: `inbucket` *is* still a valid `-x` name in
+CLI 2.109.1 (`supabase start --help` lists it), so the exclusion lists in both
+jobs were left alone.
+
+**The admin client reads `SUPABASE_SECRET_KEY` lazily, inside the factory.** At
+module scope it would break `next build` in the `verify` job, which has no
+stack and no secret — pinned by a test asserting the module imports cleanly with
+both variables unset, and confirmed by building with the key removed.
+
+**`inviteVendor` carries an explicit `is_staff()` check**, the only action in
+the repo that does. `vendors.profile_id` has no client write grant, so the write
+goes through the service role and there is no policy left to lean on;
+`vendors_select_staff_or_self` is not a substitute because its
+`or profile_id = auth.uid()` arm means a successful read proves nothing.
 
 ### ✅ Phase 3 — the staff write path (2026-08-02)
 Create a work order → assign a vendor → activity trail, over real RLS.
@@ -108,8 +148,7 @@ them the job. Pinned by an e2e assertion on the specific trail entry.
 `assignVendor` moves status to `assigned` only from `open`, so reassigning a
 job mid-repair changes the vendor and not the state. 115 unit tests across 12
 files; `tests/e2e/work-orders.spec.ts` adds 5 specs (14 e2e total).
-**Still open — the vendor half:** magic-link invite, vendor status update,
-photo upload.
+**The vendor half followed on 2026-08-03 — see the ✅ entry above.**
 
 ### ✅ Reject empty/whitespace notes on the activity trail (2026-08-02, issue #76)
 Forward migration `20260802143000_require_non_blank_activity_note.sql` tightens
@@ -584,6 +623,29 @@ counsel review.
 **Done when:** both documents are placeholder-free, counsel-approved, and linked
 from the app.
 
+### 🟡 Extract the thrice-copied `submittedValues()` form-echo helper
+**Why:** `CLAUDE.md` §0 requires every `useActionState` form to echo its
+non-sensitive submitted values back, because React resets an uncontrolled form
+after *every* function action. The helper that does it now exists in **three**
+action modules — `auth.ts`, `work-orders.ts`, and (since 2026-08-03)
+`vendors.ts` — which is exactly the "3+ real things" threshold §3 names for
+extracting. It was left duplicated deliberately while the vendor half was in
+flight: the copies differ (one is typed to `AuthFormValues`, the others to
+`Record<string, string>`; `MAX_ECHOED_LENGTH` is 256 in two and 2100 in the
+other, tracking each module's longest field), and unifying them mid-stage would
+have widened a feature diff into a refactor of two files it did not otherwise
+touch.
+**The actual risk is drift**, not the duplication itself: three copies of a rule
+about *not losing user input* will eventually disagree about which fields are
+sensitive, and the failure is silent — a password echoed back, or a field
+quietly dropped on error.
+**Do:** one `submittedValues(formData, names, maxLength)` in a shared module
+(`src/server/actions/form-state.ts` is the obvious home), generic over the value
+shape, with the per-module maximum passed in rather than baked in. Keep the
+three `FormState` types where they are — they are genuinely different shapes.
+**Done when:** one implementation, all three modules using it, and the existing
+action tests still pass unchanged.
+
 ### 🟡 Coverage visibility (not a gate)
 **Why:** See what's tested without chasing a %.
 **Do:** `pnpm add -D @vitest/coverage-v8`; `pnpm test -- --coverage`; report in CI, no threshold yet.
@@ -650,29 +712,20 @@ CLI replaced the classic base colors with named presets, so the toolkit was buil
 from the registry's zinc tokens directly — add further primitives with
 `pnpm dlx shadcn@latest add <name>`.
 
-### 🟢 Phase 3 — The one vertical slice *(half done — still open)*
+### ✅ Phase 3 — The one vertical slice *(complete 2026-08-03)*
 manager logs in → creates work order → assigns vendor → vendor updates status + uploads photo →
-activity log reflects it → manager sees it. Exercises auth, RLS, mutations, storage, audit once.
+activity log reflects it → manager sees it. Exercised auth, RLS, mutations, storage, audit once.
 
-**Done 2026-07-27 (see ✅ above):** the auth half — login, signup, the
-session-gated shell, and the work-order **list**, with Playwright driving both
-seeded roles against a real stack. That covers auth and RLS-on-read.
+Landed in three parts, each with its own ✅ entry above: the auth half
+(2026-07-27), the staff write path (2026-08-02), and the vendor half
+(2026-08-03). Every layer the slice was meant to prove has now been exercised
+from the app rather than only from SQL — including Storage and the vendor
+column-guard trigger, which were the last two.
 
-**Done 2026-08-02 (see ✅ above):** the staff write path — create a work order ·
-assign a vendor · the activity trail rendered back, including notes. That
-exercises RLS-on-write, the column grants, and the activity triggers from the
-app for the first time.
-
-**Still open — the vendor half:** the magic-link invite, the vendor's status
-update, and the photo upload. Storage and the vendor column-guard trigger are
-still unexercised from the app, and `supabase/functions/` and `src/app/api/`
-remain the two unbuilt `CLAUDE.md` §3 folders — the invite's `/auth/confirm`
-route handler is the first thing that will need the latter.
-
-The vendor half is **magic-link, not a signup** — vendors get a real auth user reached by a unique
-link (a "Copy vendor link" button in Phase 3; delivered over SMS in Phase 5). Design per
-`docs/vendor-access.md`. Open signup does not change that: a self-registered
-vendor is inert until staff link it to a `vendors` row.
+One §3 folder is still unbuilt and that is correct: `supabase/functions/` waits
+for Phase 5 SMS. `src/app/api/` is also still absent — the magic-link redemption
+route landed at `src/app/auth/confirm/route.ts` instead, since it is an auth
+endpoint rather than an API surface. The SSO callback will sit beside it.
 
 ### 🟢 Phase 3 — SSO (Google first, then Microsoft, then Apple)
 **Why:** Password auth works, but staff sign-in is the friction that gets a tool
@@ -716,8 +769,17 @@ reaches Supabase; the insert carries only the granted columns; `assignVendor`
 leaves a non-`open` status alone; a note never sets `action` or `actor_id`).
 115 unit tests across 12 files.
 
-**Still open:** the vendor-side transition — `in_progress`/`completed` through
-`guard_work_order_update()`. Lands with the vendor half.
+**Done 2026-08-03:** the vendor-side transition and the privileged path.
+`src/schemas/vendor.test.ts` (the contact-method rule mirrored, including the
+whitespace cases `nullif(trim(...), '')` exists to catch),
+`src/server/actions/vendors.test.ts` (a non-staff caller never reaches the admin
+client; a NULL `is_staff()` is denied like a false one; a non-`vendor` role is
+never linked; the returned link points at our own `/auth/confirm`), and
+`src/lib/supabase/admin.test.ts` (missing key, publishable key in the secret's
+place, and no environment read at import time). 150 unit tests across 15 files.
+The `in_progress`/`completed` transition itself is covered where it is actually
+enforced — pgTAP for the trigger, and `tests/e2e/vendor-loop.spec.ts` for the
+form only offering those two.
 
 ### 🟢 Phase 4 — Observability & deploy (issue #36)
 `@sentry/nextjs`, Vercel PR preview deploys, prod deploys only from `main`. Keep a working

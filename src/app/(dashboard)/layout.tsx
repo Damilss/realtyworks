@@ -1,7 +1,9 @@
+import Link from "next/link";
+
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { signOut } from "@/server/actions/auth";
-import { getCurrentProfile } from "@/server/queries/session";
+import { getCurrentProfile, isStaff } from "@/server/queries/session";
 
 /**
  * The authenticated app shell.
@@ -20,7 +22,31 @@ export default async function DashboardLayout({
     <div className="flex min-h-svh flex-col">
       <header className="border-b">
         <div className="mx-auto flex w-full max-w-6xl items-center justify-between gap-4 px-6 py-4">
-          <span className="font-semibold tracking-tight">RealtyWorks</span>
+          <div className="flex items-center gap-6">
+            <Link href="/dashboard" className="font-semibold tracking-tight">
+              RealtyWorks
+            </Link>
+
+            {/* Nav only, not a gate. `/vendors` performs its own check, and RLS
+                is what actually decides — this link simply doesn't offer a
+                vendor a page that would tell them no. */}
+            {profile && isStaff(profile) ? (
+              <nav className="flex items-center gap-4 text-sm">
+                <Link
+                  href="/dashboard"
+                  className="text-muted-foreground hover:text-foreground"
+                >
+                  Work orders
+                </Link>
+                <Link
+                  href="/vendors"
+                  className="text-muted-foreground hover:text-foreground"
+                >
+                  Vendors
+                </Link>
+              </nav>
+            ) : null}
+          </div>
 
           <div className="flex items-center gap-3">
             {profile ? (

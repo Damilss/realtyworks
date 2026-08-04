@@ -122,6 +122,88 @@ export const addNoteSchema = z.object({
     .max(NOTE_MAX_LENGTH, `Use ${NOTE_MAX_LENGTH} characters or fewer.`),
 });
 
+/**
+ * The two statuses a vendor may move a job to, mirroring
+ * `guard_work_order_update()`:
+ *
+ *     if new.status not in ('in_progress', 'completed') then raise ...
+ *
+ * Deliberately narrower than `Constants.public.Enums.work_order_status`, and
+ * deliberately hardcoded rather than derived from it — the DB enum has five
+ * values and this list is a *policy* about two of them, so generating it from
+ * the enum would silently widen the form the day a sixth status is added.
+ * `open`, `assigned` and `cancelled` stay staff-only, which is what keeps a
+ * vendor from cancelling a job rather than reporting on it.
+ */
+export const VENDOR_STATUSES = ["in_progress", "completed"] as const;
+
+export const updateStatusSchema = z.object({
+  workOrderId: id(),
+  status: z.enum(VENDOR_STATUSES, "Choose a status."),
+});
+
+/** `char_length(file_name) between 1 and 255` on `work_order_attachments`. */
+const FILE_NAME_MAX_LENGTH = 255;
+
+/**
+ * The exact object name the storage policies and `attachments_path_matches_row`
+ * both require: `<work_order_id>/<attachment_id>.<ext>`, one folder level, and
+ * **lowercase** hex. The case matters — `z.guid()` accepts uppercase and
+ * Postgres's `uuid` type renders lowercase, so an uppercase id would satisfy the
+ * id fields, fail the storage regex, and only surface after the bytes were
+ * already uploaded.
+ */
+const STORAGE_PATH_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.[a-zA-Z0-9]+$/;
+
+/**
+ * The metadata half of the coordinated upload path
+ * (`20260717120700_create_work_order_attachments.sql`). The object is already in
+ * Storage by the time this runs — the client uploads it under its own session —
+ * so this describes only what the client is *allowed* to assert about it.
+ *
+ * Note what is absent: `mimeType` and `sizeBytes`. Both are read back off the
+ * stored object server-side, because the metadata row is written with the
+ * service role and nothing downstream would catch a client that lied about
+ * either. `fileName` and `kind` stay client-supplied — one is the original
+ * filename, which exists nowhere else, and the other is a label staff can
+ * correct through `attachments_update_staff`.
+ */
+export const recordAttachmentSchema = z
+  .object({
+    workOrderId: id(),
+    attachmentId: id(),
+    storagePath: z.string().regex(STORAGE_PATH_PATTERN, "Invalid upload path."),
+    fileName: z
+      .string()
+      .trim()
+      .min(1, "The file needs a name.")
+      .max(
+        FILE_NAME_MAX_LENGTH,
+        `Use ${FILE_NAME_MAX_LENGTH} characters or fewer.`,
+      ),
+    kind: z.enum(Constants.public.Enums.attachment_kind),
+  })
+  .refine(
+    // The folder IS the work order and the basename IS the attachment id.
+    // Checked by comparing the parts rather than by interpolating the ids into
+    // a pattern, so a path naming a *different* work order — the one case that
+    // would let metadata point at somebody else's object — cannot satisfy it.
+    (input) => {
+      const [folder, basename] = input.storagePath.split("/");
+      return (
+        folder === input.workOrderId &&
+        basename?.startsWith(`${input.attachmentId}.`)
+      );
+    },
+    {
+      path: ["storagePath"],
+      message: "That upload does not belong to this work order.",
+    },
+  );
+
 export type CreateWorkOrderInput = z.infer<typeof createWorkOrderSchema>;
 export type AssignVendorInput = z.infer<typeof assignVendorSchema>;
 export type AddNoteInput = z.infer<typeof addNoteSchema>;
+export type UpdateStatusInput = z.infer<typeof updateStatusSchema>;
+export type RecordAttachmentInput = z.infer<typeof recordAttachmentSchema>;

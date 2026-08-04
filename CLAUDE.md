@@ -82,8 +82,9 @@ old `CI/CD` type is retired in favor of `ci` — see `commitlint.config.mjs`).
 
 ### Current state vs. the target in §3
 
-The repo is at **Phase 3 (the vertical slice), in progress as of 2026-07-27** —
-Phases 1 and 2 are complete. The schema shipped 2026-07-17 and **merged to
+The repo is at **Phase 3 (the vertical slice), complete as of 2026-08-03** —
+Phases 1, 2 and 3 are done; **Phase 4 (hosted deployment) is next**. The schema
+shipped 2026-07-17 and **merged to
 `main` 2026-07-21** (PR #78), so `main` is the migration baseline: every schema
 change from here is a *new* forward migration, never an edit to a merged one.
 Parts of §3's *application* tree are still the **target**, not yet present.
@@ -180,18 +181,47 @@ Verify before assuming they exist:
   hydration. Forward migration
   `20260802143000_require_non_blank_activity_note.sql` closes the blank-note
   hole (issue #76).
-- **Phase 3 (the vertical slice) is in progress.** UI toolkit and auth loop
-  landed 2026-07-27, the staff write path 2026-08-02; what remains is the
-  **vendor half** — magic-link invite, vendor status update, photo upload. That
-  needs a `SUPABASE_SECRET_KEY` server-only admin client, because
-  `work_order_attachments` has no client INSERT grant by design and
-  `auth.admin.generateLink` is privileged. SSO (Google first, then Microsoft,
-  then Apple) is queued after. All tracked in `docs/backlog.md`, along with
-  schema-review follow-ups that are fill-in work, not blockers.
-- **Not yet created:** `supabase/functions/`, `src/app/api/`. Neither is a
-  gap to fill on its own — edge functions are Phase 5 (§6 SMS), and route
-  handlers arrive with the vendor invite's `/auth/confirm` and the SSO
-  callback. Do not scaffold either speculatively (§3/§8).
+- **In place — the vendor half (2026-08-03), which completes Phase 3:**
+  `src/lib/supabase/admin.ts` (the privileged client), `src/lib/attachments.ts`
+  (the shared upload contract), `src/schemas/vendor.ts`,
+  `src/server/actions/vendors.ts` (`createVendor` · `inviteVendor`),
+  `updateWorkOrderStatus` + `recordAttachment` in the work-order actions,
+  `src/app/auth/confirm/route.ts`, and `/vendors`. **No migration** — every
+  policy, grant and trigger this needed was already on `main`, which is what the
+  Phase 2 design was for. Four rules to carry forward:
+
+  **`SUPABASE_SECRET_KEY` is read lazily, inside `createAdminClient()`.** Never
+  at module scope: the CI `verify` job runs `next build` with no stack and no
+  secret, and a module-scope read fails that build the moment any page's import
+  graph reaches the file. It also refuses a `sb_publishable_`-prefixed value,
+  and it lives in `admin.ts` rather than `env.ts` because `env.ts` is imported
+  by the browser client.
+
+  **Reach for the admin client last, never first.** It bypasses RLS by
+  definition, so the caller's access is established with the *session* client
+  first — `can_access_work_order()` for an upload, `is_staff()` for an invite —
+  and only then is the privileged client created. Signed download URLs are
+  minted with the session client for the same reason: signing with the service
+  role would hand out URLs RLS had just refused.
+
+  **`inviteVendor` is the one action with its own authorization check**, and the
+  exception is real rather than sloppy: `vendors.profile_id` has no client write
+  grant, so the write goes through the service role and there is no policy left
+  to lean on. `vendors_select_staff_or_self` is not a substitute — its
+  `or profile_id = auth.uid()` arm means a read succeeding proves nothing.
+
+  **The magic link is ours, not GoTrue's.** `generateLink` mints the token; we
+  build a `/auth/confirm` URL from `properties.hashed_token` and redeem it with
+  `verifyOtp`. `properties.action_link` is the implicit flow and returns the
+  session in a URL fragment, which a cookie-session app cannot use. Verified
+  against the running stack: `generateLink` **sends no email**, and the token is
+  **single use**. Full reasoning and the other settled questions:
+  `docs/vendor-access.md` §6.
+- **Not yet created:** `supabase/functions/`, `src/app/api/`. Neither is a gap
+  to fill on its own — edge functions are Phase 5 (§6 SMS), and the only route
+  handler that exists is `src/app/auth/confirm/route.ts`, which is deliberately
+  *not* under `api/`. The SSO callback will be the next one. Do not scaffold
+  either speculatively (§3/§8).
 - When you add the next missing piece, follow §3/§5 exactly (e.g.
   `src/server/` as the trust boundary; schema changes only as new migrations
   with RLS alongside).
@@ -210,14 +240,14 @@ work orders, vendor coordination, documentation, and audit-ready records.
 
 ### Timeline — we are on a clock
 
-**Target: past MVP by early August 2026** (~1 week out as of 2026-07-27). The
-§1 MVP scope needs to be built, deployed, and usable by then — Phases 1–5 of
-§4, not just the foundations. As of 2026-07-27 Phases 1 and 2 are complete and
-**Phase 3 (the vertical slice) is underway** — the Tailwind + shadcn/ui toolkit
-and the auth loop both landed 2026-07-27, and the work-order half (create →
-assign → vendor update → activity trail) is the current focus. It is the
-largest remaining unknown — schema polish competes with it for the same window, so
-treat backlog follow-ups as fill-in work, not the critical path.
+**Target: past MVP by early August 2026** — i.e. now. The §1 MVP scope needs to
+be built, deployed, and usable, which is Phases 1–5 of §4, not just the
+foundations. As of 2026-08-03 **Phases 1–3 are complete**: the toolkit and auth
+loop landed 2026-07-27, the staff write path 2026-08-02, and the vendor half
+2026-08-03, closing the vertical slice end to end. **Phase 4 (hosted deployment)
+is the critical path now** — the largest remaining unknown, and the one thing
+that turns a working local app into a usable one. Treat backlog follow-ups as
+fill-in work around it, not as the main line.
 
 **This does not lower the bar.** Rigor is what keeps a two-week push from
 becoming a four-week one. RLS still ships in the same migration as its table,
@@ -334,8 +364,9 @@ realtyworks/
 ├── src/
 │   ├── app/                        # App Router
 │   │   ├── (auth)/                 # route group: login, signup
-│   │   ├── (dashboard)/            # route group: authed app shell
-│   │   ├── api/                    # route handlers (webhooks etc.)
+│   │   ├── (dashboard)/            # route group: authed app shell (work orders, vendors)
+│   │   ├── auth/confirm/route.ts   # redeems a magic link → session cookies
+│   │   ├── api/                    # route handlers (webhooks etc.) — not created yet
 │   │   ├── layout.tsx
 │   │   ├── page.tsx
 │   │   └── globals.css
@@ -346,8 +377,10 @@ realtyworks/
 │   │   ├── supabase/
 │   │   │   ├── client.ts           # browser client
 │   │   │   ├── server.ts           # server client (cookies/SSR)
+│   │   │   ├── admin.ts            # PRIVILEGED — secret key, bypasses RLS (§2)
 │   │   │   ├── proxy.ts            # session refresh (called by src/proxy.ts)
 │   │   │   └── env.ts              # validated NEXT_PUBLIC_SUPABASE_* config
+│   │   ├── attachments.ts          # upload contract shared by browser + server
 │   │   ├── database.types.ts       # GENERATED — never hand-edit
 │   │   └── utils.ts
 │   ├── server/                     # SERVER-ONLY — never imported by client
@@ -420,17 +453,18 @@ the table it protects. Seed file with 3 test users (landlord, manager, vendor),
 sample properties, a vendor, work orders in varied states. One command resets
 local to a known-good state.
 
-**Phase 3 — One vertical slice** *(in progress — UI toolkit + auth loop landed 2026-07-27)*
+**Phase 3 — One vertical slice** *(complete 2026-08-03)*
 Exactly one full path, nothing else: manager logs in → creates work order →
 assigns vendor → vendor logs in → vendor updates status + uploads photo →
-activity log reflects all of it → manager sees it. Exercises auth, RLS,
-mutations, storage, activity trail before the pattern is duplicated.
-**Done:** login/signup, the session-gated shell, and the work-order list, with
-Playwright driving all of it against a seeded stack. **Remaining:** create a
-work order, assign a vendor, the vendor status update + photo upload, and the
-activity trail rendered back to the manager.
+activity log reflects all of it → manager sees it. Exercised auth, RLS,
+mutations, storage, and the activity trail before the pattern gets duplicated —
+which was the point of doing it as one path instead of five half-features.
+Landed in three parts: the toolkit + auth loop (2026-07-27), the staff write
+path (2026-08-02), and the vendor half (2026-08-03). `tests/e2e/` drives the
+whole thing against a seeded stack, including redeeming a real magic link in a
+second browser context.
 
-**Phase 4 — Hosted deployment**
+**Phase 4 — Hosted deployment** *(next)*
 Vercel + Supabase Cloud free tier. PR preview deploys, Sentry wired, prod
 deploys only from `main`.
 

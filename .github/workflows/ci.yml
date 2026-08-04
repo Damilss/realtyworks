@@ -143,15 +143,25 @@ jobs:
       - name: Reset to migrations + seed
         run: pnpm exec supabase db reset
 
-      # The grep is load-bearing: the raw output also carries SERVICE_ROLE_KEY,
-      # SECRET_KEY, and JWT_SECRET, none of which belong in a file the client
-      # bundle is built from.
+      # The grep is load-bearing, and it is an ALLOWLIST rather than a filter:
+      # the raw output also carries SERVICE_ROLE_KEY and JWT_SECRET, neither of
+      # which belongs in a file the client bundle is built from. SECRET_KEY is
+      # admitted deliberately — the vendor invite and the attachment-metadata
+      # insert are service-role writes with no client grant — and renamed to the
+      # SUPABASE_SECRET_KEY that src/lib/supabase/admin.ts reads. It is safe
+      # here only because it has no NEXT_PUBLIC_ prefix, so `next build` never
+      # inlines it into the bundle.
+      #
+      # sed rather than a third --override-name: `supabase status --help`
+      # documents no override path for the secret key, and a wrong one fails by
+      # emitting nothing at all rather than by erroring.
       - name: Write .env.local from the running stack
         run: |
           pnpm exec supabase status -o env \
             --override-name api.url=NEXT_PUBLIC_SUPABASE_URL \
             --override-name auth.publishable_key=NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY \
-            | grep '^NEXT_PUBLIC_' > .env.local
+            | grep -E '^(NEXT_PUBLIC_|SECRET_KEY=)' \
+            | sed 's/^SECRET_KEY=/SUPABASE_SECRET_KEY=/' > .env.local
 
       # CI is set by GitHub Actions, so playwright.config.ts keys off it
       # (forbidOnly, retries: 2, reuseExistingServer: false) with no extra flags.
