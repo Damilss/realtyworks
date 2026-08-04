@@ -51,6 +51,26 @@ function workOrderTitle(
   return `${label} (w${testInfo.workerIndex}${attempt})`;
 }
 
+/**
+ * Two vendors for the reassignment spec, deliberately *not* built on
+ * `vendorIdentity()`. `addVendor()` finds its row by substring, so a name that
+ * contains another vendor's would match two rows and fail strict mode the moment
+ * a worker ran both specs against the same database.
+ */
+function reassignmentPair(testInfo: { workerIndex: number; retry: number }) {
+  const suffix = `w${testInfo.workerIndex}${testInfo.retry > 0 ? `r${testInfo.retry}` : ""}`;
+  return {
+    outgoing: {
+      name: `Outgoing Vendor ${suffix}`,
+      email: `outgoing-vendor-${suffix}@realtyworks.test`,
+    },
+    incoming: {
+      name: `Incoming Vendor ${suffix}`,
+      email: `incoming-vendor-${suffix}@realtyworks.test`,
+    },
+  };
+}
+
 async function signIn(page: Page, email: string) {
   await page.goto("/login");
   await page.getByLabel("Email").fill(email);
@@ -237,6 +257,38 @@ test("a magic link is single use", async ({ page, browser }, testInfo) => {
   await expect(
     second.getByText(/expired or has already been used/i),
   ).toBeVisible();
+});
+
+test("a minted link does not survive a reassignment", async ({
+  page,
+}, testInfo) => {
+  const { outgoing, incoming } = reassignmentPair(testInfo);
+  const title = workOrderTitle(testInfo, "Reassigned");
+
+  await signIn(page, "manager@realtyworks.test");
+  await addVendor(page, outgoing);
+  await addVendor(page, incoming);
+  await createAndAssign(page, title, outgoing.name);
+
+  await mintInviteLink(page);
+
+  // `assignVendor` revalidates rather than navigating, so this re-renders the
+  // page in place. The invite panel keeps its position in the tree — and, unless
+  // something forces a remount, its useActionState along with it.
+  await page.getByLabel("Vendor").selectOption({ label: incoming.name });
+  await page.getByRole("button", { name: "Reassign vendor" }).click();
+
+  // The panel is now about the incoming vendor…
+  await expect(
+    main(page).getByText(`Creates an account for ${incoming.name}`),
+  ).toBeVisible();
+
+  // …and the outgoing vendor's link left with them. A link that stays on screen
+  // under the new assignee's name is how a bearer token reaches the wrong
+  // person: it signs its holder in as the *outgoing* vendor, exposing the other
+  // jobs assigned to them and attributing whatever the holder does to a vendor
+  // who never touched the job.
+  await expect(page.getByLabel("Sign-in link")).toHaveCount(0);
 });
 
 test("the confirm endpoint refuses an off-site redirect", async ({ page }) => {
