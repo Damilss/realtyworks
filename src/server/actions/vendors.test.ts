@@ -135,7 +135,11 @@ function formData(fields: Record<string, string>) {
 
 /** A work order with the vendor embedded, as the invite action reads it. */
 function assignedWorkOrder(
-  overrides: { email?: string | null; id?: string } = {},
+  overrides: {
+    email?: string | null;
+    id?: string;
+    profileId?: string | null;
+  } = {},
 ) {
   return {
     data: {
@@ -146,6 +150,9 @@ function assignedWorkOrder(
         name: "Bob's Handyman Services",
         email:
           overrides.email === undefined ? "bob@example.com" : overrides.email,
+        // Unlinked until an invite succeeds — the state a squatted address
+        // would be exploited from.
+        profile_id: overrides.profileId ?? null,
       },
     },
     error: null,
@@ -270,13 +277,14 @@ describe("inviteVendor", () => {
   });
 
   /**
-   * Self-service signup is open, so an existing account is a normal state for
-   * this flow rather than a failure. Everything downstream works from the user
-   * `generateLink()` resolves, so there is nothing to recover — only a wrong
-   * branch to avoid taking.
+   * Re-inviting a vendor who is already linked is the common case of a lost
+   * invite: a fresh magic link for the very account the row already points at,
+   * so there is nothing new to authorize.
    */
-  it("treats an existing account as success", async () => {
-    stubSession({ results: [assignedWorkOrder()] });
+  it("re-issues a link for an account already linked to this vendor", async () => {
+    stubSession({
+      results: [assignedWorkOrder({ profileId: VENDOR_PROFILE_ID })],
+    });
     const admin = stubAdmin({
       createUserError: { code: "email_exists", status: 422 },
       results: [{ data: { role: "vendor" }, error: null }, { error: null }],
@@ -287,6 +295,47 @@ describe("inviteVendor", () => {
     expect(state.error).toBeUndefined();
     expect(state.inviteUrl).toContain("/auth/confirm?");
     expect(admin.generateLink).toHaveBeenCalled();
+  });
+
+  /**
+   * The address squat. `enable_confirmations` is false while signup is open, so
+   * anyone can register an address they do not own; `handle_new_user()` defaults
+   * them to 'vendor', which is exactly the role the check below admits. Linking
+   * that account is what would turn a self-registration that reads nothing into
+   * one holding the vendor's work orders — and the squatter knows their own
+   * password, so the magic link never has to be intercepted.
+   */
+  it("refuses a pre-existing account that is not linked to this vendor", async () => {
+    stubSession({ results: [assignedWorkOrder({ profileId: null })] });
+    const admin = stubAdmin({
+      createUserError: { code: "email_exists", status: 422 },
+      results: [{ data: { role: "vendor" }, error: null }, { error: null }],
+    });
+
+    const state = await inviteVendor({}, formData(validInvite));
+
+    expect(state.error).toMatch(/already exists for that email/i);
+    expect(state.inviteUrl).toBeUndefined();
+    // Never written: the squatter must not end up in `vendors.profile_id`.
+    expect(admin.queries[1].calls.update).not.toHaveBeenCalled();
+  });
+
+  /**
+   * An account this action created itself is safe to link — nobody else has
+   * ever held its credentials.
+   */
+  it("links an account it created for a vendor with no prior link", async () => {
+    stubSession({ results: [assignedWorkOrder({ profileId: null })] });
+    const admin = stubAdmin({
+      results: [{ data: { role: "vendor" }, error: null }, { error: null }],
+    });
+
+    const state = await inviteVendor({}, formData(validInvite));
+
+    expect(state.error).toBeUndefined();
+    expect(admin.queries[1].calls.update).toHaveBeenCalledWith({
+      profile_id: VENDOR_PROFILE_ID,
+    });
   });
 
   /**

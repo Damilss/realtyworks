@@ -167,7 +167,7 @@ export async function inviteVendor(
   const { data: workOrder, error: workOrderError } = await supabase
     .from("work_orders")
     .select(
-      "id, vendor_id, vendors!work_orders_vendor_id_fkey ( id, name, email )",
+      "id, vendor_id, vendors!work_orders_vendor_id_fkey ( id, name, email, profile_id )",
     )
     .eq("id", parsed.data.workOrderId)
     .maybeSingle();
@@ -230,10 +230,10 @@ export async function inviteVendor(
     user_metadata: { full_name: vendor.name },
   });
 
-  // Self-service signup is open, so the vendor may already have an account —
-  // that is a normal state for this flow, not a failure. Everything downstream
-  // works from the account generateLink() resolves, so there is nothing to
-  // recover here beyond not treating it as an error.
+  // Self-service signup is open, so the address may already have an account.
+  // That is not automatically the vendor's account, which is why the branch
+  // below only records the fact and the decision is made once the account has
+  // been resolved.
   if (created.error && created.error.code !== "email_exists") {
     console.error("[vendors] Failed to create the vendor account", {
       code: created.error.code,
@@ -241,6 +241,8 @@ export async function inviteVendor(
     });
     return { error: "Could not create an account for that vendor." };
   }
+
+  const accountPreexisted = created.error?.code === "email_exists";
 
   // Mints the token AND resolves the account — GenerateLinkResponse carries the
   // user, which is what makes the email_exists branch above need no lookup of
@@ -259,6 +261,39 @@ export async function inviteVendor(
   }
 
   const invitedUserId = link.data.user.id;
+
+  // Refuse an account this action did not create, unless it is already the one
+  // this vendor row points at.
+  //
+  // `[auth.email] enable_confirmations` is still false while signup is open
+  // (docs/backlog.md — "Turn on email confirmations before the Phase 4 public
+  // deploy"), so anyone can register an address they do not own and be signed in
+  // immediately. The backlog rates that blast radius as nil because an unlinked
+  // self-registration reads nothing — and it is this action that would end the
+  // "unlinked" part. Squat a vendor's address, wait for staff to invite them,
+  // and the link handed over is to the squatter's own account, which they hold
+  // the password for. The magic link never has to be intercepted.
+  //
+  // The role check below does not cover this: `handle_new_user()` defaults a
+  // self-registration to 'vendor'
+  // (20260727140000_handle_new_user_phone_from_metadata.sql), so a squatted
+  // account is exactly the role that check admits. It stops staff addresses,
+  // not impostors.
+  //
+  // Re-inviting an already-linked vendor stays allowed — that is a fresh magic
+  // link for the same account, and the common case of a lost invite.
+  if (accountPreexisted && vendor.profile_id !== invitedUserId) {
+    console.error("[vendors] Refused to link a pre-existing account", {
+      vendorId: vendor.id,
+      alreadyLinked: vendor.profile_id !== null,
+    });
+    return {
+      error:
+        "An account already exists for that email address, and it is not " +
+        "this vendor's. Confirm the address belongs to them before inviting " +
+        "again — someone else may have registered it.",
+    };
+  }
 
   // Refuse to link an account that is not a vendor. Without this, inviting a
   // vendor row that happens to carry a manager's address would give that
