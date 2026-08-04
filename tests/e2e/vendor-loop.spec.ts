@@ -28,18 +28,33 @@ function trailEntry(page: Page, text: string) {
 }
 
 /**
- * Worker- and retry-scoped, for the same reason as `title()` in
+ * Label-, worker- and retry-scoped, for the same reason as `title()` in
  * work-orders.spec.ts — but it matters more here. An invited vendor's email
  * becomes an `auth.users` row, and re-running against the same database would
  * hit `email_exists`, link the *existing* account to a second vendor row, and
  * fail the `vendors_profile_id_key` partial unique index. Distinct addresses
  * keep a retry from colliding with the attempt that created the account.
+ *
+ * `label` carries no less weight than the worker index, so it is required
+ * rather than optional. Worker and attempt separate a spec from *other runs of
+ * itself*; only the label separates it from a different spec that happens to
+ * share its worker — which is every spec under `--workers=1`, and any spec once
+ * there are more of them than workers. Sharing an address there leaves two rows
+ * answering to one name, and `addVendor()` finds a vendor already invited by a
+ * spec that has already finished.
+ *
+ * Labels must also not nest: `addVendor()` locates its row by substring, so
+ * "Loop" alongside "Loop extra" would match two.
  */
-function vendorIdentity(testInfo: { workerIndex: number; retry: number }) {
+function vendorIdentity(
+  testInfo: { workerIndex: number; retry: number },
+  label: string,
+) {
   const suffix = `w${testInfo.workerIndex}${testInfo.retry > 0 ? `r${testInfo.retry}` : ""}`;
+  const slug = label.toLowerCase().replace(/[^a-z0-9]+/g, "-");
   return {
-    name: `Test Vendor ${suffix}`,
-    email: `test-vendor-${suffix}@realtyworks.test`,
+    name: `Test Vendor ${label} ${suffix}`,
+    email: `test-vendor-${slug}-${suffix}@realtyworks.test`,
   };
 }
 
@@ -49,26 +64,6 @@ function workOrderTitle(
 ) {
   const attempt = testInfo.retry > 0 ? `-r${testInfo.retry}` : "";
   return `${label} (w${testInfo.workerIndex}${attempt})`;
-}
-
-/**
- * Two vendors for the reassignment spec, deliberately *not* built on
- * `vendorIdentity()`. `addVendor()` finds its row by substring, so a name that
- * contains another vendor's would match two rows and fail strict mode the moment
- * a worker ran both specs against the same database.
- */
-function reassignmentPair(testInfo: { workerIndex: number; retry: number }) {
-  const suffix = `w${testInfo.workerIndex}${testInfo.retry > 0 ? `r${testInfo.retry}` : ""}`;
-  return {
-    outgoing: {
-      name: `Outgoing Vendor ${suffix}`,
-      email: `outgoing-vendor-${suffix}@realtyworks.test`,
-    },
-    incoming: {
-      name: `Incoming Vendor ${suffix}`,
-      email: `incoming-vendor-${suffix}@realtyworks.test`,
-    },
-  };
 }
 
 async function signIn(page: Page, email: string) {
@@ -149,7 +144,7 @@ test("a vendor is invited, signs in by link, reports progress, and uploads a pho
   page,
   browser,
 }, testInfo) => {
-  const vendor = vendorIdentity(testInfo);
+  const vendor = vendorIdentity(testInfo, "Loop");
   const title = workOrderTitle(testInfo, "Vendor loop");
 
   await signIn(page, "manager@realtyworks.test");
@@ -236,7 +231,7 @@ test("a vendor is invited, signs in by link, reports progress, and uploads a pho
 });
 
 test("a magic link is single use", async ({ page, browser }, testInfo) => {
-  const vendor = vendorIdentity(testInfo);
+  const vendor = vendorIdentity(testInfo, "Single use");
   const title = workOrderTitle(testInfo, "Single use");
 
   await signIn(page, "manager@realtyworks.test");
@@ -262,7 +257,8 @@ test("a magic link is single use", async ({ page, browser }, testInfo) => {
 test("a minted link does not survive a reassignment", async ({
   page,
 }, testInfo) => {
-  const { outgoing, incoming } = reassignmentPair(testInfo);
+  const outgoing = vendorIdentity(testInfo, "Outgoing");
+  const incoming = vendorIdentity(testInfo, "Incoming");
   const title = workOrderTitle(testInfo, "Reassigned");
 
   await signIn(page, "manager@realtyworks.test");
