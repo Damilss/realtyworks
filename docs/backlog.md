@@ -73,6 +73,15 @@ Pick them off at your discretion.
   that can read nothing; roles come only from server-set `raw_app_meta_data`.
   Reversal + reasoning: `docs/schema/my_schema_writeup.md`, last section. The
   two costs are filed as 🟠 (email confirmations) and 🟡 (CAPTCHA).
+- **Cross-checked against the GitHub issue list 2026-08-07** (15 open). Four
+  filed issues had no entry here and were added to 🟡: the Tailwind v4 full-height
+  regression (#86/#89), the prettier-plugin-tailwindcss v4 options (#87), the
+  `minimatch` override (#84), and the `vitest.config.ts` alias path (#102). Every
+  other visible open issue already had an entry, now cross-referenced by number.
+  **Caveat:** the check was made against a screenshot of the first page of
+  *Open*, so roughly three of the fifteen sat below the fold and were not
+  compared — re-run the comparison on those before treating this file as a
+  complete mirror of the tracker.
 
 ### Sharp edges these issues address
 - Native GitHub security features (CodeQL, secret-scanning push-protection,
@@ -539,7 +548,7 @@ required-check names are unchanged; the OSV scan surfaces as a non-required
 
 ## 🟠 High
 
-### 🟠 Reject backslash-based external redirects in `/auth/confirm` (PR review, P2)
+### 🟠 Reject backslash-based external redirects in `/auth/confirm` (issue #105, PR review, P2)
 **Why:** `safeNext()` in `src/app/auth/confirm/route.ts` is meant to guarantee
 the post-verification redirect stays same-origin, and it does not.
 `next=%2F%5Cevil.example` decodes to `/\evil.example` — starts with `/`, does not
@@ -613,7 +622,7 @@ executes, tabling `//evil.example`, `%2F%5Cevil.example`, `/%09/evil.example`,
 deep-linking still works; and deleting `safeNext()` makes that spec fail —
 confirmed by actually doing it once, given the above.
 
-### 🟠 Turn on email confirmations before the Phase 4 public deploy
+### 🟠 Turn on email confirmations before the Phase 4 public deploy (issue #93)
 **Why:** `[auth.email] enable_confirmations = false` was harmless while signup
 was invite-only. Since signup opened (2026-07-27) it means **anyone can create
 an account against an email address they do not own**, and be signed in
@@ -660,7 +669,9 @@ one as a duplicate.
 **Done when:** a whitespace-only value is rejected on every required text column,
 with a pgTAP assertion each.
 
-### 🟡 Scope the sign-out action to the current session
+### 🟡 Scope the sign-out action to the current session (issues #92, #98)
+**Note:** #98 carries the `duplicate` label against #92 — close one as a
+duplicate, same as the #75/#77 pair below.
 **Why:** `src/server/actions/auth.ts` calls `supabase.auth.signOut()` with no
 options, and `@supabase/auth-js` (2.110.7) declares that as
 `signOut(options = { scope: 'global' })` — it revokes **every** refresh token the
@@ -721,6 +732,137 @@ shape, with the per-module maximum passed in rather than baked in. Keep the
 three `FormState` types where they are — they are genuinely different shapes.
 **Done when:** one implementation, all three modules using it, and the existing
 action tests still pass unchanged.
+
+### 🟡 Restore the full-height page shell dropped by the Tailwind v4 scaffold (issues #86, #89)
+**Why:** The pre-Tailwind root layout sized the document:
+`<html className="… h-full antialiased">` with
+`<body className="min-h-full flex flex-col">`. The v4 scaffold commit (8263085)
+rewrote both lines and kept neither — `src/app/layout.tsx` is now
+`<html lang="en" className={…}>` over `<body className="font-sans antialiased">`.
+The pair was load-bearing together: `min-h-full` on the body resolves against a
+sized parent, so dropping `h-full` from `<html>` would have neutered it even if
+the body class had survived.
+
+**The blast radius is smaller than it looks, which is exactly why it has sat
+here.** Both route groups size themselves — `src/app/(auth)/layout.tsx:10` and
+`src/app/(dashboard)/layout.tsx:22` each open with `min-h-svh` — so every page a
+user can currently reach looks right. What has no height context is anything
+rendering *outside* those groups, and `src/app/` today has no `not-found.tsx`,
+`error.tsx`, or `global-error.tsx` at any level, so Next's built-in versions
+render straight under the root layout. `src/app/page.tsx` is a bare `redirect()`
+and never paints. So the regression is real but currently invisible, and it
+becomes visible the moment a root-level error or 404 surface is added — likely
+during Phase 4, when a deployed app starts producing real 404s.
+**Do:** restore `h-full` on `<html>` and `min-h-full flex flex-col` on `<body>`.
+**Keep `font-sans`** — it arrived later (5f7efc5) and is deliberate; the comment
+above it in `layout.tsx` explains that `globals.css` maps `--font-sans` to Geist
+via `@theme inline` but nothing applied it, so removing the class silently
+reverts the app to the browser default font. Then decide whether the two
+route-group `min-h-svh` wrappers stay or become redundant; leaving both is
+harmless, so prefer leaving them unless one demonstrably fights the other.
+**Note:** #89 carries the `duplicate` label against #86 — close one as a
+duplicate, same as the #75/#77 pair above.
+**Done when:** a surface rendered outside both route groups fills the viewport —
+add a root `not-found.tsx` and check it, since that is the page most likely to
+expose this in production — and both route groups render unchanged.
+
+### 🟡 Configure prettier-plugin-tailwindcss for Tailwind v4 (issue #87)
+**Why:** `.prettierrc` loads `prettier-plugin-tailwindcss` (0.8.1) with no
+options. Under Tailwind v3 the plugin found the theme through
+`tailwind.config.js`; v4 has no such file — this repo's theme lives in
+`@theme inline` inside `src/app/globals.css` (`CLAUDE.md` §0) — so the plugin
+resolves no theme at all and treats **every theme-derived utility as unknown**.
+Unknown classes sort to the front, which is why class strings across the repo
+lead with tokens instead of layout. Confirmed by probe:
+
+```
+# as configured today
+<div className="bg-background border-input flex p-4 text-sm" />
+# with the stylesheet resolved
+<div className="flex border-input bg-background p-4 text-sm" />
+```
+
+That is not a cosmetic difference — the second is Tailwind's real order (layout,
+then border, then background, then spacing, then type) and the first is the
+plugin failing to recognize `bg-background` and `border-input` as utilities at
+all. `pnpm format:check` is green either way, because the gate only enforces
+*consistency* with whatever the plugin currently believes; it cannot tell that
+the plugin is running blind. **19 files reflow** once the option is set.
+
+Second half of the same fix: `tailwindFunctions`. The plugin already sorts
+strings inside a `className` attribute — including `className={cn("…")}` — but
+a `cva(…)` or a bare `cn(…)` assigned to a variable is left untouched, verified
+by the same probe. `src/components/ui/button.tsx` is the case that matters,
+since every variant string there is a `cva` argument.
+**Do:** add `"tailwindStylesheet": "./src/app/globals.css"` and
+`"tailwindFunctions": ["cn", "cva"]` to `.prettierrc` (confirm the exact option
+names against the installed plugin's docs — 0.8.x renamed some of them), then
+`pnpm format` and commit the reflow. **Land it as its own commit**, separate from
+any behaviour change: it touches 19 files and reviewing a real diff buried in a
+repo-wide reformat is how a regression gets waved through.
+**Done when:** `pnpm format:check` is green with the options set, the probe above
+produces the second ordering, and a `cva` argument in `button.tsx` sorts.
+
+### 🟡 Re-check (or drop) the `minimatch@<9` override — the reported crash does not reproduce (issue #84)
+**Why:** The issue reads as a live bug: the `minimatch@<9: ^10.0.0` override in
+`pnpm-workspace.yaml` forces v3-era consumers onto v10, and v10's CJS entry
+exports a plain object rather than the callable v3 `module.exports`, so any
+consumer doing `require("minimatch")(path, pattern)` gets
+`TypeError: minimatch is not a function`. The mechanism is real —
+`typeof require(".../minimatch/dist/commonjs/index.js")` is `"object"`, not
+`"function"`.
+
+**It does not reproduce on this tree, and the entry exists to record why.** Only
+two runtime packages declare a `<9` range and are therefore forced:
+`@eslint/config-array@0.21.2` and `@eslint/eslintrc@3.3.5`, both at
+`minimatch: ^3.1.5`. Neither calls it as a function. `config-array` reads
+`minimatch.Minimatch` off the namespace (`dist/cjs/index.cjs:224`), which v10
+provides. `eslintrc` looks riskier — `dist/eslintrc.cjs:1043` destructures
+`const { Minimatch } = minimatch__default["default"]` through Rollup's
+`_interopDefaultLegacy` — but that helper checks for a `default` key, v10's CJS
+module has none, so it wraps the namespace as `{ default: ns }`, the
+destructure finds the class, and `new Minimatch()` constructs. Verified by
+running that exact interop against the installed 10.2.5, and `pnpm lint` is
+green. (The other `<9` declarations the grep turns up — `fast-glob`,
+`micromatch`, `dom-accessibility-api` — are devDependencies of those packages
+and are never installed transitively.)
+
+So the override is currently harmless, and the risk is **latent**: a future
+plugin that calls the v3 default export directly would break at lint time with a
+confusing error pointing at a package nobody edited.
+**Do:** keep the override, and add a comment beside it in `pnpm-workspace.yaml`
+recording the two forced consumers and that both were checked — the existing
+comment explains why the override exists but not what it lands on. Re-check
+whenever a new ESLint plugin is added. The override becomes removable once
+nothing declares `<9`; `pnpm why minimatch` answers that in one command.
+**Done when:** the comment names the forced consumers, and the issue is closed as
+not-reproducing with the interop check recorded on it rather than left open as a
+suspected crash.
+
+### 🟡 Use `fileURLToPath()` for the `server-only` alias in `vitest.config.ts` (issue #102)
+**Why:** The alias is built with `new URL("./tests/unit/server-only-stub.ts",
+import.meta.url).pathname`. `.pathname` is a **URL** component, not a filesystem
+path: it stays percent-encoded, and on Windows it keeps a leading slash before
+the drive letter. Under the current checkout
+(`/Users/emilio/vsprojects/realtyworks`) the two forms are identical, which is
+why every test passes — but a clone into a directory containing a space or any
+non-ASCII character resolves to `…/my%20projects/…`, the alias silently fails to
+match, and every `src/server/queries/**` test dies on the real `server-only`
+import instead. Verified:
+
+```
+pathname     : /Users/emilio/my%20projects/realtyworks/tests/unit/server-only-stub.ts
+fileURLToPath: /Users/emilio/my projects/realtyworks/tests/unit/server-only-stub.ts
+win pathname : /C:/dev/app/x.ts
+```
+
+Latent, environment-dependent, and it fails in the worst way — as a confusing
+`server-only` import error rather than a path error — which is why it is worth
+fixing while it costs one line.
+**Do:** `import { fileURLToPath } from "node:url"` and wrap the URL:
+`fileURLToPath(new URL("./tests/unit/server-only-stub.ts", import.meta.url))`.
+**Done when:** `pnpm test` passes from a checkout whose absolute path contains a
+space.
 
 ### 🟡 Coverage visibility (not a gate)
 **Why:** See what's tested without chasing a %.
@@ -910,40 +1052,48 @@ The `supabase` CLI is ✅ installed as a pinned devDependency (2026-07-17).
 branch protection → pgTAP in CI → first migrations merged to `main` →
 **Supabase clients: Phase 2 complete** → **Tailwind + shadcn/ui: Phase 3
 started** → **auth loop + open signup: the read half of the slice** →
-**service-role table grants narrowed**.)*
+**service-role table grants narrowed** → **the staff write path** → **the vendor
+half: Phase 3 complete**, merged to `main` 2026-08-04 as PR #94.)*
 
-1. **Make the `db` job blocking** — the job has reported a run (PR #78), so it
+**Phase 4 (hosted deployment) is the critical path** (`CLAUDE.md` §1/§4). The two
+🟠 items are gates on it, not parallel work — both land on `/auth/confirm`, the
+one endpoint the deploy exposes that mints a session.
+
+1. **Fix the `/auth/confirm` open redirect** (🟠, issue #105). Smallest of the
+   three, and it is the endpoint about to face the internet. Note the second
+   half: the e2e spec that appears to cover it uses `token_hash=bogus`, so
+   verification fails before `next` is ever read — deleting `safeNext()` leaves
+   it green. Fix the spec with the guard.
+2. **Turn on email confirmations** (🟠, issue #93). Hard gate on a public
+   deploy — today anyone can register against an address they don't own and be
+   signed in immediately. Cheaper than it was, since `/auth/confirm` already does
+   the `verifyOtp` exchange, but the tail (email template repointed off
+   `{{ .ConfirmationURL }}`, production SMTP, `inbucket` dropped from the CI
+   `e2e` `-x` list) is exactly what you do not want to discover mid-deploy.
+3. **Phase 4 itself** (🟢 above, issue #36) — Supabase Cloud project + pushed
+   migrations, Vercel project + env vars, PR preview deploys, prod deploys only
+   from `main`, Sentry, and a working Dockerfile so §7 stays mechanical.
+4. **Make the `db` job blocking** — the job has reported a run (PR #78), so it
    is now selectable in Settings → Branches. Two minutes of web UI, and it's
-   what makes the pgTAP assertions below actually gate a merge. While in there:
-   the `e2e` job's display name changed to **"E2E (Playwright auth loop)"**, and
-   branch protection matches required checks **by name** — so if it was ever
-   selected as required, re-select it under the new name or it silently stops
-   gating.
-2. **Finish the Phase 3 vertical slice — the write half.** Still the critical
-   path (`CLAUDE.md` §1: stay on it before the schema-polish items, and trim
-   Phase 5 breadth before trimming this). Auth, the shell, and the work-order
-   list landed 2026-07-27; **next is create work order → assign vendor**, then
-   the vendor's status update + photo upload and the activity trail rendered
-   back. That is where storage, the audit trail, and the vendor column-guard
-   trigger finally get exercised from the app.
-3. **SSO (Google)** — queued as the next PR (🟢 above), and blocked on
-   registering the OAuth app, so start that registration before you need it.
-   Do it after item 2 if the two compete: the slice proves the architecture,
-   SSO only smooths the door.
-4. **Turn on email confirmations** (🟠 High) — not urgent while the app is
-   unlisted, but it is a **hard gate on the Phase 4 public deploy**, and it
-   drags in an `/auth/confirm` route, an email template, and production SMTP.
-   Don't discover that during the deploy.
+   what makes the pgTAP assertions actually gate a merge. While in there: the
+   `e2e` job's display name is **"E2E (Playwright auth loop)"**, and branch
+   protection matches required checks **by name** — so if it was ever selected as
+   required, re-select it under the new name or it silently stops gating.
+5. **SSO (Google)** (🟢 above) — blocked on registering the OAuth app, which is
+   not code, so start that registration before you need it. It smooths the door;
+   it does not block the deploy.
 
-*Ride-along:* the sign-out scope fix (🟡 above) is one argument plus a test
+*Ride-along:* the sign-out scope fix (🟡, #92/#98) is one argument plus a test
 assertion. Fold it into the next change that touches `src/server/actions/auth.ts`
-rather than letting it displace item 2 — it does not deserve its own session, but
-it also should not still be here at the Phase 4 deploy.
+rather than letting it take a session of its own — but it should not still be
+here at the Phase 4 deploy.
 
-The security + CI + commit-hygiene foundation is green and the Phase 2 schema
-is **on `main`**. Apart from the schema-review follow-ups above — all of which
-are now *forward* migrations on a merged baseline — everything after this is
-Phase 3 application work. Note what shifted on 2026-07-27: with the auth loop
-in, the open items are no longer "wire the plumbing" but "write the mutations,"
-and two of them (email confirmations, CAPTCHA) exist only because signup opened.
-Both are the price of that call, not surprises.
+The security + CI + commit-hygiene foundation is green, the Phase 2 schema is on
+`main`, and as of 2026-08-04 so is the whole Phase 3 vertical slice. What shifted
+with it: the open items are no longer "wire the plumbing" or "write the
+mutations" but **"make it real for someone other than you"** — and the two 🟠
+gates (email confirmations, the open redirect) plus CAPTCHA all exist because
+signup is open to the public. They are the price of that call, not surprises.
+The 🟡 bucket is now mostly latent defects and DX debt; none of it should
+displace Phase 4, and the four items added 2026-08-07 (#86/#89, #87, #84, #102)
+are explicitly fill-in work around it.
