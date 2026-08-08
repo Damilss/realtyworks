@@ -53,8 +53,8 @@ Pick them off at your discretion.
 - **pgTAP `db` job** running in CI on `main`/`dev` (issue #72) — not yet a
   *required* check. See ✅.
 - **Branch protection on `main`** enabled 2026-07-20 (web UI). See ✅.
-- `pnpm audit --audit-level=high` **clean** as of 2026-07-21 (fast-uri + sharp
-  cleared — see ✅).
+- `pnpm audit --audit-level=high` **clean** as of 2026-08-07 (fast-uri + sharp
+  cleared 2026-07-21; js-yaml + nanoid cleared 2026-08-07 — see ✅).
 - **UI toolkit installed 2026-07-27** — Tailwind CSS v4 (`@tailwindcss/postcss`,
   no `tailwind.config.js`) + shadcn/ui (zinc base, new-york) scaffolded from the
   registry's zinc tokens (the current `shadcn` CLI dropped the classic base
@@ -92,6 +92,33 @@ Pick them off at your discretion.
 ---
 
 ## ✅ Done (kept for the paper trail)
+
+### ✅ js-yaml + nanoid high advisories cleared (2026-08-07)
+Two highs broke the blocking `pnpm audit` gate in CI: **js-yaml**
+(GHSA-5p4m-2wfm-xmqj — quadratic CPU consumption resolving `!!omap`, patched in
+4.3.1, reached through `cosmiconfig` under commitlint and through
+`@eslint/eslintrc`, 28 paths) and **nanoid** (GHSA-2v37-7h3g-55p8 — custom
+generators loop indefinitely at size zero, patched in 3.3.17, reached through
+`postcss` under next / `@tailwindcss/postcss` / vite, 5 paths).
+
+**Both were stale lockfile pins, so neither took an override.** This is the
+`docs/tooling.md` rule doing its job: the patched version has to fall *outside*
+the parent's declared range to justify forcing it. Here every consumer already
+declared a range that admits the fix — `cosmiconfig` at `js-yaml: ^4.1.0` and
+`@eslint/eslintrc` at `^4.1.1` both admit 4.3.1; `postcss` declares
+`nanoid: ^3.3.16`, which admits 3.3.17 — and the lockfile was simply pinned one
+patch short at 4.3.0 and 3.3.16. `pnpm update js-yaml nanoid --depth Infinity`
+was the whole fix; `pnpm-workspace.yaml` is unchanged. Same shape as the
+2026-07-21 fast-uri clearance, and the opposite of sharp, where next's declared
+`^0.34.5` genuinely had no patched version to move into.
+
+Verified in the lockfile rather than in `node_modules`: `pnpm-lock.yaml` now
+resolves `js-yaml@4.3.1` and `nanoid@3.3.17` and nothing else, which is what the
+CI `--frozen-lockfile` install actually reads. Stale `js-yaml@4.3.0` /
+`nanoid@3.3.16` directories survive under `node_modules/.pnpm` — pnpm does not
+prune the virtual store on update, and they are unreferenced, not live. Full
+gate re-run green afterwards: lint → format:check → typecheck → 165 tests →
+build → audit.
 
 ### ✅ Phase 3 — the vendor half, closing the vertical slice (2026-08-03)
 Magic-link invite → vendor session → status update → photo upload → activity
