@@ -71,3 +71,11 @@ next-env.d.ts
 # editor swap files
 *.swp
 *.swo
+
+# Personal convenience sheet for the local seeded stack (accounts, boot
+# commands, the 127.0.0.1 gotcha). Untracked by request — not because it holds
+# secrets, since every credential in it is already committed in
+# supabase/seed.sql, but because it is per-machine scratch rather than a
+# document the repo owes a reader. The tracked equivalents are seed.sql itself
+# and CONTRIBUTING.md.
+/docs/local-credentials.md
