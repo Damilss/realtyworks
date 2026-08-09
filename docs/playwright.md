@@ -3,17 +3,28 @@
 End-to-end tests for RealtyWorks. Playwright drives a real browser against the
 running app to verify user-facing behavior.
 
-**Current scope (since 2026-07-27):** the boot smoke test, plus
-`tests/e2e/auth.spec.ts` — 8 specs driving the Phase 3 auth loop against a
-**real, seeded Supabase stack**. The rest of the vertical slice (create work
-order → assign vendor → status + photo → activity trail) joins as it is built —
-see `CLAUDE.md` §4.
+**Current scope (complete since 2026-08-03):** the boot smoke test plus the
+whole Phase 3 vertical slice — 23 specs across four files, all against a
+**real, seeded Supabase stack**:
+
+| File | Specs | Covers |
+| --- | --- | --- |
+| `smoke.spec.ts` | 1 | the app boots and serves a page |
+| `auth.spec.ts` | 8 | the auth loop: sign in as each seeded role, self-register, wrong password, rejected signup keeps its fields, signed-out redirect, root redirect, sign out |
+| `work-orders.spec.ts` | 7 | the staff write path: create, assign, note (and the blank-note refusal), assignment making a job visible to its vendor, select state after a failed submit, a malformed id 404, a vendor refused the create form |
+| `vendor-loop.spec.ts` | 7 | the vendor half: invite → redeem a real magic link in a second browser context → status + photo; single use, revocation on reassignment, the off-site redirect refusal, and the two un-invitable vendor cases |
 
 The suite's point is not "a cookie was set." It is that the *same* URL renders
-different rows for different people — the manager sees all five seeded work
-orders, the assigned vendor sees three, a self-registered stranger sees none.
-That is RLS observed through the product, and it is only meaningful against a
-real database.
+different rows for different people — the manager sees every seeded work order,
+the assigned vendor sees only theirs, a self-registered stranger sees none. That
+is RLS observed through the product, and it is only meaningful against a real
+database.
+
+**Assertions are by identity, never by row count.** The config runs fully
+parallel against one shared database and most specs write to it, so "every work
+order" is the seed plus whatever another spec has committed by then — and a CI
+retry re-runs against the rows the failed attempt left behind. Naming the rows
+is also the stronger claim: a count of five never said it was the right five.
 
 ---
 
@@ -25,18 +36,28 @@ real database.
   workflow, none of which we want.
 - **A running local Supabase stack, freshly reset**
   (`pnpm exec supabase start` → `pnpm exec supabase db reset`). The specs sign
-  in as the seeded users from `supabase/seed.sql` and assert exact row counts,
-  so they need the known-good state, not merely a migrated database.
-- A **`.env.local`** with the two `NEXT_PUBLIC_SUPABASE_*` variables, pointing
-  at that stack. Playwright boots the app itself (see below), and `src/proxy.ts`
-  refreshes the Supabase session on every request — without the config the app
-  500s on every route and the run fails on the `webServer` timeout rather than
-  on an assertion. Setup is in the [README](../README.md#install--run).
+  in as the seeded users from `supabase/seed.sql` and assert against the seeded
+  fixtures by name, so they need the known-good state, not merely a migrated
+  database.
+- A **`.env.local`** pointing at that stack. Playwright boots the app itself
+  (see below), and `src/proxy.ts` refreshes the Supabase session on every
+  request — without the config the app 500s on every route and the run fails on
+  the `webServer` timeout rather than on an assertion. Setup is in the
+  [README](../README.md#install--run).
   **Placeholder values no longer work.** They used to: with no session cookie
   the refresh short-circuits before any network call, so a smoke test that never
   logged in was happy with fiction. Most specs here sign in, and fiction fails
   at the first assertion with a connection error that reads like an application
   bug.
+- **`SUPABASE_SECRET_KEY` in that same file**, not just the two
+  `NEXT_PUBLIC_SUPABASE_*` values. `vendor-loop.spec.ts` invites a vendor and
+  uploads a photo, and both are service-role writes through
+  `src/lib/supabase/admin.ts`. Without the key those actions return "Vendor
+  invites are not configured on this server." / "Uploads are not configured on
+  this server." — so that one suite goes red while everything else stays green,
+  which reads like a vendor bug rather than a missing variable. The README's
+  `supabase status` redirect writes it for you (renaming the CLI's
+  `SECRET_KEY`), exactly as the CI job does.
 
 ## Installation
 
@@ -81,33 +102,44 @@ dev-only assets.
 
 ### Re-running locally
 
-`auth.spec.ts` has one spec that **writes**: the self-registration case creates
-a real auth user. The address is derived from the worker index rather than
-randomized — a fresh address every run would pass forever while quietly filling
-`auth.users` — so a second run against the same database fails with "account
-already exists." Run `supabase db reset` before each pass. CI gets this for
-free; it resets immediately before Playwright starts.
+**Most specs write, so `supabase db reset` before each pass is not optional.**
+`auth.spec.ts` self-registers, every spec in `work-orders.spec.ts` inserts, and
+every spec in `vendor-loop.spec.ts` creates a vendor row and an `auth.users`
+account that nothing deletes. Those addresses are derived from the worker index,
+the retry count, and a per-spec label rather than randomized — a fresh address
+every run would pass forever while quietly filling `auth.users` — so a second
+run against the same database fails with "account already exists," or links an
+existing account to a second vendor row and trips the `vendors_profile_id_key`
+partial unique index. CI gets this for free; it resets immediately before
+Playwright starts.
 
 Useful variants:
 
 ```bash
-pnpm exec playwright test --ui              # interactive UI mode (great for debugging)
-pnpm exec playwright test --headed          # watch the real browser
-pnpm exec playwright test --debug           # step through with the inspector
-pnpm exec playwright test smoke             # filter by test file name/path
-pnpm exec playwright test -g "home page"    # filter by test title (--grep)
-pnpm exec playwright show-report            # open the HTML report from the last run
+pnpm exec playwright test --ui               # interactive UI mode (great for debugging)
+pnpm exec playwright test --headed           # watch the real browser
+pnpm exec playwright test --debug            # step through with the inspector
+pnpm exec playwright test vendor-loop        # filter by test file name/path
+pnpm exec playwright test -g "magic link"    # filter by test title (--grep)
+pnpm exec playwright show-report             # open the HTML report from the last run
 ```
 
 ## Where things live
 
 ```
-playwright.config.ts        # config: testDir, baseURL, browser, webServer auto-boot
-tests/e2e/                  # E2E specs (*.spec.ts)
-tests/e2e/smoke.spec.ts     # the app boots + serves a page
-tests/e2e/auth.spec.ts      # the auth loop: sign in as each seeded role, self-register,
-                            # wrong password, rejected signup keeps its fields,
-                            # signed-out redirect, root redirect, sign out
+playwright.config.ts           # config: testDir, baseURL, browser, webServer auto-boot
+tests/e2e/                     # E2E specs (*.spec.ts)
+tests/e2e/smoke.spec.ts        # the app boots + serves a page
+tests/e2e/auth.spec.ts         # the auth loop: sign in as each seeded role, self-register,
+                               # wrong password, rejected signup keeps its fields,
+                               # signed-out redirect, root redirect, sign out
+tests/e2e/work-orders.spec.ts  # the staff write path: create, assign, note (+ the
+                               # blank-note refusal), a vendor seeing a job once
+                               # assigned, select state after a failed submit,
+                               # bad-id 404, a vendor refused the create form
+tests/e2e/vendor-loop.spec.ts  # the vendor half: invite, redeem the link in a
+                               # second browser context, status + photo, single
+                               # use, revocation on reassign, off-site redirect
 ```
 
 Test runners stay separated by directory: **Vitest** collects `src/**` and
@@ -142,8 +174,12 @@ test("home page loads", async ({ page }) => {
   stack that isn't there. Check that `supabase status` reports running services
   and that `.env.local` matches its output; a stale URL or key from a previous
   stack looks exactly like an app bug.
-- **Row counts off by one, or "account already exists"** — the database has
+- **Missing seeded rows, or "account already exists"** — the database has
   drifted from the seed. `pnpm exec supabase db reset`, then re-run.
+- **Only `vendor-loop.spec.ts` fails, on "not configured on this server"** —
+  `SUPABASE_SECRET_KEY` is missing from `.env.local`. The invite and the upload
+  are service-role writes, so they are the only things that notice; every other
+  spec passes without the key.
 - **Wrong Node version** — `nvm use` to match `.nvmrc` (Node 24), the same
   version CI uses.
 
@@ -152,7 +188,10 @@ test("home page loads", async ({ page }) => {
 The suite runs in CI as a dedicated `e2e` job in `.github/workflows/ci.yml`
 ("E2E (Playwright auth loop)") — parallel to the `verify` gate
 (`lint → format:check → typecheck → test → build → audit`, Vitest only), on the
-same triggers (PRs + pushes to `main`/`dev`). The job installs deps
+same triggers (PRs + pushes to `main`/`dev`). The job name predates the rest of
+the slice landing in it and is kept deliberately: branch protection matches
+required checks **by name**, so a rename silently stops an existing rule from
+gating. The job installs deps
 (`--frozen-lockfile`) and Chromium (`playwright install --with-deps chromium`,
 cached across runs on `~/.cache/ms-playwright`), then — since the auth loop
 landed — stands up a real database before testing:
@@ -160,7 +199,9 @@ landed — stands up a real database before testing:
 ```
 supabase start -x studio,imgproxy,edge-runtime,functions,analytics,vector,inbucket
 supabase db reset
-supabase status -o env … | grep '^NEXT_PUBLIC_' > .env.local
+supabase status -o env … \
+  | grep -E '^(NEXT_PUBLIC_|SECRET_KEY=)' \
+  | sed 's/^SECRET_KEY=/SUPABASE_SECRET_KEY=/' > .env.local
 pnpm run test:e2e
 ```
 
@@ -178,12 +219,19 @@ Four things about that setup are load-bearing:
   The failure looks like a network error in the application, not a
   misconfigured job — which is the expensive kind of wrong.
 - **`db reset` is not redundant here** (unlike in the `db` job, where it is kept
-  as an assertion). The specs assert exact row counts against the seeded
-  fixtures, and one of them creates a user, so the run needs the known-good
-  state.
-- **The `grep` is load-bearing.** `supabase status -o env` also prints
-  `SERVICE_ROLE_KEY`, `SECRET_KEY`, and `JWT_SECRET`. None of those belong in a
-  file `next build` inlines into the browser bundle.
+  as an assertion). The specs assert against the seeded fixtures by name and
+  most of them write — including `auth.users` rows nothing cleans up — so the
+  run needs the known-good state.
+- **The `grep` is load-bearing, and it is an allowlist rather than a filter.**
+  `supabase status -o env` also prints `SERVICE_ROLE_KEY` and `JWT_SECRET`, and
+  neither belongs in a file `next build` reads. `SECRET_KEY` *is* admitted, and
+  renamed by the `sed` to the `SUPABASE_SECRET_KEY` that
+  `src/lib/supabase/admin.ts` expects — the vendor invite and the
+  attachment-metadata insert are service-role writes with no client grant. It is
+  safe there only because it carries no `NEXT_PUBLIC_` prefix, so it is never
+  inlined into the bundle. The rename is a `sed` rather than a third
+  `--override-name` because `supabase status --help` documents no override path
+  for that key, and a wrong one emits nothing at all instead of erroring.
 - **The `-x` list mirrors the `db` job**, with the same rule: never exclude `db`
   or `storage`. `inbucket` is excluded only because
   `[auth.email] enable_confirmations` is `false` — turning confirmations on
@@ -194,5 +242,6 @@ Four things about that setup are load-bearing:
 the `db` job. Cold image pulls mean this is no longer a fast job — details in
 [tooling.md](tooling.md).
 
-The remaining vertical-slice flows (create → assign → status + photo → activity
-trail) join as they are built. See `CLAUDE.md` §4–§5.
+The vertical slice is fully covered as of 2026-08-03. What joins next is Phase 5
+breadth — new pages get specs the same way, against the same seeded stack. See
+`CLAUDE.md` §4–§5.

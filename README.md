@@ -6,12 +6,12 @@ Modern solutions for property management.
 landlords to run real-estate maintenance and repair operations end-to-end:
 work orders, vendor coordination, documentation, and audit-ready records.
 
-> **Status:** MVP / in active development — Phases 1–2 complete;
-> **Phase 3 (the vertical slice) is in progress** (as of 2026-07-27). The
-> Tailwind + shadcn/ui toolkit and the auth loop (login → signup →
-> session-gated shell → work-order list) have landed; the work-order half —
-> create, assign a vendor, vendor status update + photo, activity trail — is
-> the current focus.
+> **Status:** MVP / in active development — **Phases 1–3 complete** as of
+> 2026-08-03 (merged to `main` 2026-08-04). The vertical slice runs end to end:
+> a manager signs in, creates a work order, assigns a vendor and mints a
+> magic-link invite; the vendor opens the link, gets a real session, updates
+> status and uploads a photo; the activity trail records all of it.
+> **Phase 4 (hosted deployment) is next and is the critical path.**
 > **License:** Proprietary (see [`LICENSE.md`](LICENSE.md))
 
 ---
@@ -61,7 +61,7 @@ reporting above.
 | Package manager | **pnpm** `11.13.1` (pinned via `packageManager`) |
 | Runtime | Node **24** (pinned in `.nvmrc`, matched by CI) |
 | Unit tests | Vitest |
-| E2E tests | Playwright (auth-loop suite runs in CI against a real seeded stack — see [docs/playwright.md](docs/playwright.md)) |
+| E2E tests | Playwright (the whole vertical slice runs in CI against a real seeded stack — see [docs/playwright.md](docs/playwright.md)) |
 | Database | Supabase (Postgres 17, Auth, Storage, RLS) — local stack via the pinned `supabase` CLI; schema lives in `supabase/migrations/` (RLS ships with each table), pgTAP tests in `supabase/tests/` |
 | Lint / format | ESLint (`next/core-web-vitals` + TypeScript) · Prettier |
 | Git hygiene | Husky + lint-staged · commitlint (conventional commits) · gitleaks |
@@ -70,15 +70,22 @@ Server-side auth is `@supabase/ssr`: browser and per-request server clients in
 `src/lib/supabase/`, plus session refresh in `src/proxy.ts` (Next.js 16 renamed
 the root `middleware` convention to `proxy` — it is **not** `middleware.ts`).
 Both clients use the publishable key and the caller's session, so RLS applies
-identically on the server and in the browser; neither is privileged.
+identically on the server and in the browser; neither is privileged. There is
+one privileged client, `src/lib/supabase/admin.ts`, and it exists only for the
+two writes that have no client grant by design — attachment metadata and
+`vendors.profile_id` — plus `auth.admin` for the vendor invite. It reads
+`SUPABASE_SECRET_KEY` lazily, bypasses RLS, and is always reached *after* the
+caller's access has been established with their own session.
 
-Tailwind CSS + shadcn/ui (zinc) and the auth loop both landed 2026-07-27
-(Phase 3): zod schemas in `src/schemas/`, the session data-access layer and
-server actions in `src/server/`, and the `(auth)` / `(dashboard)` route groups.
-Planned for a later phase (decided, not yet installed): Sentry (Phase 4). There
-is **no separate backend service** — backend logic
-lives in Postgres (RLS/constraints), Next.js server actions/route handlers, and
-Supabase Edge Functions. See `CLAUDE.md` §2.
+Phase 3 landed in three parts: Tailwind CSS + shadcn/ui (zinc) and the auth loop
+on 2026-07-27, the staff write path on 2026-08-02, and the vendor half on
+2026-08-03 — zod schemas in `src/schemas/`, the server-only data-access layer
+and server actions in `src/server/`, the `(auth)` / `(dashboard)` route groups,
+and `src/app/auth/confirm/route.ts`, which redeems a magic link into cookie
+session. Planned for a later phase (decided, not yet installed): Sentry
+(Phase 4). There is **no separate backend service** — backend logic lives in
+Postgres (RLS/constraints), Next.js server actions/route handlers, and Supabase
+Edge Functions. See `CLAUDE.md` §2.
 
 ---
 
@@ -122,19 +129,27 @@ pnpm exec supabase start      # boot the local stack (first run pulls images)
 pnpm exec supabase status -o env \
   --override-name api.url=NEXT_PUBLIC_SUPABASE_URL \
   --override-name auth.publishable_key=NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY \
-  | grep '^NEXT_PUBLIC_' > .env.local
+  | grep -E '^(NEXT_PUBLIC_|SECRET_KEY=)' \
+  | sed 's/^SECRET_KEY=/SUPABASE_SECRET_KEY=/' > .env.local
 ```
 
-That writes exactly the two variables the app reads. **The `grep` is
-load-bearing:** `-o env` also prints `SERVICE_ROLE_KEY`, `SECRET_KEY`,
-`JWT_SECRET`, and `DB_URL`, and none of those belong in the app's env file —
-only the two `NEXT_PUBLIC_` values are safe to ship to the browser. The CLI
-quotes its values; Next.js strips the quotes when it loads the file.
+That writes exactly the three variables the app reads — the same command the CI
+`e2e` job runs. **The `grep` is load-bearing, and it is an allowlist rather than
+a filter:** `-o env` also prints `SERVICE_ROLE_KEY`, `JWT_SECRET`, and `DB_URL`,
+none of which belong in the app's env file. The CLI quotes its values; Next.js
+strips the quotes when it loads the file.
+
+The `sed` renames `SECRET_KEY` to the `SUPABASE_SECRET_KEY` that
+`src/lib/supabase/admin.ts` reads (`supabase status` documents no override for
+this one). **That variable is deliberately not `NEXT_PUBLIC_`** — it bypasses
+RLS completely, and `next build` inlines every `NEXT_PUBLIC_*` value into the
+browser bundle. The app boots and serves without it; only the vendor invite and
+the attachment upload need it, so they are what fails if it is missing.
 
 > The redirect **overwrites** `.env.local`. If you've customized it, back it up
 > first — or take the manual route instead: `cp .env.example .env.local`, then
-> fill in the two values from `pnpm exec supabase status`.
-> [`.env.example`](.env.example) is committed and documents both.
+> fill in the three values from `pnpm exec supabase status`.
+> [`.env.example`](.env.example) is committed and documents all of them.
 
 Then run the app:
 
@@ -164,7 +179,10 @@ pnpm exec supabase stop       # shut the stack down
 Seeded logins (landlord, manager, vendor) come from `supabase/seed.sql`, which
 `db reset` loads — `<role>@realtyworks.test` / `password123`. Signing in as each
 is the fastest way to see RLS working: the manager sees all five seeded work
-orders, the vendor only the three assigned to them.
+orders, the vendor only the three assigned to them. To walk the rest of the
+slice, sign in as the manager, open a work order, assign a vendor, press
+**Create sign-in link**, **Copy** it, and open it in a private window — that is
+the vendor's whole login path (`docs/vendor-access.md`).
 
 ### Additional checkouts (git worktrees)
 
@@ -221,12 +239,14 @@ pnpm test:e2e                          # E2E (Playwright boots the dev server it
 
 `pnpm test:e2e` boots the app via `pnpm dev`, so it needs the same `.env.local`
 as the app — without it every request 500s and the run fails on the `webServer`
-timeout, not on an assertion. Since the auth loop landed, the specs sign in as
-the seeded users and assert exact row counts, so the variables must point at a
-**running, freshly reset** stack; placeholders no longer work. The signup spec
-creates a real auth user, so a second run without `db reset` fails on "account
-already exists". CI's `e2e` job does exactly this — boots a stack, resets it,
-writes `.env.local` from `supabase status` — see
+timeout, not on an assertion. The specs sign in as the seeded users and assert
+against the seeded fixtures **by identity, not by row count**, so the variables
+must point at a **running, freshly reset** stack; placeholders no longer work.
+The vendor-loop specs also need `SUPABASE_SECRET_KEY`, since inviting a vendor
+is a service-role write. Most specs write, and the signup and invite paths
+create real `auth.users` rows that nothing cleans up, so a second run without
+`db reset` fails on "account already exists". CI's `e2e` job does exactly this —
+boots a stack, resets it, writes `.env.local` from `supabase status` — see
 [docs/playwright.md](docs/playwright.md).
 
 Full detail — what each runner collects and how they stay out of each other's
@@ -253,14 +273,17 @@ way — is in [Testing](#testing) below and [docs/playwright.md](docs/playwright
   `tests/unit/**/*.{test,spec}.{ts,tsx}` only. Run one file with
   `pnpm exec vitest run src/path/to/file.test.ts`, or filter by name with
   `pnpm exec vitest run -t "name of test"`.
-- **E2E (Playwright)** — owns `tests/e2e/`: the boot smoke test plus
-  `auth.spec.ts`, which drives the real auth loop (sign in as each seeded role,
-  self-register, wrong password, signed-out redirect, sign out). Requires a
-  one-time browser download: `pnpm exec playwright install chromium`, and a
-  seeded local stack. Both specs run in CI (the parallel `e2e` job in
-  `.github/workflows/ci.yml`), which boots its own Supabase stack — so CI
-  proves the app runs *and* that RLS holds through a real session, not just
-  that it compiles. Full guide: [docs/playwright.md](docs/playwright.md).
+- **E2E (Playwright)** — owns `tests/e2e/`: the boot smoke test plus the three
+  slice suites — `auth.spec.ts` (sign in as each seeded role, self-register,
+  wrong password, signed-out redirect, sign out), `work-orders.spec.ts` (create,
+  assign, note, the 404 and vendor-refusal paths), and `vendor-loop.spec.ts`
+  (invite → redeem a real magic link in a second browser context → status +
+  photo, plus single-use and revocation). Requires a one-time browser download:
+  `pnpm exec playwright install chromium`, and a seeded local stack. All of them
+  run in CI (the parallel `e2e` job in `.github/workflows/ci.yml`), which boots
+  its own Supabase stack — so CI proves the app runs *and* that RLS holds
+  through a real session, not just that it compiles. Full guide:
+  [docs/playwright.md](docs/playwright.md).
 
 The two runners never collect each other's files.
 
@@ -293,7 +316,10 @@ unit tests → build → audit**; every check step after the first uses
 `if: ${{ !cancelled() }}`, so a single run reports *every* failure rather than
 stopping at the first. pnpm's store and the Next.js build cache are cached
 between runs. `e2e` boots a local Supabase stack, resets it to the seeded state,
-then boots the app and runs the Playwright auth-loop specs against it. `db`
+then boots the app and runs the Playwright vertical-slice specs against it —
+auth loop, staff write path, and vendor loop. (The job is still *named* "E2E
+(Playwright auth loop)" from when that was all it ran; renaming it would break
+any branch-protection rule that matches the check by name.) `db`
 boots the same stack and runs the pgTAP suite from `supabase/tests/`, so an
 RLS or write-guard regression fails CI rather than merging green. Both pull
 Docker images cold, so they, not `verify`, set the wall-clock. Details:
@@ -338,15 +364,17 @@ realtyworks/
 ├── src/
 │   ├── app/                # Next.js App Router · globals.css carries the shadcn zinc theme
 │   │   ├── (auth)/         # login · signup (signed-out route group)
-│   │   └── (dashboard)/    # authed shell + /dashboard work-order list
+│   │   ├── (dashboard)/    # authed shell · /dashboard · /work-orders/{new,[id]} · /vendors
+│   │   └── auth/confirm/   # route handler: redeems a magic link → session cookies
 │   ├── components/
 │   │   ├── features/       # composed, domain-specific components (work-orders/)
-│   │   └── ui/             # shadcn/ui primitives (button, input, label, card, table, badge)
+│   │   └── ui/             # shadcn/ui primitives (button, input, label, card, table, badge, textarea, native-select, form-feedback)
 │   ├── lib/
-│   │   ├── supabase/       # client.ts (browser) · server.ts (per-request) · proxy.ts (session refresh) · env.ts (validated config)
+│   │   ├── supabase/       # client.ts (browser) · server.ts (per-request) · admin.ts (PRIVILEGED, bypasses RLS) · proxy.ts (session refresh) · env.ts (validated config)
+│   │   ├── attachments.ts  # upload contract shared by browser + server
 │   │   ├── utils.ts        # cn() class-name helper (clsx + tailwind-merge)
 │   │   └── database.types.ts   # GENERATED from the schema — never hand-edited
-│   ├── schemas/            # zod schemas shared by client + server (auth.ts)
+│   ├── schemas/            # zod schemas shared by client + server (auth · work-order · vendor)
 │   ├── server/             # actions/ (server actions) · queries/ (server-only DAL)
 │   └── proxy.ts            # Next.js 16 root convention (renamed from middleware.ts)
 ├── supabase/
@@ -356,7 +384,7 @@ realtyworks/
 │   └── config.toml
 ├── tests/
 │   ├── unit/               # Vitest (DOM harness)
-│   └── e2e/                # Playwright specs (smoke.spec.ts · auth.spec.ts)
+│   └── e2e/                # Playwright specs (smoke · auth · work-orders · vendor-loop)
 ├── .env.example            # committed template — documents every required var
 ├── .gitleaks.toml          # secret-scanning config
 ├── .nvmrc                  # Node 24
@@ -370,8 +398,10 @@ realtyworks/
 
 The rest of the target structure (`src/app/api/`, `supabase/functions/`) is
 specified in `CLAUDE.md` §3 and gets created when something needs it — not
-speculatively. (`src/components/`, `src/schemas/`, and `src/server/` all
-arrived with the UI toolkit and auth loop on 2026-07-27.)
+speculatively. Edge functions are Phase 5 (SMS), and the only route handler that
+exists lives at `src/app/auth/confirm/route.ts` rather than under `api/`,
+because it is an auth endpoint. (`src/components/`, `src/schemas/`, and
+`src/server/` all arrived with the UI toolkit and auth loop on 2026-07-27.)
 
 `src/server/queries/` is server-only and says so in code (`import
 "server-only"`, which fails the build if client code imports it).
@@ -388,7 +418,9 @@ server actions, and `"use server"` keeps the implementation out of the bundle.
 | [`docs/tooling.md`](docs/tooling.md) | CI, security scanning, git hooks — how it works, decisions, known issues |
 | [`docs/playwright.md`](docs/playwright.md) | E2E testing: install, run, troubleshoot |
 | [`docs/backlog.md`](docs/backlog.md) | Ranked foundation & development backlog (issue-ready blocks) |
+| [`docs/vendor-access.md`](docs/vendor-access.md) | How vendors get in: magic links, not accounts — and what was settled shipping it |
 | [`docs/schema/schema-brainstorming.md`](docs/schema/schema-brainstorming.md) | Schema design process: workflows → tables → security/RLS → Zod (Phase 2+) |
+| [`docs/schema/my_schema_writeup.md`](docs/schema/my_schema_writeup.md) | The schema as built: workflows → design decisions → the open-signup reversal |
 | [`docs/pwa.md`](docs/pwa.md) | PWA: per-platform install/push reality (Android vs iOS/iPadOS), offline scope (Phase 5) |
 | [`docs/commit-messages.md`](docs/commit-messages.md) | Commit message cheat sheet — format + allowed types (commitlint) |
 | [`docs/dependency-version-management.md`](docs/dependency-version-management.md) | Field manual for dependency/version debugging |
@@ -402,8 +434,8 @@ server actions, and `"use server"` keeps the implementation out of the bundle.
 | --- | --- | --- |
 | 1 — Foundations | Tooling, CI, hooks, security scanning on a near-empty app | ✅ Done |
 | 2 — Supabase | Local stack, migrations (RLS from day one), seed data, `@supabase/ssr` clients | ✅ Done — schema, RLS, seed, and pgTAP suite merged to `main` 2026-07-21; clients + session-refresh proxy landed on top |
-| 3 — Vertical slice | One full path: manager → work order → vendor → activity log | 🚧 In progress — UI toolkit + auth loop (login/signup, session-gated shell, work-order list, Playwright coverage) landed 2026-07-27; create/assign work orders next |
-| 4 — Hosted deploy | Vercel + Supabase Cloud, PR previews, Sentry | Planned |
+| 3 — Vertical slice | One full path: manager → work order → vendor → activity log | ✅ Done — in three parts: UI toolkit + auth loop 2026-07-27, staff write path 2026-08-02, vendor half 2026-08-03; merged to `main` 2026-08-04 (PR #94) |
+| 4 — Hosted deploy | Vercel + Supabase Cloud, PR previews, Sentry | 🚧 Next — the critical path |
 | 5 — Breadth | More features, minimal reports, SMS/notifications, PWA install layer | Planned |
 | 6 — Accounting & rent tracking | Rent roll, ledger, cost rollups — server-side, append-only | Late stage |
 | 7 — Self-host (optional) | Docker Compose migration — kept mechanical by design | Eventual |

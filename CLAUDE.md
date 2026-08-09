@@ -58,11 +58,18 @@ runs lint → format:check → typecheck → test → build → audit. Each chec
 after the first uses `if: !cancelled()` so one run reports *every* failure, not
 just the first. A parallel `e2e` job boots a local Supabase stack
 (`supabase start -x …` → `db reset` → write `.env.local` from `supabase
-status`) and runs the Playwright auth-loop specs against it (Chromium only,
-HTML report uploaded as an artifact) — proving the app *runs* and that RLS
-holds through a real session, not just that it compiles. That job sets no
+status`) and runs the whole Playwright vertical slice against it — auth loop,
+staff write path, vendor loop (Chromium only, HTML report uploaded as an
+artifact) — proving the app *runs* and that RLS holds through a real session,
+not just that it compiles. (The job's *name* is still "E2E (Playwright auth
+loop)"; branch protection matches required checks by name, so renaming it is a
+deliberate change, not a tidy-up.) That job sets no
 `NEXT_PUBLIC_SUPABASE_*` of its own on purpose: process env outranks
 `.env.local`, so a leftover placeholder would silently outrank the real values.
+Its env-writing step is an **allowlist**, not a filter: it admits the CLI's
+`SECRET_KEY` and renames it to `SUPABASE_SECRET_KEY` (the invite and the
+attachment insert are service-role writes), while `SERVICE_ROLE_KEY` and
+`JWT_SECRET` never reach a file `next build` reads.
 A parallel `db` job boots the same stack and runs the pgTAP suite
 (`supabase test db`), so an RLS or write-guard regression fails CI instead of
 merging green.
@@ -90,8 +97,11 @@ change from here is a *new* forward migration, never an edit to a merged one.
 Parts of §3's *application* tree are still the **target**, not yet present.
 Verify before assuming they exist:
 
-- **In place — schema layer (on `main`):** `supabase/` with 9 migrations (all 7 tables,
-  RLS + grants + triggers in the same file as each table), `seed.sql`
+- **In place — schema layer (on `main`):** `supabase/` with 14 migrations — the
+  9 that built the schema (all 7 tables, RLS + grants + triggers in the same
+  file as each table) plus 5 forward fixes since the 2026-07-21 baseline (the
+  last-landlord delete guard and the signup-phone metadata fix, two narrowing
+  `service_role`, and the non-blank-note constraint) — `seed.sql`
   (3 login-able users, sample properties/units/vendor, work orders in all 5
   statuses — `pnpm exec supabase db reset` is the one-command known-good
   state), `supabase/tests/` (pgTAP RLS/guard suite), and the generated
@@ -149,7 +159,8 @@ Verify before assuming they exist:
   `defaultValue` (fixed 2026-08-01) — React resets an uncontrolled form after
   *every* function action, error paths included, so anything not echoed is
   retyped after a failed submit. Passwords are never echoed; that one field
-  clears. Follow this in the Phase 3 write-half forms. Self-service signup
+  clears. It holds for every form added since, and for the next one.
+  Self-service signup
   opened in the same change; the fail-safe is that a self-registration is a `vendor` with no
   `vendors` row, so `current_vendor_id()` is NULL and every vendor-scoped
   policy arm returns nothing (pinned by

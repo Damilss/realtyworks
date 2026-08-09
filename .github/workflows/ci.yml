@@ -138,8 +138,9 @@ jobs:
       - name: Start Supabase stack
         run: pnpm exec supabase start -x studio,imgproxy,edge-runtime,functions,analytics,vector,inbucket
 
-      # The specs assert exact row counts against the seeded fixtures, so they
-      # need the known-good state, not merely a migrated database.
+      # The specs assert against the seeded fixtures by name, and most of them
+      # write — including auth.users rows nothing cleans up — so they need the
+      # known-good state, not merely a migrated database.
       - name: Reset to migrations + seed
         run: pnpm exec supabase db reset
 

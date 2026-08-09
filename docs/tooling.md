@@ -13,7 +13,7 @@ the [README](../README.md#quality-gates); this is the detail.
 | commitlint | `.husky/commit-msg` | every commit |
 | Lint → format → typecheck → test → build | `.github/workflows/ci.yml` | PRs + pushes to `main`/`dev` |
 | `pnpm audit` dependency gate | `.github/workflows/ci.yml` | PRs + pushes to `main`/`dev` |
-| Playwright E2E auth loop (boots its own Supabase stack) | `.github/workflows/ci.yml` | PRs + pushes to `main`/`dev` |
+| Playwright E2E vertical slice (boots its own Supabase stack) | `.github/workflows/ci.yml` | PRs + pushes to `main`/`dev` |
 | pgTAP RLS/write-guard suite (`db` job) | `.github/workflows/ci.yml` | PRs + pushes to `main`/`dev` |
 | gitleaks full-history scan | `.github/workflows/security.yml` | PRs + pushes to `main`/`dev` |
 | Semgrep SAST scan | `.github/workflows/security.yml` | PRs + pushes to `main`/`dev` |
@@ -123,13 +123,19 @@ a `playwright-report` artifact (`if: !cancelled()`) for debugging.
 
 **Since the Phase 3 auth loop landed (2026-07-27) this job boots a real
 Supabase stack** — `supabase start -x …` → `db reset` → write `.env.local` from
-`supabase status -o env | grep '^NEXT_PUBLIC_'` — and then boots the app
-(`pnpm dev`, via `playwright.config.ts`'s `webServer`) and runs
-`tests/e2e/smoke.spec.ts` + `tests/e2e/auth.spec.ts` against it. So CI now
-proves the app *runs*, authenticates, and enforces RLS through a real session —
-not just that `next build` compiles it.
+`supabase status -o env` — and then boots the app (`pnpm dev`, via
+`playwright.config.ts`'s `webServer`) and runs every spec in `tests/e2e/`
+against it: smoke, `auth.spec.ts`, and — since the slice closed on
+2026-08-03 — `work-orders.spec.ts` and `vendor-loop.spec.ts`. So CI now proves
+the app *runs*, authenticates, and enforces RLS through a real session — not
+just that `next build` compiles it.
 
-Two consequences worth knowing before editing the job:
+The job is still **named** "E2E (Playwright auth loop)" even though it now runs
+the whole slice. That is deliberate: branch protection matches required checks
+by name, so renaming it silently drops any rule selecting the old name. Rename
+it only alongside re-selecting the check in Settings → Branches.
+
+Three consequences worth knowing before editing the job:
 
 - **It deliberately sets no `NEXT_PUBLIC_SUPABASE_*` env.** It used to set
   placeholders, which were sufficient while nothing logged in (with no session
@@ -141,6 +147,16 @@ Two consequences worth knowing before editing the job:
   placeholders** and should: `next build` never executes the proxy, and the
   values exist there only so `next.config.ts` can prove the build environment
   is complete.
+- **Its env-writing `grep` is an allowlist, not a filter.** `supabase status -o
+  env` prints `SERVICE_ROLE_KEY` and `JWT_SECRET` too, and neither belongs in a
+  file `next build` reads. `SECRET_KEY` *is* admitted deliberately and renamed
+  by a `sed` to `SUPABASE_SECRET_KEY` (2026-08-03): the vendor invite and the
+  attachment-metadata insert are service-role writes with no client grant, so
+  `vendor-loop.spec.ts` cannot run without it. It is safe there only because it
+  has no `NEXT_PUBLIC_` prefix and is therefore never inlined into the bundle —
+  and it is a `sed` rather than a third `--override-name` because the CLI
+  documents no override for that key, and a wrong one emits nothing rather than
+  failing.
 - **It is no longer the fast job.** It carries the same cold Docker pulls and
   the same `timeout-minutes: 20` backstop as `db`, for the same reason.
 
@@ -521,6 +537,17 @@ worth adding (`actionlint` doesn't understand the issue-forms schema anyway).
 Running record of problems hit and calls made, newest first. (PR numbers are
 the paper trail; see git history for the full diffs.)
 
+- **2026-08 · the `e2e` job carries a real secret now** — closing the vertical
+  slice put two service-role writes in the app (the vendor invite and the
+  attachment-metadata insert), so the job's `.env.local` step gained
+  `SECRET_KEY`, renamed to `SUPABASE_SECRET_KEY` by a `sed`. The grep stayed an
+  **allowlist** rather than becoming a filter, which is the whole safety
+  argument: `SERVICE_ROLE_KEY` and `JWT_SECRET` are still excluded by not being
+  named, so the failure mode of a future CLI field is "missing", not "leaked".
+  The same command is what the README and `CONTRIBUTING.md` now tell you to run
+  locally, so there is one recipe rather than two that drift. Related: the job
+  runs the whole slice but keeps the name "E2E (Playwright auth loop)", because
+  branch protection matches required checks by name.
 - **2026-07 · `e2e` job placeholders removed, not updated** — the job now boots
   a real Supabase stack because the auth-loop specs sign in. The non-obvious
   half was deleting its `NEXT_PUBLIC_SUPABASE_*` env: **process env takes

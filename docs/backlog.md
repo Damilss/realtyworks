@@ -15,7 +15,7 @@ Pick them off at your discretion.
 
 ---
 
-## State verified (2026-08-01)
+## State verified (2026-08-07)
 
 - `next 16.2.11` / `react 19.2.4` / `pnpm@11.13.1`, Node pinned to 24 (`.nvmrc`).
 - CI runs `lint → format:check → typecheck → test → build → audit` — with
