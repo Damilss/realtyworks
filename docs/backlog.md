@@ -725,6 +725,55 @@ account-settings affordance, and `scope: "others"` exists for it when wanted
 signing out of one leaves the other able to load `/dashboard`; pinned by the unit
 assertion above.
 
+### 🟡 A sign-in failure blames the password even when Supabase is unreachable
+**Why:** `signIn()` in `src/server/actions/auth.ts` collapses every non-429
+failure into one string:
+
+```ts
+return { error: isRateLimited(error) ? RATE_LIMITED : INVALID_CREDENTIALS, values };
+```
+
+So a wrong password, an unknown account, a typo'd domain **and a dead auth
+service** all render as `Invalid email or password.` The first two have to be
+merged — distinguishing them turns the form into an account-enumeration oracle,
+and that reasoning is sound. It does not extend to the third: a transport
+failure carries no enumeration signal at all, because it happens before any
+account is looked up.
+
+**The mechanism is specific.** `@supabase/auth-js` (2.110.7) throws
+`AuthRetryableFetchError` with status **0** when the fetch itself fails
+(`lib/fetch.js:38` and `:124`), or the upstream status when there is one
+(`:42`). `isRateLimited()` tests `status === 429 || code ===
+"over_request_rate_limit"`, so status 0 falls straight through to the
+credential message. `signUp()` has the same shape one branch down — an
+unreachable stack reports `Could not create that account. If you already have
+one, sign in.`
+
+**This is not hypothetical; it cost a session on 2026-08-08.** A vendor login
+was investigated as a credentials problem, then as an RLS linkage problem,
+before the local stack turned out to have been killed by Docker. The form had
+said the password was wrong. Every layer below it was fine, and the one
+component positioned to say so said the opposite.
+
+**The precedent for fixing it is already in the file.** `RATE_LIMITED` exists
+because 429 is *actionable* and deserves its own message, and
+`auth.test.ts` pins it with a test named "distinguishes rate limiting, which is
+actionable". An unreachable backend is equally actionable and equally free of
+enumeration risk; this only extends a principle the module already applies.
+**Do:** branch on transport failure before falling through to the credential
+message. Prefer auth-js's exported `isAuthRetryableFetchError()` over sniffing
+`status === 0` — it is the library's own predicate, and it survives the status
+being 0 in one code path and upstream in another. Add a third constant
+(something like `Can't reach the sign-in service. Try again in a moment.` —
+generic, no host, no stack detail) and mirror the branch in `signUp()`. Cover
+both with unit tests alongside the existing rate-limit one.
+**Done when:** with the local stack stopped, `/login` reports that the service
+is unreachable rather than that the password is wrong, and a seeded account
+still gets `Invalid email or password.` for a genuinely wrong password — both
+pinned in `src/server/actions/auth.test.ts`.
+**Ride-along:** lands in the same file as the sign-out scope fix above; do them
+together.
+
 ### 🟡 Finish the ToS + Privacy Policy drafts (issue #74)
 **Why:** Required before any public or multi-tenant launch; both are currently
 banner-marked **DRAFT — NOT FOR PUBLICATION** and unusable for customer
