@@ -213,15 +213,38 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       # -x skips containers the SQL suite never touches, trading image pulls for
-      # wall-clock. Do NOT add `db` (Postgres itself) or `storage` — the storage
-      # service creates the `storage` schema that
+      # wall-clock. This boots exactly three: Postgres, gotrue, and storage-api.
+      #
+      # USE THE NAMES THE CLI VALIDATES, NOT THE ONES `--help` PRINTS. They are
+      # different lists, and a name from the wrong one is silently ignored rather
+      # than rejected. `supabase start --help` advertises `analytics`, `inbucket`,
+      # `functions`, `rest` and `meta`; the validator accepts only `logflare`,
+      # `mailpit`, `postgrest` and `postgres-meta` (and has no `functions` at all).
+      # This list previously carried three of the advertised names, so logflare
+      # (930MB) and mailpit (48MB) were pulled on every run despite "excluding"
+      # them. The authoritative list is echoed by the CLI itself when a name does
+      # not match: edge-runtime, gotrue, imgproxy, kong, logflare, mailpit,
+      # postgres-meta, postgrest, realtime, storage-api, studio, supavisor, vector.
+      #
+      # `kong` and `postgrest` must be excluded TOGETHER. The CLI health-checks
+      # PostgREST *through* Kong (HEAD 127.0.0.1:54321/rest-admin/v1/ready), so
+      # dropping Kong alone fails the boot on a connection refused.
+      #
+      # Do NOT add `storage-api` — it creates the `storage` schema that
       # 20260717120800_create_storage_bucket.sql writes its bucket and object
-      # policies into, so excluding it fails the migration outright. `kong`,
-      # `rest`, `realtime`, and `meta` are kept deliberately: cheap, and they keep
-      # this boot shaped like a real one. If this step ever misbehaves, dropping
-      # -x entirely is the first thing to try.
+      # policies into, so excluding it fails the migration outright. (`db` is not
+      # excludable at all.) gotrue stays because the suite asserts on auth.users.
+      # Everything else is dead weight here: `supabase test db` runs pg_prove
+      # against Postgres directly over 54322 and never makes an HTTP request.
+      # Verified locally — 3 containers healthy, 14 migrations applied, 94/94
+      # assertions passing. If this step ever misbehaves, dropping -x entirely is
+      # the first thing to try.
+      #
+      # The `e2e` job's list is deliberately NOT the same and must not be synced
+      # to this one: it drives the app over HTTP and needs Kong, PostgREST and
+      # Realtime. (It does still carry the ignored names — see docs/backlog.md.)
       - name: Start Supabase stack
-        run: pnpm exec supabase start -x studio,imgproxy,edge-runtime,functions,analytics,vector,inbucket
+        run: pnpm exec supabase start -x studio,imgproxy,edge-runtime,logflare,vector,mailpit,postgrest,realtime,postgres-meta,kong
 
       # Redundant with `start` (which already applies migrations + seed) but kept
       # on purpose: it asserts that the documented one-command known-good state

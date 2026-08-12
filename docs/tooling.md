@@ -160,12 +160,19 @@ Three consequences worth knowing before editing the job:
 - **It is no longer the fast job.** It carries the same cold Docker pulls and
   the same `timeout-minutes: 20` backstop as `db`, for the same reason.
 
-The `-x` exclusion list mirrors the `db` job below, including the rule about
-never excluding `db` or `storage`; `inbucket` is excluded only while
-`[auth.email] enable_confirmations` is `false`. Turning confirmations on (a
-backlog item, required before the Phase 4 public deploy) means signup sends
-mail, and this job then needs the mailbox back. Details:
-[playwright.md](playwright.md).
+The `-x` exclusion list **no longer mirrors the `db` job below, and must not be
+synced to it.** This job drives the app over HTTP, so it genuinely needs Kong,
+PostgREST and Realtime — the containers `db` now drops. What both jobs still
+share is the rule about never excluding `storage-api`.
+
+It does still carry the ignored names described under `db` below (`analytics`,
+`inbucket`, `functions` are not valid `-x` values, so logflare and mailpit boot
+regardless). Correcting them here is a live backlog item rather than part of the
+`db` change, because this job's mailbox story is conditional: mailpit is meant to
+be absent only while `[auth.email] enable_confirmations` is `false`. Turning
+confirmations on (a backlog item, required before the Phase 4 public deploy)
+means signup sends mail and this job needs the mailbox back — so the fix and that
+flag have to be decided together. Details: [playwright.md](playwright.md).
 
 ### Database suite (`db` job)
 
@@ -183,13 +190,39 @@ rather than a floating action-installed one. Then: `supabase start` →
 Three deliberate choices:
 
 - **`-x` excludes containers the SQL suite never touches**
-  (`studio,imgproxy,edge-runtime,functions,analytics,vector,inbucket`), trading
-  image pulls for wall-clock. **Never exclude `db` or `storage`** — the storage
-  service creates the `storage` schema that
-  `20260717120800_create_storage_bucket.sql` writes its bucket and object
-  policies into, so excluding it fails the migration outright. `kong`, `rest`,
-  `realtime`, and `meta` stay: cheap, and they keep the boot shaped like a real
-  one.
+  (`studio,imgproxy,edge-runtime,logflare,vector,mailpit,postgrest,realtime,postgres-meta,kong`),
+  trading image pulls for wall-clock. What boots is exactly three containers:
+  Postgres, gotrue, and storage-api. **Never exclude `storage-api`** — it creates
+  the `storage` schema that `20260717120800_create_storage_bucket.sql` writes its
+  bucket and object policies into, so excluding it fails the migration outright.
+  (`db` is not on the excludable list at all.) gotrue stays because the suite
+  asserts on `auth.users`. Everything else is dead weight: `supabase test db`
+  runs pg_prove against Postgres directly over 54322 and never makes an HTTP
+  request, and the tests reference only `auth.*` and `storage.*`.
+
+  Two traps, both found the hard way (2026-08-10):
+
+  **The valid `-x` names are not the ones `--help` prints.** `supabase start
+  --help` advertises `analytics`, `inbucket`, `functions`, `rest` and `meta`; the
+  runtime validator accepts `logflare`, `mailpit`, `postgrest` and
+  `postgres-meta`, and has no `functions` at all. A name from the wrong list is
+  **silently ignored, not rejected** — so the original list's `analytics`,
+  `inbucket` and `functions` entries did nothing, and logflare (930MB) plus
+  mailpit (48MB) were pulled on every run despite appearing to be excluded. The
+  authoritative list is the one the CLI echoes when a name misses: `edge-runtime,
+  gotrue, imgproxy, kong, logflare, mailpit, postgres-meta, postgrest, realtime,
+  storage-api, studio, supavisor, vector`. This also retires the 2026-08-03
+  finding that `inbucket` was "still valid because `--help` lists it" — `--help`
+  listing it is exactly the thing that misleads.
+
+  **`kong` and `postgrest` must be excluded together.** The CLI health-checks
+  PostgREST *through* Kong (`HEAD 127.0.0.1:54321/rest-admin/v1/ready`), so
+  dropping Kong on its own fails the boot with a connection refused and stops
+  every container it just started.
+
+  Net effect: ~6.2GB of images pulled → ~3.3GB, a **47% cut**. Verified locally
+  before landing — 3 containers healthy, all 14 migrations applied, 94/94
+  assertions passing.
 - **`db reset` is redundant and kept anyway.** `start` already applies
   migrations and the seed; running reset asserts that the documented
   one-command known-good state actually works, and costs seconds once the

@@ -141,6 +141,15 @@ mail container. Related correction: `inbucket` *is* still a valid `-x` name in
 CLI 2.109.1 (`supabase start --help` lists it), so the exclusion lists in both
 jobs were left alone.
 
+> **Superseded 2026-08-10** — left above as written, because *how* it was wrong
+> is the useful part. `--help` does list `inbucket`, but `--help` is not the list
+> the CLI validates against: the runtime accepts `mailpit`, and silently ignores
+> `inbucket` instead of rejecting it. So the mail container was never actually
+> excluded from either job, and "the exclusion lists were left alone" was the
+> wrong call reached by plausible reasoning from the wrong source. Checking
+> `--help` was the mistake; the authoritative list is the one the CLI echoes back
+> when a name misses. See the `db` job section in `docs/tooling.md`.
+
 **The admin client reads `SUPABASE_SECRET_KEY` lazily, inside the factory.** At
 module scope it would break `next build` in the `verify` job, which has no
 stack and no secret — pinned by a test asserting the module imports cleanly with
@@ -939,6 +948,32 @@ fixing while it costs one line.
 `fileURLToPath(new URL("./tests/unit/server-only-stub.ts", import.meta.url))`.
 **Done when:** `pnpm test` passes from a checkout whose absolute path contains a
 space.
+
+### 🟡 Correct the `e2e` job's silently-ignored `-x` names
+**Why:** Found while trimming the `db` job (2026-08-10). `supabase start -x`
+validates against `edge-runtime, gotrue, imgproxy, kong, logflare, mailpit,
+postgres-meta, postgrest, realtime, storage-api, studio, supavisor, vector` — not
+the list `supabase start --help` prints. A name from the wrong list is **silently
+ignored, not rejected.** The `e2e` job excludes
+`studio,imgproxy,edge-runtime,functions,analytics,vector,inbucket`, of which
+`functions`, `analytics` and `inbucket` are not valid, so **logflare (930MB) and
+mailpit (48MB) are pulled and booted on every run** despite appearing excluded.
+The `db` job had the same three and they were corrected there; `e2e` was left
+alone deliberately, because its mail story is conditional rather than mechanical.
+
+**Do:** Rename `analytics` → `logflare` and drop `functions`. Decide `inbucket` →
+`mailpit` **together with** issue #93 (turn on `[auth.email]
+enable_confirmations` before the Phase 4 public deploy): today mailpit is
+genuinely unnecessary and excluding it saves the pull, but the moment
+confirmations go on, signup sends mail and this job needs the mailbox — so
+excluding it correctly now buys ~48MB and creates a trap for #93. Preferred
+order: land the logflare fix (the 930MB one) now, and settle mailpit as part of
+#93. Do **not** copy the `db` job's `kong`/`postgrest`/`realtime` exclusions here
+— this job drives the app over HTTP and needs all three.
+
+**Done when:** the `e2e` job's `supabase start` log no longer shows a logflare
+image pull, the Playwright suite is still green in CI, and `docs/tooling.md`'s
+`e2e` section no longer carries the "ignored names" caveat.
 
 ### 🟡 Coverage visibility (not a gate)
 **Why:** See what's tested without chasing a %.

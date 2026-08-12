@@ -70,9 +70,13 @@ Its env-writing step is an **allowlist**, not a filter: it admits the CLI's
 `SECRET_KEY` and renames it to `SUPABASE_SECRET_KEY` (the invite and the
 attachment insert are service-role writes), while `SERVICE_ROLE_KEY` and
 `JWT_SECRET` never reach a file `next build` reads.
-A parallel `db` job boots the same stack and runs the pgTAP suite
-(`supabase test db`), so an RLS or write-guard regression fails CI instead of
-merging green.
+A parallel `db` job runs the pgTAP suite (`supabase test db`), so an RLS or
+write-guard regression fails CI instead of merging green. It boots a **strictly
+smaller stack than `e2e`** — three containers (Postgres, gotrue, storage-api),
+because pg_prove talks to Postgres directly and never makes an HTTP request. Do
+not sync the two `-x` lists. And note the trap when editing either: the valid
+`-x` names are **not** the ones `supabase start --help` prints, and a wrong name
+is silently ignored rather than rejected (`docs/tooling.md`).
 The audit step (`pnpm audit --audit-level=high`) is blocking — CI fails on any
 high/critical advisory. Two more workflows: gitleaks secret scan + Semgrep
 SAST (`security.yml`, PR + push to `main`/`dev`; semgrep is blocking, findings
