@@ -243,7 +243,8 @@ Verify before assuming they exist:
   about the test: the spec that appeared to cover it used a bogus token, so
   verification failed and the guarded line never ran. **If deleting the guard
   leaves its test green, the test does not cover the guard** — check by actually
-  deleting it once.
+  deleting it once. Reasoning: `docs/vendor-access.md` §6a; the testing half:
+  `docs/playwright.md`.
 - **Not yet created:** `supabase/functions/`, `src/app/api/`. Neither is a gap
   to fill on its own — edge functions are Phase 5 (§6 SMS), and the only route
   handler that exists is `src/app/auth/confirm/route.ts`, which is deliberately
