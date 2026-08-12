@@ -15,7 +15,7 @@ Pick them off at your discretion.
 
 ---
 
-## State verified (2026-08-01)
+## State verified (2026-08-07)
 
 - `next 16.2.11` / `react 19.2.4` / `pnpm@11.13.1`, Node pinned to 24 (`.nvmrc`).
 - CI runs `lint → format:check → typecheck → test → build → audit` — with
@@ -140,6 +140,15 @@ on both. The no-email finding is what lets the CI `e2e` job keep excluding the
 mail container. Related correction: `inbucket` *is* still a valid `-x` name in
 CLI 2.109.1 (`supabase start --help` lists it), so the exclusion lists in both
 jobs were left alone.
+
+> **Superseded 2026-08-10** — left above as written, because *how* it was wrong
+> is the useful part. `--help` does list `inbucket`, but `--help` is not the list
+> the CLI validates against: the runtime accepts `mailpit`, and silently ignores
+> `inbucket` instead of rejecting it. So the mail container was never actually
+> excluded from either job, and "the exclusion lists were left alone" was the
+> wrong call reached by plausible reasoning from the wrong source. Checking
+> `--help` was the mistake; the authoritative list is the one the CLI echoes back
+> when a name misses. See the `db` job section in `docs/tooling.md`.
 
 **The admin client reads `SUPABASE_SECRET_KEY` lazily, inside the factory.** At
 module scope it would break `next build` in the `verify` job, which has no
@@ -725,6 +734,99 @@ account-settings affordance, and `scope: "others"` exists for it when wanted
 signing out of one leaves the other able to load `/dashboard`; pinned by the unit
 assertion above.
 
+### 🟡 Reassignment does not revoke an outstanding invite link (PR review, P2)
+**Why:** `docs/playwright.md` and `README.md` both listed "revocation on
+reassignment" among the vendor-loop guarantees, and neither the code nor the test
+delivers one. `assignVendor` (`src/server/actions/work-orders.ts`) writes
+`vendor_id` — and a status bump from `open` — and touches nothing else; nothing in
+GoTrue, nothing in `vendors.profile_id`. The spec it leaned on discards the URL it
+minted and asserts only `getByLabel("Sign-in link")` is gone from the *manager's*
+page, which is the `key={assignedVendor.id}` remount dropping the panel's
+`useActionState`. So a link copied before the reassignment still redeems and still
+signs its holder in as the **outgoing** vendor. RLS does hide the reassigned job
+from them; their other assigned jobs are exactly as visible as before.
+
+**The overclaim is fixed** (2026-08-12) — both docs now say "clears the stale
+link from the page", the caveat is spelled out under the spec table in
+`docs/playwright.md`, and the spec is renamed to what it asserts. What is left is
+the product question, filed here rather than silently closed.
+
+Sized Medium, not High, deliberately: the token grants precisely the access the
+manager *intended* to grant that vendor minutes earlier, it is single use, and it
+dies in an hour (`[auth.email] otp_expiry = 3600`). The defect was the promise,
+not the exposure. Move it up if the intended semantics turn out to be "reassign =
+cut off", which is the call below.
+
+**Decide first, then build:** does reassignment mean "this job moved" or "that
+vendor is out"? Today it means the first, and the second already has a lever —
+unlink `vendors.profile_id` and `current_vendor_id()` resolves NULL on the very
+next request, mid-session (`docs/vendor-access.md` §6). No UI exposes it, which is
+the more useful gap. Note also that token revocation alone would be theatre: if
+the outgoing vendor already *redeemed* the link they hold a live session, and only
+the `profile_id` unlink touches that.
+
+**Do (in order):** (1) add the deliberate "revoke vendor access" control that
+unlinks `profile_id`, with an activity-trail entry — that is the real requirement
+§3c asked for; (2) only if reassignment should imply it, call that same path from
+`assignVendor` and say so in the UI, since silently cutting a vendor off from
+their *other* jobs because one moved would be worse than the current behaviour.
+Do **not** resurrect the rejected `vendor_access` table for this
+(`docs/vendor-access.md` §6) — per-invite `revoked_at` buys nothing the
+`profile_id` unlink does not already give.
+
+**Done when:** whichever semantics is chosen, an e2e spec mints a link, triggers
+the revocation path, *replays the URL it kept*, and asserts the holder does not
+end up with a working session — the assertion the current spec skipped.
+
+### 🟡 A sign-in failure blames the password even when Supabase is unreachable
+**Why:** `signIn()` in `src/server/actions/auth.ts` collapses every non-429
+failure into one string:
+
+```ts
+return { error: isRateLimited(error) ? RATE_LIMITED : INVALID_CREDENTIALS, values };
+```
+
+So a wrong password, an unknown account, a typo'd domain **and a dead auth
+service** all render as `Invalid email or password.` The first two have to be
+merged — distinguishing them turns the form into an account-enumeration oracle,
+and that reasoning is sound. It does not extend to the third: a transport
+failure carries no enumeration signal at all, because it happens before any
+account is looked up.
+
+**The mechanism is specific.** `@supabase/auth-js` (2.110.7) throws
+`AuthRetryableFetchError` with status **0** when the fetch itself fails
+(`lib/fetch.js:38` and `:124`), or the upstream status when there is one
+(`:42`). `isRateLimited()` tests `status === 429 || code ===
+"over_request_rate_limit"`, so status 0 falls straight through to the
+credential message. `signUp()` has the same shape one branch down — an
+unreachable stack reports `Could not create that account. If you already have
+one, sign in.`
+
+**This is not hypothetical; it cost a session on 2026-08-08.** A vendor login
+was investigated as a credentials problem, then as an RLS linkage problem,
+before the local stack turned out to have been killed by Docker. The form had
+said the password was wrong. Every layer below it was fine, and the one
+component positioned to say so said the opposite.
+
+**The precedent for fixing it is already in the file.** `RATE_LIMITED` exists
+because 429 is *actionable* and deserves its own message, and
+`auth.test.ts` pins it with a test named "distinguishes rate limiting, which is
+actionable". An unreachable backend is equally actionable and equally free of
+enumeration risk; this only extends a principle the module already applies.
+**Do:** branch on transport failure before falling through to the credential
+message. Prefer auth-js's exported `isAuthRetryableFetchError()` over sniffing
+`status === 0` — it is the library's own predicate, and it survives the status
+being 0 in one code path and upstream in another. Add a third constant
+(something like `Can't reach the sign-in service. Try again in a moment.` —
+generic, no host, no stack detail) and mirror the branch in `signUp()`. Cover
+both with unit tests alongside the existing rate-limit one.
+**Done when:** with the local stack stopped, `/login` reports that the service
+is unreachable rather than that the password is wrong, and a seeded account
+still gets `Invalid email or password.` for a genuinely wrong password — both
+pinned in `src/server/actions/auth.test.ts`.
+**Ride-along:** lands in the same file as the sign-out scope fix above; do them
+together.
+
 ### 🟡 Finish the ToS + Privacy Policy drafts (issue #74)
 **Why:** Required before any public or multi-tenant launch; both are currently
 banner-marked **DRAFT — NOT FOR PUBLICATION** and unusable for customer
@@ -890,6 +992,36 @@ fixing while it costs one line.
 `fileURLToPath(new URL("./tests/unit/server-only-stub.ts", import.meta.url))`.
 **Done when:** `pnpm test` passes from a checkout whose absolute path contains a
 space.
+
+### 🟡 Correct the `e2e` job's silently-ignored `-x` names
+**Why:** Found while trimming the `db` job (2026-08-10). `supabase start -x`
+validates against `edge-runtime, gotrue, imgproxy, kong, logflare, mailpit,
+postgres-meta, postgrest, realtime, storage-api, studio, supavisor, vector` — not
+the list `supabase start --help` prints. A name from the wrong list is **silently
+ignored, not rejected.** The `e2e` job excludes
+`studio,imgproxy,edge-runtime,functions,analytics,vector,inbucket`, of which
+`functions`, `analytics` and `inbucket` are not valid, so **logflare (930MB) and
+mailpit (48MB) are pulled and booted on every run** despite appearing excluded.
+The `db` job had the same three and they were corrected there; `e2e` was left
+alone deliberately, because its mail story is conditional rather than mechanical.
+
+**Do:** Rename `analytics` → `logflare` and drop `functions`. Decide `inbucket` →
+`mailpit` **together with** issue #93 (turn on `[auth.email]
+enable_confirmations` before the Phase 4 public deploy): today mailpit is
+genuinely unnecessary and excluding it saves the pull, but the moment
+confirmations go on, signup sends mail and this job needs the mailbox — so
+excluding it correctly now buys ~48MB and creates a trap for #93. Preferred
+order: land the logflare fix (the 930MB one) now, and settle mailpit as part of
+#93. Do **not** copy the `db` job's `kong`/`postgrest`/`realtime` exclusions here
+— this job drives the app over HTTP and needs all three.
+
+**Done when:** the `e2e` job's `supabase start` log no longer shows a logflare
+image pull, the Playwright suite is still green in CI, and the "ignored names"
+caveat is gone from all three places that now carry it — `docs/tooling.md`'s
+`e2e` section, `docs/playwright.md`'s `-x` bullet, and the comment above the
+`e2e` job's `Start Supabase stack` step in `.github/workflows/ci.yml`. The
+container counts stated alongside them (nine for `e2e`, three for `db`) are
+part of the same edit: dropping logflare makes it eight.
 
 ### 🟡 Coverage visibility (not a gate)
 **Why:** See what's tested without chasing a %.

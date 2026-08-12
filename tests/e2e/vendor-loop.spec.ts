@@ -254,7 +254,7 @@ test("a magic link is single use", async ({ page, browser }, testInfo) => {
   ).toBeVisible();
 });
 
-test("a minted link does not survive a reassignment", async ({
+test("a reassignment clears the outgoing vendor's link from the page", async ({
   page,
 }, testInfo) => {
   const outgoing = vendorIdentity(testInfo, "Outgoing");
@@ -279,11 +279,20 @@ test("a minted link does not survive a reassignment", async ({
     main(page).getByText(`Creates an account for ${incoming.name}`),
   ).toBeVisible();
 
-  // …and the outgoing vendor's link left with them. A link that stays on screen
-  // under the new assignee's name is how a bearer token reaches the wrong
-  // person: it signs its holder in as the *outgoing* vendor, exposing the other
-  // jobs assigned to them and attributing whatever the holder does to a vendor
-  // who never touched the job.
+  // …and the outgoing vendor's link is off the screen with them. A link that
+  // stays on screen under the new assignee's name is how a bearer token reaches
+  // the wrong person: it signs its holder in as the *outgoing* vendor, exposing
+  // the other jobs assigned to them and attributing whatever the holder does to
+  // a vendor who never touched the job.
+  //
+  // Scope, precisely: this is the UI dropping a stale token, **not** revocation.
+  // `assignVendor` writes `vendor_id` and touches nothing in GoTrue, so a link
+  // copied before the reassignment still redeems and still signs its holder in
+  // as the outgoing vendor — RLS hides *this* job from them afterwards, and
+  // their other jobs are as visible as they were. That is why the minted URL
+  // above is discarded rather than replayed: there is no revocation here to
+  // assert on yet (docs/backlog.md, "Reassignment does not revoke an
+  // outstanding invite link").
   await expect(page.getByLabel("Sign-in link")).toHaveCount(0);
 });
 

@@ -13,7 +13,7 @@ the [README](../README.md#quality-gates); this is the detail.
 | commitlint | `.husky/commit-msg` | every commit |
 | Lint → format → typecheck → test → build | `.github/workflows/ci.yml` | PRs + pushes to `main`/`dev` |
 | `pnpm audit` dependency gate | `.github/workflows/ci.yml` | PRs + pushes to `main`/`dev` |
-| Playwright E2E auth loop (boots its own Supabase stack) | `.github/workflows/ci.yml` | PRs + pushes to `main`/`dev` |
+| Playwright E2E vertical slice (boots its own Supabase stack) | `.github/workflows/ci.yml` | PRs + pushes to `main`/`dev` |
 | pgTAP RLS/write-guard suite (`db` job) | `.github/workflows/ci.yml` | PRs + pushes to `main`/`dev` |
 | gitleaks full-history scan | `.github/workflows/security.yml` | PRs + pushes to `main`/`dev` |
 | Semgrep SAST scan | `.github/workflows/security.yml` | PRs + pushes to `main`/`dev` |
@@ -123,13 +123,19 @@ a `playwright-report` artifact (`if: !cancelled()`) for debugging.
 
 **Since the Phase 3 auth loop landed (2026-07-27) this job boots a real
 Supabase stack** — `supabase start -x …` → `db reset` → write `.env.local` from
-`supabase status -o env | grep '^NEXT_PUBLIC_'` — and then boots the app
-(`pnpm dev`, via `playwright.config.ts`'s `webServer`) and runs
-`tests/e2e/smoke.spec.ts` + `tests/e2e/auth.spec.ts` against it. So CI now
-proves the app *runs*, authenticates, and enforces RLS through a real session —
-not just that `next build` compiles it.
+`supabase status -o env` — and then boots the app (`pnpm dev`, via
+`playwright.config.ts`'s `webServer`) and runs every spec in `tests/e2e/`
+against it: smoke, `auth.spec.ts`, and — since the slice closed on
+2026-08-03 — `work-orders.spec.ts` and `vendor-loop.spec.ts`. So CI now proves
+the app *runs*, authenticates, and enforces RLS through a real session — not
+just that `next build` compiles it.
 
-Two consequences worth knowing before editing the job:
+The job is still **named** "E2E (Playwright auth loop)" even though it now runs
+the whole slice. That is deliberate: branch protection matches required checks
+by name, so renaming it silently drops any rule selecting the old name. Rename
+it only alongside re-selecting the check in Settings → Branches.
+
+Three consequences worth knowing before editing the job:
 
 - **It deliberately sets no `NEXT_PUBLIC_SUPABASE_*` env.** It used to set
   placeholders, which were sufficient while nothing logged in (with no session
@@ -141,15 +147,33 @@ Two consequences worth knowing before editing the job:
   placeholders** and should: `next build` never executes the proxy, and the
   values exist there only so `next.config.ts` can prove the build environment
   is complete.
-- **It is no longer the fast job.** It carries the same cold Docker pulls and
-  the same `timeout-minutes: 20` backstop as `db`, for the same reason.
+- **Its env-writing `grep` is an allowlist, not a filter.** `supabase status -o
+  env` prints `SERVICE_ROLE_KEY` and `JWT_SECRET` too, and neither belongs in a
+  file `next build` reads. `SECRET_KEY` *is* admitted deliberately and renamed
+  by a `sed` to `SUPABASE_SECRET_KEY` (2026-08-03): the vendor invite and the
+  attachment-metadata insert are service-role writes with no client grant, so
+  `vendor-loop.spec.ts` cannot run without it. It is safe there only because it
+  has no `NEXT_PUBLIC_` prefix and is therefore never inlined into the bundle —
+  and it is a `sed` rather than a third `--override-name` because the CLI
+  documents no override for that key, and a wrong one emits nothing rather than
+  failing.
+- **It is the slow job now.** Nine containers pulled cold, against `db`'s three
+  — the `timeout-minutes: 20` backstop is the same as `db`'s and for the same
+  reason, but the weight behind it is not.
 
-The `-x` exclusion list mirrors the `db` job below, including the rule about
-never excluding `db` or `storage`; `inbucket` is excluded only while
-`[auth.email] enable_confirmations` is `false`. Turning confirmations on (a
-backlog item, required before the Phase 4 public deploy) means signup sends
-mail, and this job then needs the mailbox back. Details:
-[playwright.md](playwright.md).
+The `-x` exclusion list **no longer mirrors the `db` job below, and must not be
+synced to it.** This job drives the app over HTTP, so it genuinely needs Kong,
+PostgREST and Realtime — the containers `db` now drops. What both jobs still
+share is the rule about never excluding `storage-api`.
+
+It does still carry the ignored names described under `db` below (`analytics`,
+`inbucket`, `functions` are not valid `-x` values, so logflare and mailpit boot
+regardless). Correcting them here is a live backlog item rather than part of the
+`db` change, because this job's mailbox story is conditional: mailpit is meant to
+be absent only while `[auth.email] enable_confirmations` is `false`. Turning
+confirmations on (a backlog item, required before the Phase 4 public deploy)
+means signup sends mail and this job needs the mailbox back — so the fix and that
+flag have to be decided together. Details: [playwright.md](playwright.md).
 
 ### Database suite (`db` job)
 
@@ -167,13 +191,39 @@ rather than a floating action-installed one. Then: `supabase start` →
 Three deliberate choices:
 
 - **`-x` excludes containers the SQL suite never touches**
-  (`studio,imgproxy,edge-runtime,functions,analytics,vector,inbucket`), trading
-  image pulls for wall-clock. **Never exclude `db` or `storage`** — the storage
-  service creates the `storage` schema that
-  `20260717120800_create_storage_bucket.sql` writes its bucket and object
-  policies into, so excluding it fails the migration outright. `kong`, `rest`,
-  `realtime`, and `meta` stay: cheap, and they keep the boot shaped like a real
-  one.
+  (`studio,imgproxy,edge-runtime,logflare,vector,mailpit,postgrest,realtime,postgres-meta,kong`),
+  trading image pulls for wall-clock. What boots is exactly three containers:
+  Postgres, gotrue, and storage-api. **Never exclude `storage-api`** — it creates
+  the `storage` schema that `20260717120800_create_storage_bucket.sql` writes its
+  bucket and object policies into, so excluding it fails the migration outright.
+  (`db` is not on the excludable list at all.) gotrue stays because the suite
+  asserts on `auth.users`. Everything else is dead weight: `supabase test db`
+  runs pg_prove against Postgres directly over 54322 and never makes an HTTP
+  request, and the tests reference only `auth.*` and `storage.*`.
+
+  Two traps, both found the hard way (2026-08-10):
+
+  **The valid `-x` names are not the ones `--help` prints.** `supabase start
+  --help` advertises `analytics`, `inbucket`, `functions`, `rest` and `meta`; the
+  runtime validator accepts `logflare`, `mailpit`, `postgrest` and
+  `postgres-meta`, and has no `functions` at all. A name from the wrong list is
+  **silently ignored, not rejected** — so the original list's `analytics`,
+  `inbucket` and `functions` entries did nothing, and logflare (930MB) plus
+  mailpit (48MB) were pulled on every run despite appearing to be excluded. The
+  authoritative list is the one the CLI echoes when a name misses: `edge-runtime,
+  gotrue, imgproxy, kong, logflare, mailpit, postgres-meta, postgrest, realtime,
+  storage-api, studio, supavisor, vector`. This also retires the 2026-08-03
+  finding that `inbucket` was "still valid because `--help` lists it" — `--help`
+  listing it is exactly the thing that misleads.
+
+  **`kong` and `postgrest` must be excluded together.** The CLI health-checks
+  PostgREST *through* Kong (`HEAD 127.0.0.1:54321/rest-admin/v1/ready`), so
+  dropping Kong on its own fails the boot with a connection refused and stops
+  every container it just started.
+
+  Net effect: ~6.2GB of images pulled → ~3.3GB, a **47% cut**. Verified locally
+  before landing — 3 containers healthy, all 14 migrations applied, 94/94
+  assertions passing.
 - **`db reset` is redundant and kept anyway.** `start` already applies
   migrations and the seed; running reset asserts that the documented
   one-command known-good state actually works, and costs seconds once the
@@ -182,8 +232,8 @@ Three deliberate choices:
   `config.toml` change, or a CLI bump, so gating on changed paths would miss
   cases.
 
-Cold image pulls make this and `e2e` — which now boots a stack of its own — the
-two slow jobs in the matrix; `timeout-minutes: 20` is a backstop against a
+Cold image pulls still make `e2e` — nine containers to this job's three — the
+slow job in the matrix; both keep `timeout-minutes: 20` as a backstop against a
 container that never reaches healthy. A `docker ps -a` + `supabase status` step
 runs `if: failure()` for triage.
 
@@ -521,6 +571,17 @@ worth adding (`actionlint` doesn't understand the issue-forms schema anyway).
 Running record of problems hit and calls made, newest first. (PR numbers are
 the paper trail; see git history for the full diffs.)
 
+- **2026-08 · the `e2e` job carries a real secret now** — closing the vertical
+  slice put two service-role writes in the app (the vendor invite and the
+  attachment-metadata insert), so the job's `.env.local` step gained
+  `SECRET_KEY`, renamed to `SUPABASE_SECRET_KEY` by a `sed`. The grep stayed an
+  **allowlist** rather than becoming a filter, which is the whole safety
+  argument: `SERVICE_ROLE_KEY` and `JWT_SECRET` are still excluded by not being
+  named, so the failure mode of a future CLI field is "missing", not "leaked".
+  The same command is what the README and `CONTRIBUTING.md` now tell you to run
+  locally, so there is one recipe rather than two that drift. Related: the job
+  runs the whole slice but keeps the name "E2E (Playwright auth loop)", because
+  branch protection matches required checks by name.
 - **2026-07 · `e2e` job placeholders removed, not updated** — the job now boots
   a real Supabase stack because the auth-loop specs sign in. The non-obvious
   half was deleting its `NEXT_PUBLIC_SUPABASE_*` env: **process env takes

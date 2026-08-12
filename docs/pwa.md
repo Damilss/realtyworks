@@ -11,7 +11,7 @@ retrofit.
 
 **The one-line policy:** one responsive codebase, installable to the home
 screen. No native app, no second surface, no `m.` subdomain. The responsive PWA
-*is* the entire mobile story (`CLAUDE.md:120`, `CLAUDE.md:157-164`).
+*is* the entire mobile story (`CLAUDE.md` §1 *Explicit non-goals*, §2 *Stack*).
 
 ---
 
@@ -23,7 +23,9 @@ they turn into rework:
 1. **Responsive-first from day one.** Dense tables for managers on desktop;
    stacked, touch-friendly views for vendors on phones. A vendor standing in a
    boiler room with one hand free is the actual mobile user. Build for that as
-   pages are written in Phase 3/5 — the install layer assumes it.
+   pages are written — the install layer assumes it. The Phase 3 slice
+   (2026-08-03) is the first set of pages this applies to; every Phase 5 page
+   inherits the rule.
 2. **Push notifications require an installed app on iOS.** If the plan ever
    depends on reaching a vendor's iPhone via *web* push, that vendor must first
    have manually installed the app to their home screen. See

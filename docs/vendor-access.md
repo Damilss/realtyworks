@@ -152,10 +152,12 @@ deferred / §4 Phase 6).
 The auth model is the thing; SMS is just the delivery channel. Split them:
 
 - **Phase 3 (build the model) — shipped 2026-08-03.** The tokenized link +
-  vendor session, delivered by a **"Copy sign-in link"** button on the work
-  order. The whole flow — vendor opens link, gets a real session, updates
-  status, uploads a photo/receipt, activity trail records it — runs with **no
-  Twilio account, no 10DLC registration, and zero spend**, exactly as this
+  vendor session, delivered by a **"Create sign-in link"** button on the work
+  order (the link then appears with a **Copy** control beside it; pressing the
+  button again reads "New sign-in link" and mints a fresh one that supersedes
+  the previous token). The whole flow — vendor opens link, gets a real session,
+  updates status, uploads a photo/receipt, activity trail records it — runs with
+  **no Twilio account, no 10DLC registration, and zero spend**, exactly as this
   section predicted. It is driven end to end by
   `tests/e2e/vendor-loop.spec.ts`, which redeems a real token in a second
   browser context.

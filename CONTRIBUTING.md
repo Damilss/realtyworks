@@ -36,13 +36,20 @@ pnpm exec supabase start
 pnpm exec supabase status -o env \
   --override-name api.url=NEXT_PUBLIC_SUPABASE_URL \
   --override-name auth.publishable_key=NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY \
-  | grep '^NEXT_PUBLIC_' > .env.local
+  | grep -E '^(NEXT_PUBLIC_|SECRET_KEY=)' \
+  | sed 's/^SECRET_KEY=/SUPABASE_SECRET_KEY=/' > .env.local
 ```
 
-The `grep` is load-bearing — `-o env` also prints `SERVICE_ROLE_KEY`,
-`SECRET_KEY`, `JWT_SECRET`, and `DB_URL`, none of which belong in the app's env
-file. This command **overwrites** `.env.local`; back it up if you've customized
-it. Full walkthrough and the manual alternative:
+That is the same command the CI `e2e` job runs, and it writes the three
+variables the app reads. The `grep` is load-bearing and is an **allowlist**:
+`-o env` also prints `SERVICE_ROLE_KEY`, `JWT_SECRET`, and `DB_URL`, none of
+which belong in the app's env file. `SECRET_KEY` is admitted on purpose and
+renamed to the `SUPABASE_SECRET_KEY` that `src/lib/supabase/admin.ts` reads —
+the vendor invite and the attachment upload are service-role writes. It must
+never gain a `NEXT_PUBLIC_` prefix: `next build` inlines those into the browser
+bundle, and this key bypasses RLS. The app boots without it; only those two
+paths fail. This command **overwrites** `.env.local`; back it up if you've
+customized it. Full walkthrough and the manual alternative:
 [`README.md` § Getting started](README.md#getting-started).
 
 Everyday database commands:
@@ -199,7 +206,7 @@ What the CI jobs prove:
 | Job | Proves |
 | --- | --- |
 | `verify` | lint → format:check → typecheck → test → build → audit. It compiles and is clean. Every step after the first runs on `!cancelled()`, so one run reports *every* failure |
-| `e2e` | Boots a real Supabase stack, resets it to the seed, and drives the Playwright auth loop in Chromium — the app actually **runs** and RLS holds through a real session, not just compiles |
+| `e2e` | Boots a real Supabase stack, resets it to the seed, and drives the whole Playwright vertical slice in Chromium (auth loop · staff write path · vendor loop) — the app actually **runs** and RLS holds through a real session, not just compiles. Still *named* "E2E (Playwright auth loop)"; branch protection matches by name, so the name outlived its scope on purpose |
 | `db` | `supabase db reset` + pgTAP — RLS and write guards still hold. Runs on every PR, **not yet a required check** |
 | `security` | gitleaks full-history secret scan + Semgrep SAST. Both blocking |
 | `osv-scanner` | Lockfile CVEs — weekly, plus every PR into `main`. Advisory |
@@ -256,9 +263,18 @@ enforced server-side. The client may mirror logic for UX and is never the source
 of truth. Never trust a client-supplied role, price, permission, or ownership
 check.
 
-`src/server/` is the trust boundary — client components must never import from
-it. `src/schemas/` (zod) is imported by both sides: validate twice, trust only
-the server.
+`src/server/` is the trust boundary, with one deliberate seam.
+`src/server/queries/` is server-only and enforces it in code (`import
+"server-only"`); `src/server/actions/` is the exception, because client
+components are *meant* to import server actions — `"use server"` replaces the
+body with an RPC reference and the implementation never ships. `src/schemas/`
+(zod) is imported by both sides: validate twice, trust only the server.
+
+**One client bypasses RLS**, `src/lib/supabase/admin.ts`, and it exists only for
+the two writes with no client grant (attachment metadata, `vendors.profile_id`)
+plus `auth.admin` for the vendor invite. Reach for it **last**: establish the
+caller's access with their own session client first, then create the privileged
+one. It is the one place where a missing check has no policy behind it.
 
 ---
 

@@ -98,6 +98,17 @@ Real values live only in `.env.local`, which is gitignored.
 [`.env.example`](.env.example) is the committed template and contains no
 secrets. Production data is never used in local or dev environments.
 
+**There is exactly one real secret in that file:** `SUPABASE_SECRET_KEY`, added
+2026-08-03 with the vendor half. The two `NEXT_PUBLIC_SUPABASE_*` values are
+public by design — the publishable key grants nothing beyond what RLS allows the
+caller — but the secret key **bypasses RLS entirely**, so it is the one variable
+whose exposure is a real incident. Two structural guards, both worth keeping:
+it has no `NEXT_PUBLIC_` prefix (so `next build` never inlines it into the
+browser bundle), and `src/lib/supabase/admin.ts` refuses to start if the value
+it finds is a publishable key instead — a swap fails loudly rather than silently
+running "privileged" writes under RLS. Rotate it from the Supabase dashboard;
+locally it is whatever `pnpm exec supabase status` prints for the current stack.
+
 ---
 
 ## The security model, in two lines
@@ -109,3 +120,15 @@ in the same migration that creates it — retrofitting RLS is not allowed.
 server-side** — in RLS, a server action, or a database constraint. The client
 may mirror a check for UX and is never the source of truth (`CLAUDE.md` §2). A
 client-side-only check is a bug, not a defense.
+
+**The one documented exception proves the rule.** `src/lib/supabase/admin.ts`
+carries the secret key and bypasses RLS, because two writes are deliberately
+unreachable from the Data API: attachment metadata (no client INSERT grant) and
+`vendors.profile_id` (no client write grant). Every path that uses it
+establishes the caller's access with their *own* session client first —
+`can_access_work_order()` before an upload, `is_staff()` before an invite — and
+only then reaches for the privileged one. `inviteVendor` is the single action
+carrying its own authorization check, precisely because there is no policy left
+behind it. Treat any new use of that client as a security change: it is the only
+code in the repo the database will not second-guess. Design detail:
+[`docs/vendor-access.md`](docs/vendor-access.md).
