@@ -223,6 +223,31 @@ record what was actually observed.
   again — the link is shown once, stored nowhere, and never written to the
   activity trail or the logs, because it is a bearer credential for one login.
 
+### 6a. The link's destination is guarded, not trusted (2026-08-12, issue #105)
+
+The invite carries `next=/work-orders/<id>` so one tap lands on the job (§3b).
+That parameter is part of the URL, which means it is part of what a **re-crafted
+invite** can change — and §3a's threat model is exactly that the link reaches
+someone it shouldn't. A forwarded invite with a hostile `next` signs its holder
+in and then bounces them wherever the crafter chose, which is what makes a fake
+"session expired, sign in again" page work.
+
+`safeNext()` in `src/app/auth/confirm/route.ts` resolves `next` with
+`new URL(next, origin)`, refuses anything whose origin is not ours, and returns
+**only** `pathname + search + hash` — no host is ever emitted, so the guard
+still holds if `nextUrl.origin` were influenced by a spoofed `Host` header.
+
+It originally string-matched the prefix, and that was wrong in a way worth
+keeping on record: `/\evil.example` starts with `/`, does not start with `//`,
+and normalizes to `//evil.example` anyway, because `\` only becomes an authority
+separator once the WHATWG parser reads it. Tabs and newlines are stripped by
+that same parser, *after* any string check has already approved the value.
+**Never string-match a URL something downstream will re-parse.**
+
+Scope, precisely: this is a guard on the *destination*, not on the token. A
+leaked link is still a login (§3c is what revokes it) — this only ensures that
+redeeming one lands the holder inside our own app.
+
 - **Sensitive-field gating (§3a): nothing to gate today.** The vendor view
   exposes title, description, status, priority, and the property/unit label.
   There is no gate-code column, no lockbox column, and no tenant PII anywhere in
