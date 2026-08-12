@@ -157,8 +157,9 @@ Three consequences worth knowing before editing the job:
   and it is a `sed` rather than a third `--override-name` because the CLI
   documents no override for that key, and a wrong one emits nothing rather than
   failing.
-- **It is no longer the fast job.** It carries the same cold Docker pulls and
-  the same `timeout-minutes: 20` backstop as `db`, for the same reason.
+- **It is the slow job now.** Nine containers pulled cold, against `db`'s three
+  — the `timeout-minutes: 20` backstop is the same as `db`'s and for the same
+  reason, but the weight behind it is not.
 
 The `-x` exclusion list **no longer mirrors the `db` job below, and must not be
 synced to it.** This job drives the app over HTTP, so it genuinely needs Kong,
@@ -231,8 +232,8 @@ Three deliberate choices:
   `config.toml` change, or a CLI bump, so gating on changed paths would miss
   cases.
 
-Cold image pulls make this and `e2e` — which now boots a stack of its own — the
-two slow jobs in the matrix; `timeout-minutes: 20` is a backstop against a
+Cold image pulls still make `e2e` — nine containers to this job's three — the
+slow job in the matrix; both keep `timeout-minutes: 20` as a backstop against a
 container that never reaches healthy. A `docker ps -a` + `supabase status` step
 runs `if: failure()` for triage.
 

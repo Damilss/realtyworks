@@ -244,11 +244,19 @@ Four things about that setup are load-bearing:
   inlined into the bundle. The rename is a `sed` rather than a third
   `--override-name` because `supabase status --help` documents no override path
   for that key, and a wrong one emits nothing at all instead of erroring.
-- **The `-x` list mirrors the `db` job**, with the same rule: never exclude `db`
-  or `storage`. `inbucket` is excluded only because
-  `[auth.email] enable_confirmations` is `false` — turning confirmations on
-  (backlog, required before the Phase 4 public deploy) makes signup send mail,
-  and this job will then need the mailbox back.
+- **The `-x` list is deliberately not the `db` job's, and must not be synced to
+  it.** That job talks to Postgres directly and drops Kong, PostgREST and
+  Realtime; this one drives the app over HTTP and needs all three. The shared
+  rule is narrower than it looks: never exclude `storage-api`, and `db` is not
+  excludable at all. Two further things to know before editing this list.
+  `functions`, `analytics` and `inbucket` are **not valid `-x` values** and are
+  silently ignored, so logflare and mailpit boot regardless — the job runs nine
+  containers, not the seven the list implies. And `inbucket` (really `mailpit`)
+  is only *meant* to be gone while `[auth.email] enable_confirmations` is
+  `false`; turning confirmations on (backlog, required before the Phase 4 public
+  deploy) makes signup send mail and this job needs the mailbox back. That is
+  why correcting the inert names is a backlog item rather than a drive-by fix —
+  the two decisions are coupled.
 
 `timeout-minutes: 20` caps a stack that never reaches healthy, same reasoning as
 the `db` job. Cold image pulls mean this is no longer a fast job — details in

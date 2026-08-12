@@ -1016,8 +1016,12 @@ order: land the logflare fix (the 930MB one) now, and settle mailpit as part of
 — this job drives the app over HTTP and needs all three.
 
 **Done when:** the `e2e` job's `supabase start` log no longer shows a logflare
-image pull, the Playwright suite is still green in CI, and `docs/tooling.md`'s
-`e2e` section no longer carries the "ignored names" caveat.
+image pull, the Playwright suite is still green in CI, and the "ignored names"
+caveat is gone from all three places that now carry it — `docs/tooling.md`'s
+`e2e` section, `docs/playwright.md`'s `-x` bullet, and the comment above the
+`e2e` job's `Start Supabase stack` step in `.github/workflows/ci.yml`. The
+container counts stated alongside them (nine for `e2e`, three for `db`) are
+part of the same edit: dropping logflare makes it eight.
 
 ### 🟡 Coverage visibility (not a gate)
 **Why:** See what's tested without chasing a %.

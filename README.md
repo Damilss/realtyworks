@@ -321,10 +321,12 @@ then boots the app and runs the Playwright vertical-slice specs against it —
 auth loop, staff write path, and vendor loop. (The job is still *named* "E2E
 (Playwright auth loop)" from when that was all it ran; renaming it would break
 any branch-protection rule that matches the check by name.) `db`
-boots the same stack and runs the pgTAP suite from `supabase/tests/`, so an
-RLS or write-guard regression fails CI rather than merging green. Both pull
-Docker images cold, so they, not `verify`, set the wall-clock. Details:
-[docs/tooling.md](docs/tooling.md).
+runs the pgTAP suite from `supabase/tests/`, so an RLS or write-guard regression
+fails CI rather than merging green — on a **deliberately smaller stack**, three
+containers to `e2e`'s nine, because pg_prove talks to Postgres directly and
+never makes an HTTP request. The two `-x` exclusion lists are not the same list
+and must not be synced. Both jobs pull Docker images cold, so they, not
+`verify`, set the wall-clock. Details: [docs/tooling.md](docs/tooling.md).
 
 The final step, `pnpm audit --audit-level=high`, is a blocking dependency
 vulnerability gate. Any high/critical advisory fails CI; moderate/low
