@@ -203,7 +203,7 @@ Verify before assuming they exist:
   `updateWorkOrderStatus` + `recordAttachment` in the work-order actions,
   `src/app/auth/confirm/route.ts`, and `/vendors`. **No migration** — every
   policy, grant and trigger this needed was already on `main`, which is what the
-  Phase 2 design was for. Four rules to carry forward:
+  Phase 2 design was for. Five rules to carry forward:
 
   **`SUPABASE_SECRET_KEY` is read lazily, inside `createAdminClient()`.** Never
   at module scope: the CI `verify` job runs `next build` with no stack and no
@@ -232,6 +232,18 @@ Verify before assuming they exist:
   against the running stack: `generateLink` **sends no email**, and the token is
   **single use**. Full reasoning and the other settled questions:
   `docs/vendor-access.md` §6.
+
+  **Never string-match a URL something downstream will re-parse** (added
+  2026-08-12, issue #105). `/auth/confirm`'s redirect guard checked
+  `startsWith("/")` and `!startsWith("//")`, and `/\evil.example` passed both —
+  `\` only becomes an authority separator once the WHATWG parser reads it, and
+  tabs/newlines are stripped *after* any string check would have approved them.
+  Parse with `new URL(value, origin)`, compare `.origin`, and return
+  `pathname + search + hash` so no host is ever emitted. The companion lesson is
+  about the test: the spec that appeared to cover it used a bogus token, so
+  verification failed and the guarded line never ran. **If deleting the guard
+  leaves its test green, the test does not cover the guard** — check by actually
+  deleting it once.
 - **Not yet created:** `supabase/functions/`, `src/app/api/`. Neither is a gap
   to fill on its own — edge functions are Phase 5 (§6 SMS), and the only route
   handler that exists is `src/app/auth/confirm/route.ts`, which is deliberately

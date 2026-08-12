@@ -93,6 +93,44 @@ Pick them off at your discretion.
 
 ## ✅ Done (kept for the paper trail)
 
+### ✅ `/auth/confirm` open redirect closed (2026-08-12, issue #105)
+`safeNext()` string-matched a value a URL parser was about to reinterpret:
+`next=%2F%5Cevil.example` decodes to `/\evil.example`, which starts with `/`,
+does not start with `//`, and therefore passed — then normalized to
+`//evil.example` in the browser, because `\` is equivalent to `/` in the
+authority position (WHATWG URL). It now resolves `next` with `new URL(next,
+origin)`, compares origins, and returns **only** `pathname + search + hash`.
+
+**Parse-and-compare closes the class, not the reported instance.** The tab and
+carriage-return variants (`/%09/evil.example`, `/%0d/evil.example`) were the
+proof that another prefix case was never the fix: the parser *strips* those
+characters, so any string check approves the value before the thing that makes
+it dangerous has happened. Emitting a bare path is the other half — with no
+authority in the `Location`, the guard still holds if `nextUrl.origin` were ever
+influenced by a spoofed `Host`.
+
+**The test that appeared to cover this could not reach it.** The old e2e spec
+passed `token_hash=bogus`, so `verifyOtp` failed, the handler redirected to
+`/login?error=invalid-link`, and `next` was never read — it asserted we stayed
+on our own host for reasons unrelated to the guard. Confirmed the way the issue
+asked for: with `safeNext()` neutered, the rewritten spec fails on
+`net::ERR_NAME_NOT_RESOLVED at .../evil.example` — the browser genuinely leaves
+the site — and 9 of the 14 new unit cases go red. Same shape as the `z.uuid()`
+regression: a green test over a fixture that cannot reach the code under test.
+
+Two layers, deliberately duplicating one list (each table carries a comment
+pointing at the other). `src/app/auth/confirm/route.test.ts` (new, 14 cases)
+mocks `createClient` and `redirect` — the `src/server/actions/auth.test.ts`
+idiom — and covers every hostile shape plus the contract around it: a failed
+verification never reads `next`, a `type` outside `ALLOWED_TYPES` never reaches
+Supabase, and no accepted *or* refused destination ever carries a host.
+`tests/e2e/vendor-loop.spec.ts` redeems a **real, unspent token per case** (six
+hostile, then a legitimate `/work-orders/<id>` to prove deep-linking survives),
+which is what proves the redirect line executes at all. `mintInviteLink()` now
+waits for the link field's value to *change* before reading it — re-minting
+otherwise hands back the token just spent. 179 unit tests across 17 files; the
+vendor-loop suite is 7 specs, green in 7.1s locally.
+
 ### ✅ js-yaml + nanoid high advisories cleared (2026-08-07)
 Two highs broke the blocking `pnpm audit` gate in CI: **js-yaml**
 (GHSA-5p4m-2wfm-xmqj — quadratic CPU consumption resolving `!!omap`, patched in
@@ -583,80 +621,6 @@ required-check names are unchanged; the OSV scan surfaces as a non-required
 ---
 
 ## 🟠 High
-
-### 🟠 Reject backslash-based external redirects in `/auth/confirm` (issue #105, PR review, P2)
-**Why:** `safeNext()` in `src/app/auth/confirm/route.ts` is meant to guarantee
-the post-verification redirect stays same-origin, and it does not.
-`next=%2F%5Cevil.example` decodes to `/\evil.example` — starts with `/`, does not
-start with `//`, so it passes and is written straight to `Location`. Browsers
-treat `\` as `/` in the authority position (WHATWG URL), so it normalizes to
-`//evil.example` and the user lands off-site. Backslash is the headline case, not
-the only one: `/\/evil.example` and tab/newline variants (`/%09/evil.example`,
-`/%0d/evil.example`, both stripped by the parser before it runs) get through the
-same way.
-
-The root cause is **string-matching a value that a URL parser will later
-reinterpret**. Any allowlist built on `startsWith` eventually loses that
-argument, so the fix is not another prefix case.
-
-This is the one endpoint in the app that mints a session, and the redirect fires
-*after* a successful `verifyOtp` — so the victim is genuinely logged in when they
-land on the attacker's page, which is what makes a "session expired, sign in
-again" page work. Exploitability is bounded: it needs a **valid, unspent** magic
-link, since a failed verification redirects to `/login` and never reads `next`.
-But that is the normal state of an invite in transit, and
-`docs/vendor-access.md` §3a sets the threat model as *assume the link reaches
-someone it shouldn't* — a forwarded invite re-crafted with a hostile `next` is
-exactly the scenario. P2 is right: not remotely exploitable, real once a link
-leaks.
-
-**Two things hid this, both worth fixing with it.** The doc comment calls the
-check "the cheap, complete defence", which is an overclaim that reads as
-assurance. And the e2e spec
-(`tests/e2e/vendor-loop.spec.ts`, "refuses an off-site redirect") passes
-`token_hash=bogus` — so verification fails, the handler redirects to
-`/login?error=invalid-link`, and `next` **is never read**. It asserts we stayed
-on our own host, which we did for unrelated reasons; deleting `safeNext()`
-outright would leave it green. Same shape as the `z.uuid()` regression: a green
-test over a fixture that cannot reach the code under test.
-
-**Do:** stop string-matching. Parse with the same parser the browser will use,
-compare origins, and never emit a host:
-
-```ts
-function safeNext(next: string | null, origin: string): string {
-  if (!next) return "/dashboard";
-
-  let url: URL;
-  try {
-    url = new URL(next, origin);
-  } catch {
-    return "/dashboard";
-  }
-
-  if (url.origin !== origin) return "/dashboard";
-
-  // Path only — a host is never emitted, so even a spoofed Host header cannot
-  // turn this into an off-site Location.
-  return `${url.pathname}${url.search}${url.hash}`;
-}
-```
-
-Called as `safeNext(searchParams.get("next"), request.nextUrl.origin)`. This
-closes the class rather than the reported instance — `/\evil.example` resolves to
-origin `http://evil.example` and fails the comparison, absolute URLs fail it, and
-tab/newline injections are stripped before comparison. Returning only
-`pathname + search + hash` is the load-bearing part: because the result is always
-a bare path, the guard degrades safely even if `nextUrl.origin` were influenced
-by a spoofed `Host`. Rewrite the doc comment to describe parse-and-compare and
-drop the completeness claim.
-
-**Done when:** `next=%2F%5Cevil.example` lands on `/dashboard`; the e2e spec
-exercises the guard with a **real, valid token** so the redirect line actually
-executes, tabling `//evil.example`, `%2F%5Cevil.example`, `/%09/evil.example`,
-`https://evil.example`, and one legitimate `/work-orders/<id>` to prove
-deep-linking still works; and deleting `safeNext()` makes that spec fail —
-confirmed by actually doing it once, given the above.
 
 ### 🟠 Turn on email confirmations before the Phase 4 public deploy (issue #93)
 **Why:** `[auth.email] enable_confirmations = false` was harmless while signup
@@ -1214,15 +1178,15 @@ started** → **auth loop + open signup: the read half of the slice** →
 **service-role table grants narrowed** → **the staff write path** → **the vendor
 half: Phase 3 complete**, merged to `main` 2026-08-04 as PR #94.)*
 
-**Phase 4 (hosted deployment) is the critical path** (`CLAUDE.md` §1/§4). The two
-🟠 items are gates on it, not parallel work — both land on `/auth/confirm`, the
-one endpoint the deploy exposes that mints a session.
+**Phase 4 (hosted deployment) is the critical path** (`CLAUDE.md` §1/§4). Both
+🟠 gates on it landed on `/auth/confirm`, the one endpoint the deploy exposes
+that mints a session; the first is now closed (2026-08-12, see ✅) and the
+second is the last thing standing between here and the deploy.
 
-1. **Fix the `/auth/confirm` open redirect** (🟠, issue #105). Smallest of the
-   three, and it is the endpoint about to face the internet. Note the second
-   half: the e2e spec that appears to cover it uses `token_hash=bogus`, so
-   verification fails before `next` is ever read — deleting `safeNext()` leaves
-   it green. Fix the spec with the guard.
+1. ~~**Fix the `/auth/confirm` open redirect** (🟠, issue #105).~~ ✅ Done
+   2026-08-12 — parse-and-compare, and the e2e spec now redeems real tokens
+   instead of `token_hash=bogus`, so deleting `safeNext()` no longer leaves it
+   green.
 2. **Turn on email confirmations** (🟠, issue #93). Hard gate on a public
    deploy — today anyone can register against an address they don't own and be
    signed in immediately. Cheaper than it was, since `/auth/confirm` already does
@@ -1251,8 +1215,9 @@ The security + CI + commit-hygiene foundation is green, the Phase 2 schema is on
 `main`, and as of 2026-08-04 so is the whole Phase 3 vertical slice. What shifted
 with it: the open items are no longer "wire the plumbing" or "write the
 mutations" but **"make it real for someone other than you"** — and the two 🟠
-gates (email confirmations, the open redirect) plus CAPTCHA all exist because
-signup is open to the public. They are the price of that call, not surprises.
+gates (email confirmations, the open redirect — the second closed 2026-08-12)
+plus CAPTCHA all exist because signup is open to the public. They are the price
+of that call, not surprises.
 The 🟡 bucket is now mostly latent defects and DX debt; none of it should
 displace Phase 4, and the four items added 2026-08-07 (#86/#89, #87, #84, #102)
 are explicitly fill-in work around it.
