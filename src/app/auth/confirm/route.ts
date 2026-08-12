@@ -31,24 +31,49 @@ const ALLOWED_TYPES = new Set(["magiclink", "invite"]);
  *
  * This is the one endpoint in the app that mints a session, which makes it the
  * worst possible place for an open redirect: a link that logs someone in and
- * then bounces them to an attacker's page is a credible phishing primitive.
- * Rejecting anything but a relative path is the cheap, complete defence —
- * `//evil.example` is protocol-relative and must be refused too, which is why
- * the second character is checked.
+ * then bounces them to an attacker's page is a credible phishing primitive —
+ * the victim is genuinely signed in when they land, which is exactly what makes
+ * a "session expired, sign in again" page work.
+ *
+ * So `next` is resolved with the same parser the browser will use, and the
+ * origins are compared. **Prefix matching cannot do this job**, which is what
+ * the previous version of this guard tried: it rejected `//evil.example` but
+ * admitted `/\evil.example`, because `\` is only equivalent to `/` once the
+ * WHATWG URL parser reads it in the authority position. Tabs and newlines are
+ * worse still — the parser strips them, so `/%09/evil.example` becomes
+ * `//evil.example` *after* any string check has already approved it. Matching a
+ * value that something downstream will reinterpret loses that argument
+ * eventually; parsing it first does not.
+ *
+ * The return value is deliberately a bare path. Emitting no host means even a
+ * spoofed `Host` header — which is where `nextUrl.origin` comes from — cannot
+ * turn this into an off-site `Location`.
  */
-function safeNext(next: string | null): string {
-  if (!next || !next.startsWith("/") || next.startsWith("//")) {
+function safeNext(next: string | null, origin: string): string {
+  if (!next) {
     return "/dashboard";
   }
 
-  return next;
+  let url: URL;
+
+  try {
+    url = new URL(next, origin);
+  } catch {
+    return "/dashboard";
+  }
+
+  if (url.origin !== origin) {
+    return "/dashboard";
+  }
+
+  return `${url.pathname}${url.search}${url.hash}`;
 }
 
 export async function GET(request: NextRequest) {
   const { searchParams } = request.nextUrl;
   const tokenHash = searchParams.get("token_hash");
   const type = searchParams.get("type");
-  const next = safeNext(searchParams.get("next"));
+  const next = safeNext(searchParams.get("next"), request.nextUrl.origin);
 
   if (!tokenHash || !type || !ALLOWED_TYPES.has(type)) {
     redirect("/login?error=invalid-link");

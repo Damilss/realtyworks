@@ -115,11 +115,19 @@ async function createAndAssign(
  * clipboard permissions — and, more to the point, what keeps it copyable for a
  * user whose browser refuses the Clipboard API.
  */
-async function mintInviteLink(page: Page): Promise<string> {
+async function mintInviteLink(page: Page, previous?: string): Promise<string> {
   await page.getByRole("button", { name: /sign-in link/i }).click();
 
   const linkField = page.getByLabel("Sign-in link");
   await expect(linkField).toBeVisible();
+
+  // Re-minting: the field is already on screen holding the *previous* link — the
+  // action is pending, and useActionState serves the last state until it
+  // resolves — so reading straight away hands back a token that has just been
+  // spent. The value changing is the only signal that the new one has landed.
+  if (previous !== undefined) {
+    await expect(linkField).not.toHaveValue(previous);
+  }
 
   const url = await linkField.inputValue();
   expect(url).toContain("/auth/confirm?");
@@ -296,18 +304,93 @@ test("a reassignment clears the outgoing vendor's link from the page", async ({
   await expect(page.getByLabel("Sign-in link")).toHaveCount(0);
 });
 
-test("the confirm endpoint refuses an off-site redirect", async ({ page }) => {
-  // This is the one endpoint that mints a session, which makes it the worst
-  // place in the app for an open redirect: a link that logs someone in and then
-  // bounces them somewhere else is a ready-made phishing step. A bad token still
-  // fails, but the assertion is that we never left our own origin on the way.
-  const response = await page.goto(
-    "/auth/confirm?token_hash=bogus&type=magiclink&next=//evil.example/",
-  );
+/**
+ * Destinations that must never survive `safeNext()` in
+ * src/app/auth/confirm/route.ts.
+ *
+ * Mirrored — deliberately — by the table in src/app/auth/confirm/route.test.ts;
+ * keep the two in step. That layer proves the logic case by case in
+ * milliseconds. This one proves the guard is *reached*, which is the half the
+ * previous version of this spec missed.
+ *
+ * Written **decoded**: `URLSearchParams` re-encodes, so the second entry is
+ * sent as `next=%2F%5Cevil.example` — the exact reported payload — without
+ * hand-encoding it into something the handler never sees.
+ */
+const OFF_SITE_NEXT = [
+  "//evil.example/",
+  "/\\evil.example",
+  "/\\/evil.example",
+  "/\t/evil.example",
+  "/\r/evil.example",
+  "https://evil.example/",
+];
 
-  expect(new URL(page.url()).host).toBe("127.0.0.1:3000");
-  expect(response?.status()).toBeLessThan(400);
-  await expect(page).toHaveURL("/login?error=invalid-link");
+/** Re-crafts a minted invite to point somewhere else, as an attacker would. */
+function withNext(inviteUrl: string, next: string): string {
+  const url = new URL(inviteUrl);
+  url.searchParams.set("next", next);
+
+  return url.toString();
+}
+
+test("the confirm endpoint refuses an off-site redirect", async ({
+  page,
+  browser,
+}, testInfo) => {
+  // Seven invites and seven contexts, well past the default 30s.
+  test.slow();
+
+  // This is the one endpoint that mints a session, which makes it the worst
+  // place in the app for an open redirect: the victim is genuinely signed in
+  // when they land on the attacker's page, which is what makes a "session
+  // expired, sign in again" form work.
+  //
+  // Every case below redeems a **real, unspent** token, and that is the whole
+  // point. The previous version of this spec passed `token_hash=bogus`:
+  // verification failed, the handler bounced to /login, and `next` was never
+  // read — so it asserted we stayed on our own host for reasons that had
+  // nothing to do with the guard, and deleting `safeNext()` left it green
+  // (docs/backlog.md).
+  const vendor = vendorIdentity(testInfo, "Redirect");
+  const title = workOrderTitle(testInfo, "Redirect guard");
+
+  await signIn(page, "manager@realtyworks.test");
+  await addVendor(page, vendor);
+  const workOrderUrl = await createAndAssign(page, title, vendor.name);
+  const workOrderPath = new URL(workOrderUrl).pathname;
+
+  let minted: string | undefined;
+
+  for (const next of OFF_SITE_NEXT) {
+    // A fresh token per case — they are single use, and a spent one fails
+    // verification before the redirect line is ever reached.
+    minted = await mintInviteLink(page, minted);
+
+    const vendorPage = await freshPage(browser);
+    await vendorPage.goto(withNext(minted, next));
+
+    // Landed on the fallback…
+    await expect(vendorPage).toHaveURL("/dashboard");
+    // …and genuinely signed in. That second assertion is what proves the token
+    // verified and the guard ran: a refused token would be on /login instead.
+    await expect(
+      vendorPage.getByRole("banner").getByText(vendor.name),
+    ).toBeVisible();
+
+    await vendorPage.context().close();
+  }
+
+  // And a legitimate destination still arrives, so the guard is not simply
+  // swallowing every `next` — deep-linking the assigned job is what the invite
+  // is for (docs/vendor-access.md §3b).
+  minted = await mintInviteLink(page, minted);
+
+  const deepLinked = await freshPage(browser);
+  await deepLinked.goto(withNext(minted, workOrderPath));
+
+  await expect(deepLinked).toHaveURL(workOrderPath);
+  await expect(deepLinked.getByRole("heading", { name: title })).toBeVisible();
 });
 
 test("a vendor cannot reach the vendors page", async ({ page }) => {
