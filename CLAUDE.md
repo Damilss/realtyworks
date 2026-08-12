@@ -546,6 +546,12 @@ See §7. Should be a weekend job, not a rewrite, if §5/§7 rules are followed.
 - **Test what matters, not the framework.** Vitest on business logic (work-order
   state transitions, permission checks). Playwright on the one or two critical
   E2E happy paths. Not chasing coverage %.
+- **A test that passes with the code deleted is decoration.** Twice now a green
+  test has covered nothing: `z.uuid()` (fixtures the real database would never
+  produce) and the `/auth/confirm` redirect guard (a bogus token, so the guarded
+  line never ran). For anything security-shaped, **delete the thing under test
+  once and watch the test fail** — it takes a minute and it is the only proof
+  the fixture reaches the code. §0 has both cases.
 - **Audit trail is a product feature, not a nice-to-have.** "Who changed what,
   when" and "was the vendor notified" must be answerable from our DB.
 
