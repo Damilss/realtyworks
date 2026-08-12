@@ -734,6 +734,50 @@ account-settings affordance, and `scope: "others"` exists for it when wanted
 signing out of one leaves the other able to load `/dashboard`; pinned by the unit
 assertion above.
 
+### 🟡 Reassignment does not revoke an outstanding invite link (PR review, P2)
+**Why:** `docs/playwright.md` and `README.md` both listed "revocation on
+reassignment" among the vendor-loop guarantees, and neither the code nor the test
+delivers one. `assignVendor` (`src/server/actions/work-orders.ts`) writes
+`vendor_id` — and a status bump from `open` — and touches nothing else; nothing in
+GoTrue, nothing in `vendors.profile_id`. The spec it leaned on discards the URL it
+minted and asserts only `getByLabel("Sign-in link")` is gone from the *manager's*
+page, which is the `key={assignedVendor.id}` remount dropping the panel's
+`useActionState`. So a link copied before the reassignment still redeems and still
+signs its holder in as the **outgoing** vendor. RLS does hide the reassigned job
+from them; their other assigned jobs are exactly as visible as before.
+
+**The overclaim is fixed** (2026-08-12) — both docs now say "clears the stale
+link from the page", the caveat is spelled out under the spec table in
+`docs/playwright.md`, and the spec is renamed to what it asserts. What is left is
+the product question, filed here rather than silently closed.
+
+Sized Medium, not High, deliberately: the token grants precisely the access the
+manager *intended* to grant that vendor minutes earlier, it is single use, and it
+dies in an hour (`[auth.email] otp_expiry = 3600`). The defect was the promise,
+not the exposure. Move it up if the intended semantics turn out to be "reassign =
+cut off", which is the call below.
+
+**Decide first, then build:** does reassignment mean "this job moved" or "that
+vendor is out"? Today it means the first, and the second already has a lever —
+unlink `vendors.profile_id` and `current_vendor_id()` resolves NULL on the very
+next request, mid-session (`docs/vendor-access.md` §6). No UI exposes it, which is
+the more useful gap. Note also that token revocation alone would be theatre: if
+the outgoing vendor already *redeemed* the link they hold a live session, and only
+the `profile_id` unlink touches that.
+
+**Do (in order):** (1) add the deliberate "revoke vendor access" control that
+unlinks `profile_id`, with an activity-trail entry — that is the real requirement
+§3c asked for; (2) only if reassignment should imply it, call that same path from
+`assignVendor` and say so in the UI, since silently cutting a vendor off from
+their *other* jobs because one moved would be worse than the current behaviour.
+Do **not** resurrect the rejected `vendor_access` table for this
+(`docs/vendor-access.md` §6) — per-invite `revoked_at` buys nothing the
+`profile_id` unlink does not already give.
+
+**Done when:** whichever semantics is chosen, an e2e spec mints a link, triggers
+the revocation path, *replays the URL it kept*, and asserts the holder does not
+end up with a working session — the assertion the current spec skipped.
+
 ### 🟡 A sign-in failure blames the password even when Supabase is unreachable
 **Why:** `signIn()` in `src/server/actions/auth.ts` collapses every non-429
 failure into one string:

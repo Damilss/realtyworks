@@ -278,7 +278,8 @@ way — is in [Testing](#testing) below and [docs/playwright.md](docs/playwright
   wrong password, signed-out redirect, sign out), `work-orders.spec.ts` (create,
   assign, note, the 404 and vendor-refusal paths), and `vendor-loop.spec.ts`
   (invite → redeem a real magic link in a second browser context → status +
-  photo, plus single-use and revocation). Requires a one-time browser download:
+  photo, plus single-use and the stale link clearing from the page on
+  reassignment). Requires a one-time browser download:
   `pnpm exec playwright install chromium`, and a seeded local stack. All of them
   run in CI (the parallel `e2e` job in `.github/workflows/ci.yml`), which boots
   its own Supabase stack — so CI proves the app runs *and* that RLS holds

@@ -12,13 +12,24 @@ whole Phase 3 vertical slice — 23 specs across four files, all against a
 | `smoke.spec.ts` | 1 | the app boots and serves a page |
 | `auth.spec.ts` | 8 | the auth loop: sign in as each seeded role, self-register, wrong password, rejected signup keeps its fields, signed-out redirect, root redirect, sign out |
 | `work-orders.spec.ts` | 7 | the staff write path: create, assign, note (and the blank-note refusal), assignment making a job visible to its vendor, select state after a failed submit, a malformed id 404, a vendor refused the create form |
-| `vendor-loop.spec.ts` | 7 | the vendor half: invite → redeem a real magic link in a second browser context → status + photo; single use, revocation on reassignment, the off-site redirect refusal, and the two un-invitable vendor cases |
+| `vendor-loop.spec.ts` | 7 | the vendor half: invite → redeem a real magic link in a second browser context → status + photo; single use, the stale link cleared from the page on reassignment (UI only — see below), the off-site redirect refusal, and the two un-invitable vendor cases |
 
 The suite's point is not "a cookie was set." It is that the *same* URL renders
 different rows for different people — the manager sees every seeded work order,
 the assigned vendor sees only theirs, a self-registered stranger sees none. That
 is RLS observed through the product, and it is only meaningful against a real
 database.
+
+**What the reassignment spec does not prove.** It asserts the outgoing vendor's
+link is gone from the *manager's page* — the `key={assignedVendor.id}` remount in
+`work-orders/[id]/page.tsx` dropping the `useActionState` that held it, so a
+bearer token never sits on screen under the incoming vendor's name. It is not
+token revocation. `assignVendor` writes `vendor_id` and nothing else; a link
+already copied before the reassignment still redeems and still signs its holder
+in as the *outgoing* vendor. RLS then hides the reassigned job from them, but
+their other assigned jobs are visible exactly as before. Reassignment is a change
+of job, not a change of access — see `docs/backlog.md` ("Reassignment does not
+revoke an outstanding invite link") for what real revocation would take.
 
 **Assertions are by identity, never by row count.** The config runs fully
 parallel against one shared database and most specs write to it, so "every work
@@ -139,7 +150,8 @@ tests/e2e/work-orders.spec.ts  # the staff write path: create, assign, note (+ t
                                # bad-id 404, a vendor refused the create form
 tests/e2e/vendor-loop.spec.ts  # the vendor half: invite, redeem the link in a
                                # second browser context, status + photo, single
-                               # use, revocation on reassign, off-site redirect
+                               # use, the stale link cleared on reassign,
+                               # off-site redirect
 ```
 
 Test runners stay separated by directory: **Vitest** collects `src/**` and
