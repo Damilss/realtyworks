@@ -233,16 +233,39 @@ in and then bounces them wherever the crafter chose, which is what makes a fake
 "session expired, sign in again" page work.
 
 `safeNext()` in `src/app/auth/confirm/route.ts` resolves `next` with
-`new URL(next, origin)`, refuses anything whose origin is not ours, and returns
-**only** `pathname + search + hash` — no host is ever emitted, so the guard
-still holds if `nextUrl.origin` were influenced by a spoofed `Host` header.
+`new URL(next, origin)`, refuses anything whose origin is not ours, reduces what
+is left to `pathname + search + hash`, and then **parses that result a second
+time and requires it to still be the same same-origin path**. No host is ever
+emitted, so the guard still holds if `nextUrl.origin` were influenced by a
+spoofed `Host` header.
 
-It originally string-matched the prefix, and that was wrong in a way worth
-keeping on record: `/\evil.example` starts with `/`, does not start with `//`,
-and normalizes to `//evil.example` anyway, because `\` only becomes an authority
-separator once the WHATWG parser reads it. Tabs and newlines are stripped by
-that same parser, *after* any string check has already approved the value.
-**Never string-match a URL something downstream will re-parse.**
+It took two passes to get there, and both failures are the same mistake seen
+from opposite ends.
+
+*The input.* The first version string-matched the prefix: `/\evil.example`
+starts with `/`, does not start with `//`, and normalizes to `//evil.example`
+anyway, because `\` only becomes an authority separator once the WHATWG parser
+reads it. Tabs and newlines are stripped by that same parser, *after* any string
+check has already approved the value. **Never string-match a URL something
+downstream will re-parse.**
+
+*The output.* Parsing the input fixed that and left the mirror image behind
+(caught in review on the fix's own PR, 2026-08-24).
+`https://app.example//evil.example` is same-origin by every measure `URL`
+reports — `evil.example` is in the **pathname**, not the authority — so the
+origin check passes and the bare path handed to `redirect()` is
+`//evil.example`, protocol-relative the instant the browser parses the
+`Location`. Next.js sets that header verbatim
+(`route-modules/app-route/module.js`: `new Headers({ Location: url })`), so
+nothing downstream was going to save it. Runs of leading slashes and the
+backslashes the parser folds into them are the same family: `${origin}/\/evil`
+reduces to `///evil`, and `///evil` is `http://evil/` to a browser too.
+
+The round trip is the general answer rather than a longer denylist: **whatever
+we emit must parse, by the same rules the browser uses, back into the value we
+think it is.** A genuine destination is already a fixed point — the first
+parse normalized it — so only values that mean one thing to us and another to
+the browser get refused.
 
 Scope, precisely: this is a guard on the *destination*, not on the token. A
 leaked link is still a login (§3c is what revokes it) — this only ensures that

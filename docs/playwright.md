@@ -12,7 +12,7 @@ whole Phase 3 vertical slice — 23 specs across four files, all against a
 | `smoke.spec.ts` | 1 | the app boots and serves a page |
 | `auth.spec.ts` | 8 | the auth loop: sign in as each seeded role, self-register, wrong password, rejected signup keeps its fields, signed-out redirect, root redirect, sign out |
 | `work-orders.spec.ts` | 7 | the staff write path: create, assign, note (and the blank-note refusal), assignment making a job visible to its vendor, select state after a failed submit, a malformed id 404, a vendor refused the create form |
-| `vendor-loop.spec.ts` | 7 | the vendor half: invite → redeem a real magic link in a second browser context → status + photo; single use, the stale link cleared from the page on reassignment (UI only — see below), the off-site redirect refusal (six payloads, each against its own real token — see below), and the two un-invitable vendor cases |
+| `vendor-loop.spec.ts` | 7 | the vendor half: invite → redeem a real magic link in a second browser context → status + photo; single use, the stale link cleared from the page on reassignment (UI only — see below), the off-site redirect refusal (eight payloads, each against its own real token — see below), and the two un-invitable vendor cases |
 
 The suite's point is not "a cookie was set." It is that the *same* URL renders
 different rows for different people — the manager sees every seeded work order,
@@ -42,6 +42,14 @@ re-crafted spent link fails verification and lands right back in the old trap)
 and asserts two things together: the landing page is `/dashboard`, *and* the
 banner names the vendor. The second half is the load-bearing one — being signed
 in is what proves verification succeeded and the guarded redirect actually ran.
+
+Its payload table takes the app's origin as an argument rather than being a list
+of literals, because two of the payloads need it: `${origin}//evil.example` and
+`${origin}/\/evil.example` are the same-origin spellings that smuggle the host
+into the *pathname* (`docs/vendor-access.md` §6a). Every entry is mirrored in
+`src/app/auth/confirm/route.test.ts` — that layer proves the logic case by case
+in milliseconds, this one proves the guard is reached at all — so a payload
+added to either belongs in both.
 
 The general rule, and it is cheap: **delete the thing under test and watch the
 spec fail.** If it stays green, the spec is decoration. Same shape as the

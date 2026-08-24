@@ -89,6 +89,17 @@ const OFF_SITE_NEXT = [
   ["an embedded tab, which the URL parser strips", "/\t/evil.example"],
   ["an embedded carriage return", "/\r/evil.example"],
   ["an absolute URL on another origin", "https://evil.example/"],
+  // The last two are same-origin by every measure the parser reports: the host
+  // sits in the *pathname*, so the guard only catches them by re-reading what
+  // it is about to emit.
+  [
+    "our own origin with the host smuggled into its path",
+    `${ORIGIN}//evil.example`,
+  ],
+  [
+    "our own origin with a backslash smuggled into its path",
+    `${ORIGIN}/\\/evil.example`,
+  ],
 ] as const;
 
 beforeEach(() => {

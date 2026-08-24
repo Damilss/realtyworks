@@ -315,15 +315,21 @@ test("a reassignment clears the outgoing vendor's link from the page", async ({
  *
  * Written **decoded**: `URLSearchParams` re-encodes, so the second entry is
  * sent as `next=%2F%5Cevil.example` — the exact reported payload — without
- * hand-encoding it into something the handler never sees.
+ * hand-encoding it into something the handler never sees. Each entry is a
+ * function of the app's origin, because two of them need it.
  */
-const OFF_SITE_NEXT = [
-  "//evil.example/",
-  "/\\evil.example",
-  "/\\/evil.example",
-  "/\t/evil.example",
-  "/\r/evil.example",
-  "https://evil.example/",
+const OFF_SITE_NEXT: ((origin: string) => string)[] = [
+  () => "//evil.example/",
+  () => "/\\evil.example",
+  () => "/\\/evil.example",
+  () => "/\t/evil.example",
+  () => "/\r/evil.example",
+  () => "https://evil.example/",
+  // The last two take the app's own origin, because that is the whole trick:
+  // the host rides in the *pathname*, so the parse the guard does says
+  // same-origin and the bare path it would emit says `//evil.example`.
+  (origin: string) => `${origin}//evil.example`,
+  (origin: string) => `${origin}/\\/evil.example`,
 ];
 
 /** Re-crafts a minted invite to point somewhere else, as an attacker would. */
@@ -338,7 +344,7 @@ test("the confirm endpoint refuses an off-site redirect", async ({
   page,
   browser,
 }, testInfo) => {
-  // Seven invites and seven contexts, well past the default 30s.
+  // Nine invites and nine contexts, well past the default 30s.
   test.slow();
 
   // This is the one endpoint that mints a session, which makes it the worst
@@ -362,13 +368,13 @@ test("the confirm endpoint refuses an off-site redirect", async ({
 
   let minted: string | undefined;
 
-  for (const next of OFF_SITE_NEXT) {
+  for (const buildNext of OFF_SITE_NEXT) {
     // A fresh token per case — they are single use, and a spent one fails
     // verification before the redirect line is ever reached.
     minted = await mintInviteLink(page, minted);
 
     const vendorPage = await freshPage(browser);
-    await vendorPage.goto(withNext(minted, next));
+    await vendorPage.goto(withNext(minted, buildNext(new URL(minted).origin)));
 
     // Landed on the fallback…
     await expect(vendorPage).toHaveURL("/dashboard");
