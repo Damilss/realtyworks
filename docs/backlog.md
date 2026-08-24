@@ -93,6 +93,41 @@ Pick them off at your discretion.
 
 ## ✅ Done (kept for the paper trail)
 
+### ✅ nanoid high advisory cleared again — the patched floor moved (2026-08-24, issue #110)
+The blocking `pnpm audit` gate went red on **GHSA-2v37-7h3g-55p8**, the *same*
+advisory the 2026-08-07 entry below cleared. Nothing regressed in the tree: the
+advisory's **patched floor moved from 3.3.17 to 3.3.18**, so the exact version
+that closed this three weeks ago became the flagged one. That is the transferable
+part — a cleared advisory is not permanently cleared, and the audit gate is the
+only thing that notices.
+
+**Another stale lockfile pin, so again no override.** `postcss@8.5.25` declares
+`nanoid: "^3.3.16"`, which admits 3.3.18, and 3.3.18 is published — so the
+`pnpm-workspace.yaml` rule (force a transitive version only when the patched one
+falls *outside* the parent's declared range) says update, not override.
+`pnpm update nanoid --depth Infinity` was the whole fix; `pnpm-workspace.yaml`
+and `package.json` are unchanged. Third clearance of this shape, after fast-uri
+(2026-07-21) and js-yaml + nanoid (2026-08-07). Ignore the audit table's "5
+paths": it is one deduped copy under `postcss`, shared by next /
+`@tailwindcss/postcss` / vite, and `pnpm why nanoid` still reports "Found 1
+version".
+
+Verified in `pnpm-lock.yaml` rather than `node_modules`, since
+`--frozen-lockfile` is what CI actually reads — both the `packages:` and
+`snapshots:` entries resolve `nanoid@3.3.18` and nothing else. The lockfile diff
+carries one unrelated line: pnpm recorded a `deprecated:` note on `eslint@9.39.4`
+that the registry has since added. No version moved with it. Full gate green
+afterwards: lint → format:check → typecheck → 181 tests across 17 files → build →
+audit ("No known vulnerabilities found", exit 0). Note that `next build` needs
+`NEXT_PUBLIC_SUPABASE_*` set; the CI `verify` job's non-secret placeholders
+reproduce it locally without a stack.
+
+**Left open deliberately:** whether the moved floor is a revision of the original
+advisory or a separate incomplete-fix follow-up (the way GHSA-fxqj-rqcc-2cmp was
+for postcss), and why Dependabot did not open a security PR for a transitive,
+lockfile-only bump. Finding out from a red CI gate is worse than finding out from
+a Dependabot PR, and this is the second nanoid occurrence.
+
 ### ✅ `/auth/confirm` open redirect closed (2026-08-12, issue #105)
 `safeNext()` string-matched a value a URL parser was about to reinterpret:
 `next=%2F%5Cevil.example` decodes to `/\evil.example`, which starts with `/`,
@@ -621,49 +656,6 @@ required-check names are unchanged; the OSV scan surfaces as a non-required
 ---
 
 ## 🟠 High
-
-### 🟠 Clear the nanoid high advisory — the blocking audit gate is red again (GHSA-2v37-7h3g-55p8)
-**Why:** `pnpm audit --audit-level=high` exits 1 today, and the CI `verify` job's
-audit step is **blocking** — so every PR fails on it, including the ones for the
-items below. This is the *same* GHSA the 2026-08-07 entry cleared (see ✅):
-nanoid loops indefinitely when a custom generator is called with size zero. What
-changed is the advisory's patched floor, which moved from **3.3.17 to 3.3.18** —
-so the exact version that closed this three weeks ago is now itself flagged, and
-the lockfile is pinned one patch short again. Check the advisory page for whether
-that is a revision of the original or a separate incomplete-fix follow-up, the
-way GHSA-fxqj-rqcc-2cmp lifted postcss's floor to 8.5.23
-(`pnpm-workspace.yaml`) — it decides whether to expect a third bump.
-**Real exposure is nil**, which is why this is 🟠 and not 🔴: the loop needs a
-custom alphabet *and* `size: 0`, and the only consumer here is `postcss` minting
-source-map ids with default arguments. The gate is broken, not the app. But a
-blocking gate that is red blocks everything queued behind it, so it is not
-something to sit on.
-**Do:** `pnpm update nanoid --depth Infinity`. **No override** — and the rule
-that says so is already at the top of `pnpm-workspace.yaml`: force a transitive
-version only when the patched one falls *outside* the parent's declared range.
-`postcss@8.5.25` declares `nanoid: "^3.3.16"`, 3.3.18 satisfies that, and 3.3.18
-is published — so this is a stale lockfile pin, identical in shape to the
-2026-08-07 fix and to fast-uri before it. An override here would repeat the
-`minimatch`/`brace-expansion` mistake: a permanent pin nobody remembers to
-remove, which eventually becomes the thing *holding* a vulnerable version in
-place. Ignore the audit table's "5 paths" — `pnpm why nanoid` shows one deduped
-copy under `postcss`, shared by next / `@tailwindcss/postcss` / vite. There is
-one thing to fix, not five.
-**Verify in `pnpm-lock.yaml`, not `node_modules`** — `--frozen-lockfile` is what
-CI actually reads, and pnpm does not prune the virtual store on update, so stale
-`nanoid@3.3.17` directories will survive under `node_modules/.pnpm` unreferenced.
-**While you're there:** this is the third lockfile-pin clearance (fast-uri
-2026-07-21, js-yaml + nanoid 2026-08-07, now this) and the second for nanoid
-specifically. Dependabot is configured for weekly npm updates — worth one look at
-whether it opened a security PR for this and it got grouped into noise, or
-whether it never fired at all. If it never fires for transitive lockfile-only
-security bumps, the audit gate is doing Dependabot's job by failing CI, which is
-a worse place to find out.
-**Done when:** `pnpm audit --audit-level=high` exits 0; `pnpm why nanoid` reports
-3.3.18 and still "Found 1 version"; `pnpm-lock.yaml` resolves nanoid 3.3.18 and
-nothing else; `pnpm install --frozen-lockfile` succeeds against the committed
-lockfile; and the full gate re-runs green (lint → format:check → typecheck →
-test → build → audit).
 
 ### 🟠 Turn on email confirmations before the Phase 4 public deploy (issue #93)
 **Why:** `[auth.email] enable_confirmations = false` was harmless while signup
@@ -1221,18 +1213,15 @@ started** → **auth loop + open signup: the read half of the slice** →
 **service-role table grants narrowed** → **the staff write path** → **the vendor
 half: Phase 3 complete**, merged to `main` 2026-08-04 as PR #94.)*
 
-**Phase 4 (hosted deployment) is the critical path** (`CLAUDE.md` §1/§4) — but
-nothing merges at all while the blocking audit gate is red, so the nanoid bump
-jumps the queue on sequence, not on importance. Of the two 🟠 gates that
-landed on `/auth/confirm` — the one endpoint the deploy exposes that mints a
-session — the first is now closed (2026-08-12, see ✅) and the second is the
-last code-level thing standing between here and the deploy.
+**Phase 4 (hosted deployment) is the critical path** (`CLAUDE.md` §1/§4). Both
+🟠 gates on it landed on `/auth/confirm`, the one endpoint the deploy exposes
+that mints a session; the first is now closed (2026-08-12, see ✅) and the
+second is the last thing standing between here and the deploy.
 
-1. **Clear the nanoid high advisory** (🟠 above, GHSA-2v37-7h3g-55p8).
-   `pnpm update nanoid --depth Infinity`, no override — the advisory's patched
-   floor moved 3.3.17 → 3.3.18, so the 2026-08-07 clearance came undone. One
-   command, but the blocking audit step means every other item on this list is
-   sitting behind it.
+1. ~~**Clear the nanoid high advisory** (🟠, issue #110).~~ ✅ Done
+   2026-08-24 — `pnpm update nanoid --depth Infinity`, no override; the patched
+   floor had moved 3.3.17 → 3.3.18, undoing the 2026-08-07 clearance. Gate green
+   again.
 2. ~~**Fix the `/auth/confirm` open redirect** (🟠, issue #105).~~ ✅ Done
    2026-08-12 — parse-and-compare, and the e2e spec now redeems real tokens
    instead of `token_hash=bogus`, so deleting `safeNext()` no longer leaves it
