@@ -239,9 +239,18 @@ Verify before assuming they exist:
   `\` only becomes an authority separator once the WHATWG parser reads it, and
   tabs/newlines are stripped *after* any string check would have approved them.
   Parse with `new URL(value, origin)`, compare `.origin`, and return
-  `pathname + search + hash` so no host is ever emitted. The companion lesson is
-  about the test: the spec that appeared to cover it used a bogus token, so
-  verification failed and the guarded line never ran. **If deleting the guard
+  `pathname + search + hash` so no host is ever emitted — **then parse that
+  result again and require it to still be the same same-origin path** (added
+  2026-08-24, from review on the fix's own PR). Parsing the input alone leaves
+  the mirror-image hole: `${origin}//evil.example` puts the host in the
+  *pathname*, so `.origin` matches and the bare path emitted is
+  `//evil.example`, which `redirect()` writes to `Location` verbatim and the
+  browser reads as protocol-relative. The rule generalizes: **whatever you emit
+  must re-parse into what you think it is** — a real path is already a fixed
+  point, so nothing legitimate is refused and no denylist of spellings is
+  needed. The companion lesson is about the test: the spec that appeared to
+  cover it used a bogus token, so verification failed and the guarded line never
+  ran. **If deleting the guard
   leaves its test green, the test does not cover the guard** — check by actually
   deleting it once. Reasoning: `docs/vendor-access.md` §6a; the testing half:
   `docs/playwright.md`.
