@@ -82,7 +82,17 @@ the authoritative gate.**
    migration already on `main` is immutable (`CLAUDE.md` §5). Add a pgTAP case
    for anything that was an authorization bug, so the regression fails CI
    instead of merging green.
-4. **Write it down if it was surprising.** Notable snags get a report in
+4. **Prove the test reaches the fix — delete the guard and watch it fail.**
+   A green test over a fixture that cannot reach the code under test is
+   decoration, and it has happened twice here. The `/auth/confirm` redirect spec
+   passed `token_hash=bogus`, so verification failed before the redirect ran and
+   the guarded line never executed — deleting `safeNext()` outright left the
+   spec green (issue #105). The `z.uuid()` regression was the same shape one
+   layer over: fixtures were invented v4-shaped ids the seeded database would
+   never produce, so the schema looked correct while it rejected every real id.
+   For anything security-shaped, removing the protection for one run is the only
+   cheap proof that the assertion is attached to the thing it names.
+5. **Write it down if it was surprising.** Notable snags get a report in
    [`docs/reports/`](docs/reports/) from `TEMPLATE_REPORT.md`. The audit trail is
    a product feature here, not a nice-to-have.
 
@@ -120,6 +130,21 @@ in the same migration that creates it — retrofitting RLS is not allowed.
 server-side** — in RLS, a server action, or a database constraint. The client
 may mirror a check for UX and is never the source of truth (`CLAUDE.md` §2). A
 client-side-only check is a bug, not a defense.
+
+**One endpoint mints a session, and its destination is guarded rather than
+trusted.** `src/app/auth/confirm/route.ts` exchanges a magic-link token for
+session cookies, which makes the `next` it redirects to a phishing primitive —
+a link that genuinely signs someone in and then lands them on an attacker's page
+is exactly what makes a fake "session expired, sign in again" screen work. So
+`safeNext()` **parses** that parameter with the same rules the browser will use,
+compares origins, emits a bare path so no host can reach the `Location` header
+at all, and re-parses what it emitted to confirm it still means the same thing
+(issue #105 — parse-and-compare landed 2026-08-12, the round trip on
+2026-08-24 after review on the fix's own PR). The transferable rule
+is worth applying to the next value that crosses a parser boundary: **never
+string-match a URL something downstream will re-parse** — `/\evil.example`
+passes every prefix check and still normalizes to a foreign host. Reasoning:
+[`docs/vendor-access.md`](docs/vendor-access.md) §6a.
 
 **The one documented exception proves the rule.** `src/lib/supabase/admin.ts`
 carries the secret key and bypasses RLS, because two writes are deliberately

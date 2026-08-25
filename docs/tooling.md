@@ -346,6 +346,34 @@ flow in on a refresh. And when an advisory names a package already in
 `overrides`, re-check whether the override is still *needed* before raising it —
 if the patch is in the parent's range, the entry should be deleted, not bumped.
 
+**A cleared advisory does not stay cleared (2026-08-07, then 2026-08-24).** Two
+more rounds, both stale pins, and it is the repetition that carries the lesson:
+
+| Advisory | Package | Patched | Parent's range | Fix |
+|---|---|---|---|---|
+| GHSA-5p4m-2wfm-xmqj | `js-yaml` 4.3.0 | `>=4.3.1` | `cosmiconfig` `^4.1.0` / `@eslint/eslintrc` `^4.1.1` — **in range** | `pnpm update js-yaml --depth Infinity` |
+| GHSA-2v37-7h3g-55p8 | `nanoid` 3.3.16 | `>=3.3.17` | `postcss` wants `^3.3.16` — **in range** | `pnpm update nanoid --depth Infinity` |
+| GHSA-2v37-7h3g-55p8 *(again)* | `nanoid` 3.3.17 | `>=3.3.18` | `postcss` wants `^3.3.16` — **in range** | `pnpm update nanoid --depth Infinity` |
+
+The third row is the **same advisory** as the second, seventeen days later
+(issue #110). Nothing regressed in the tree and nothing of ours changed: the
+advisory's **patched floor moved 3.3.17 → 3.3.18**, so the exact version that
+closed it became the flagged one. An advisory is a moving target rather than a
+fact with a clearance date, and the blocking audit step is the only thing in the
+stack that notices — which means a red gate on a dependency nobody touched is an
+expected shape here, not evidence that someone broke something. Re-run the
+refresh before concluding an override is needed: the parent's declared range is
+what decides, and `^3.3.16` admits the new floor just as it admitted the old one.
+
+Two reading habits from the same round, both cheap and both easy to get
+backwards. **Verify in `pnpm-lock.yaml`, not `node_modules`** — CI installs with
+`--frozen-lockfile`, so the lockfile is what it actually reads, and pnpm does
+not prune its virtual store on update, leaving stale `nanoid@3.3.16` directories
+under `node_modules/.pnpm` that are unreferenced rather than live. And **the
+audit table's path count is paths, not copies**: nanoid's "5 paths" is one
+deduped copy under `postcss`, shared by next / `@tailwindcss/postcss` / vite,
+which `pnpm why nanoid` reports as "Found 1 version".
+
 ### Why the gate requires pnpm 11 (`packageManager` pin)
 
 npm retired the legacy audit endpoints (`/-/npm/v1/security/audits` and
@@ -522,6 +550,15 @@ Tuning applied (issue #23):
   major bump, so Dependabot never crosses a major on its own — it's
   version-agnostic, not tied to `24`.
 
+**What it does not cover, on the evidence (2026-08-24).** Neither nanoid
+clearance arrived as a Dependabot security PR — both were transitive and
+lockfile-only (no manifest entry to bump), and the red `pnpm audit` step was the
+notification both times. Grouped weekly version updates are what this config
+buys; a transitive advisory reaching us before CI does is not something to plan
+around. Open question, filed in [`backlog.md`](backlog.md): whether that is the
+lockfile-only shape or the moved floor being a revision rather than a new
+advisory.
+
 ### Moving Node to a new major (do it in this order)
 
 The runtime pin and the types pin are two different files. Bump the **runtime
@@ -571,6 +608,14 @@ worth adding (`actionlint` doesn't understand the issue-forms schema anyway).
 Running record of problems hit and calls made, newest first. (PR numbers are
 the paper trail; see git history for the full diffs.)
 
+- **2026-08 · a cleared advisory came back on its own** (issue #110) —
+  GHSA-2v37-7h3g-55p8's patched floor moved 3.3.17 → 3.3.18, so the blocking
+  audit step went red on every branch seventeen days after that same advisory
+  was cleared, with no dependency change of ours in between. Another
+  `pnpm update nanoid --depth Infinity` was the whole fix — still inside
+  `postcss`'s declared `^3.3.16`, so still no override. Worth recording because
+  the instinct on a red gate is to hunt for what *we* changed; here the answer
+  was that the advisory moved. Detail in the dependency-gate section above.
 - **2026-08 · the `e2e` job carries a real secret now** — closing the vertical
   slice put two service-role writes in the app (the vendor invite and the
   attachment-metadata insert), so the job's `.env.local` step gained

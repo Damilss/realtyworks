@@ -179,8 +179,9 @@ tests/e2e/vendor-loop.spec.ts  # the vendor half: invite, redeem the link in a
                                # off-site redirect (real token per payload)
 ```
 
-**One spec calls `test.slow()`**: the redirect-guard spec mints seven invites and
-opens seven browser contexts, which is past the 30s default. `playwright.config.ts`
+**One spec calls `test.slow()`**: the redirect-guard spec mints nine invites and
+opens nine browser contexts — eight hostile payloads plus the legitimate
+deep-link — which is past the 30s default. `playwright.config.ts`
 sets no per-test timeout on purpose — the default is right for the other 22, and a
 global bump would hide a genuinely hung spec.
 

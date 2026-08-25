@@ -53,8 +53,11 @@ Pick them off at your discretion.
 - **pgTAP `db` job** running in CI on `main`/`dev` (issue #72) — not yet a
   *required* check. See ✅.
 - **Branch protection on `main`** enabled 2026-07-20 (web UI). See ✅.
-- `pnpm audit --audit-level=high` **clean** as of 2026-08-07 (fast-uri + sharp
-  cleared 2026-07-21; js-yaml + nanoid cleared 2026-08-07 — see ✅).
+- `pnpm audit --audit-level=high` **clean** as of 2026-08-24 (fast-uri + sharp
+  cleared 2026-07-21; js-yaml + nanoid cleared 2026-08-07; nanoid cleared *again*
+  2026-08-24 after GHSA-2v37-7h3g-55p8's patched floor moved 3.3.17 → 3.3.18 —
+  see ✅ and `docs/tooling.md`). The rest of this block was last swept
+  2026-08-07.
 - **UI toolkit installed 2026-07-27** — Tailwind CSS v4 (`@tailwindcss/postcss`,
   no `tailwind.config.js`) + shadcn/ui (zinc base, new-york) scaffolded from the
   registry's zinc tokens (the current `shadcn` CLI dropped the classic base
@@ -128,13 +131,15 @@ for postcss), and why Dependabot did not open a security PR for a transitive,
 lockfile-only bump. Finding out from a red CI gate is worse than finding out from
 a Dependabot PR, and this is the second nanoid occurrence.
 
-### ✅ `/auth/confirm` open redirect closed (2026-08-12, issue #105)
+### ✅ `/auth/confirm` open redirect closed (2026-08-12, finished 2026-08-24, issue #105)
 `safeNext()` string-matched a value a URL parser was about to reinterpret:
 `next=%2F%5Cevil.example` decodes to `/\evil.example`, which starts with `/`,
 does not start with `//`, and therefore passed — then normalized to
 `//evil.example` in the browser, because `\` is equivalent to `/` in the
 authority position (WHATWG URL). It now resolves `next` with `new URL(next,
-origin)`, compares origins, and returns **only** `pathname + search + hash`.
+origin)`, compares origins, returns **only** `pathname + search + hash`, and
+then parses *that* result a second time and requires it to still be the same
+same-origin path.
 
 **Parse-and-compare closes the class, not the reported instance.** The tab and
 carriage-return variants (`/%09/evil.example`, `/%0d/evil.example`) were the
@@ -144,27 +149,40 @@ it dangerous has happened. Emitting a bare path is the other half — with no
 authority in the `Location`, the guard still holds if `nextUrl.origin` were ever
 influenced by a spoofed `Host`.
 
+**One parse was not enough, and review on the fix's own PR caught it
+(2026-08-24).** `${origin}//evil.example` is same-origin by every measure `URL`
+reports — the host is `evil.example` only in the **pathname** — so the origin
+check passes and the bare path handed to `redirect()` is `//evil.example`, which
+is protocol-relative the instant the browser reads the `Location`. Next.js sets
+that header verbatim, so nothing downstream was going to catch it. Runs of
+leading slashes and the backslashes the parser folds into them are the same
+family. The round trip is the general answer rather than a longer denylist:
+**whatever we emit has to re-parse into what we think it is**, and a genuine
+destination is already a fixed point of that reduction, so nothing legitimate is
+refused. Both hostile spellings were added to the payload tables at both layers.
+
 **The test that appeared to cover this could not reach it.** The old e2e spec
 passed `token_hash=bogus`, so `verifyOtp` failed, the handler redirected to
 `/login?error=invalid-link`, and `next` was never read — it asserted we stayed
 on our own host for reasons unrelated to the guard. Confirmed the way the issue
 asked for: with `safeNext()` neutered, the rewritten spec fails on
 `net::ERR_NAME_NOT_RESOLVED at .../evil.example` — the browser genuinely leaves
-the site — and 9 of the 14 new unit cases go red. Same shape as the `z.uuid()`
+the site — and 9 of the then-14 unit cases go red. Same shape as the `z.uuid()`
 regression: a green test over a fixture that cannot reach the code under test.
 
 Two layers, deliberately duplicating one list (each table carries a comment
-pointing at the other). `src/app/auth/confirm/route.test.ts` (new, 14 cases)
-mocks `createClient` and `redirect` — the `src/server/actions/auth.test.ts`
-idiom — and covers every hostile shape plus the contract around it: a failed
-verification never reads `next`, a `type` outside `ALLOWED_TYPES` never reaches
-Supabase, and no accepted *or* refused destination ever carries a host.
-`tests/e2e/vendor-loop.spec.ts` redeems a **real, unspent token per case** (six
-hostile, then a legitimate `/work-orders/<id>` to prove deep-linking survives),
-which is what proves the redirect line executes at all. `mintInviteLink()` now
-waits for the link field's value to *change* before reading it — re-minting
-otherwise hands back the token just spent. 179 unit tests across 17 files; the
-vendor-loop suite is 7 specs, green in 7.1s locally.
+pointing at the other). `src/app/auth/confirm/route.test.ts` (new, 16 cases once
+the round trip landed) mocks `createClient` and `redirect` — the
+`src/server/actions/auth.test.ts` idiom — and covers every hostile shape plus the
+contract around it: a failed verification never reads `next`, a `type` outside
+`ALLOWED_TYPES` never reaches Supabase, and no accepted *or* refused destination
+ever carries a host. `tests/e2e/vendor-loop.spec.ts` redeems a **real, unspent
+token per case** (eight hostile, then a legitimate `/work-orders/<id>` to prove
+deep-linking survives), which is what proves the redirect line executes at all.
+`mintInviteLink()` now waits for the link field's value to *change* before
+reading it — re-minting otherwise hands back the token just spent. 181 unit
+tests across 17 files; the vendor-loop suite is 7 specs, and the redirect case
+mints nine invites, which is why it is the one spec calling `test.slow()`.
 
 ### ✅ js-yaml + nanoid high advisories cleared (2026-08-07)
 Two highs broke the blocking `pnpm audit` gate in CI: **js-yaml**
