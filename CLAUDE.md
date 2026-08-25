@@ -203,7 +203,7 @@ Verify before assuming they exist:
   `updateWorkOrderStatus` + `recordAttachment` in the work-order actions,
   `src/app/auth/confirm/route.ts`, and `/vendors`. **No migration** — every
   policy, grant and trigger this needed was already on `main`, which is what the
-  Phase 2 design was for. Four rules to carry forward:
+  Phase 2 design was for. Five rules to carry forward:
 
   **`SUPABASE_SECRET_KEY` is read lazily, inside `createAdminClient()`.** Never
   at module scope: the CI `verify` job runs `next build` with no stack and no
@@ -232,6 +232,28 @@ Verify before assuming they exist:
   against the running stack: `generateLink` **sends no email**, and the token is
   **single use**. Full reasoning and the other settled questions:
   `docs/vendor-access.md` §6.
+
+  **Never string-match a URL something downstream will re-parse** (added
+  2026-08-12, issue #105). `/auth/confirm`'s redirect guard checked
+  `startsWith("/")` and `!startsWith("//")`, and `/\evil.example` passed both —
+  `\` only becomes an authority separator once the WHATWG parser reads it, and
+  tabs/newlines are stripped *after* any string check would have approved them.
+  Parse with `new URL(value, origin)`, compare `.origin`, and return
+  `pathname + search + hash` so no host is ever emitted — **then parse that
+  result again and require it to still be the same same-origin path** (added
+  2026-08-24, from review on the fix's own PR). Parsing the input alone leaves
+  the mirror-image hole: `${origin}//evil.example` puts the host in the
+  *pathname*, so `.origin` matches and the bare path emitted is
+  `//evil.example`, which `redirect()` writes to `Location` verbatim and the
+  browser reads as protocol-relative. The rule generalizes: **whatever you emit
+  must re-parse into what you think it is** — a real path is already a fixed
+  point, so nothing legitimate is refused and no denylist of spellings is
+  needed. The companion lesson is about the test: the spec that appeared to
+  cover it used a bogus token, so verification failed and the guarded line never
+  ran. **If deleting the guard
+  leaves its test green, the test does not cover the guard** — check by actually
+  deleting it once. Reasoning: `docs/vendor-access.md` §6a; the testing half:
+  `docs/playwright.md`.
 - **Not yet created:** `supabase/functions/`, `src/app/api/`. Neither is a gap
   to fill on its own — edge functions are Phase 5 (§6 SMS), and the only route
   handler that exists is `src/app/auth/confirm/route.ts`, which is deliberately
@@ -533,6 +555,12 @@ See §7. Should be a weekend job, not a rewrite, if §5/§7 rules are followed.
 - **Test what matters, not the framework.** Vitest on business logic (work-order
   state transitions, permission checks). Playwright on the one or two critical
   E2E happy paths. Not chasing coverage %.
+- **A test that passes with the code deleted is decoration.** Twice now a green
+  test has covered nothing: `z.uuid()` (fixtures the real database would never
+  produce) and the `/auth/confirm` redirect guard (a bogus token, so the guarded
+  line never ran). For anything security-shaped, **delete the thing under test
+  once and watch the test fail** — it takes a minute and it is the only proof
+  the fixture reaches the code. §0 has both cases.
 - **Audit trail is a product feature, not a nice-to-have.** "Who changed what,
   when" and "was the vendor notified" must be answerable from our DB.
 

@@ -12,7 +12,7 @@ whole Phase 3 vertical slice — 23 specs across four files, all against a
 | `smoke.spec.ts` | 1 | the app boots and serves a page |
 | `auth.spec.ts` | 8 | the auth loop: sign in as each seeded role, self-register, wrong password, rejected signup keeps its fields, signed-out redirect, root redirect, sign out |
 | `work-orders.spec.ts` | 7 | the staff write path: create, assign, note (and the blank-note refusal), assignment making a job visible to its vendor, select state after a failed submit, a malformed id 404, a vendor refused the create form |
-| `vendor-loop.spec.ts` | 7 | the vendor half: invite → redeem a real magic link in a second browser context → status + photo; single use, the stale link cleared from the page on reassignment (UI only — see below), the off-site redirect refusal, and the two un-invitable vendor cases |
+| `vendor-loop.spec.ts` | 7 | the vendor half: invite → redeem a real magic link in a second browser context → status + photo; single use, the stale link cleared from the page on reassignment (UI only — see below), the off-site redirect refusal (eight payloads, each against its own real token — see below), and the two un-invitable vendor cases |
 
 The suite's point is not "a cookie was set." It is that the *same* URL renders
 different rows for different people — the manager sees every seeded work order,
@@ -30,6 +30,31 @@ in as the *outgoing* vendor. RLS then hides the reassigned job from them, but
 their other assigned jobs are visible exactly as before. Reassignment is a change
 of job, not a change of access — see `docs/backlog.md` ("Reassignment does not
 revoke an outstanding invite link") for what real revocation would take.
+
+**A fixture that cannot reach the code under test proves nothing** (learned the
+expensive way, 2026-08-12, issue #105). The redirect-guard spec used to pass
+`token_hash=bogus`. Verification failed, the handler bounced to
+`/login?error=invalid-link`, and the `next` parameter it existed to test was
+never read — so it asserted we had stayed on our own host for reasons entirely
+unrelated to the guard, and deleting `safeNext()` outright left it green. It now
+mints a **fresh, unspent token per payload** (they are single use, so a
+re-crafted spent link fails verification and lands right back in the old trap)
+and asserts two things together: the landing page is `/dashboard`, *and* the
+banner names the vendor. The second half is the load-bearing one — being signed
+in is what proves verification succeeded and the guarded redirect actually ran.
+
+Its payload table takes the app's origin as an argument rather than being a list
+of literals, because two of the payloads need it: `${origin}//evil.example` and
+`${origin}/\/evil.example` are the same-origin spellings that smuggle the host
+into the *pathname* (`docs/vendor-access.md` §6a). Every entry is mirrored in
+`src/app/auth/confirm/route.test.ts` — that layer proves the logic case by case
+in milliseconds, this one proves the guard is reached at all — so a payload
+added to either belongs in both.
+
+The general rule, and it is cheap: **delete the thing under test and watch the
+spec fail.** If it stays green, the spec is decoration. Same shape as the
+`z.uuid()` regression, where unit fixtures were invented v4-shaped ids that the
+seeded database would never produce.
 
 **Assertions are by identity, never by row count.** The config runs fully
 parallel against one shared database and most specs write to it, so "every work
@@ -151,8 +176,13 @@ tests/e2e/work-orders.spec.ts  # the staff write path: create, assign, note (+ t
 tests/e2e/vendor-loop.spec.ts  # the vendor half: invite, redeem the link in a
                                # second browser context, status + photo, single
                                # use, the stale link cleared on reassign,
-                               # off-site redirect
+                               # off-site redirect (real token per payload)
 ```
+
+**One spec calls `test.slow()`**: the redirect-guard spec mints seven invites and
+opens seven browser contexts, which is past the 30s default. `playwright.config.ts`
+sets no per-test timeout on purpose — the default is right for the other 22, and a
+global bump would hide a genuinely hung spec.
 
 Test runners stay separated by directory: **Vitest** collects `src/**` and
 `tests/unit/**` (`vitest.config.ts`); **Playwright** owns `tests/e2e/`. They
