@@ -15,7 +15,7 @@ Pick them off at your discretion.
 
 ---
 
-## State verified (2026-08-07)
+## State verified (2026-08-07, auth section re-verified 2026-08-25)
 
 - `next 16.2.11` / `react 19.2.4` / `pnpm@11.13.1`, Node pinned to 24 (`.nvmrc`
   and `engines.node`, added 2026-08-25).
@@ -76,8 +76,21 @@ Pick them off at your discretion.
 - **Signup is open** (`[auth] enable_signup = true`, 2026-07-27) — reverses the
   2026-07-17 invite-only call. Every self-registration is an unlinked `vendor`
   that can read nothing; roles come only from server-set `raw_app_meta_data`.
-  Reversal + reasoning: `docs/schema/my_schema_writeup.md`, last section. The
-  two costs are filed as 🟠 (email confirmations) and 🟡 (CAPTCHA).
+  Reversal + reasoning: `docs/schema/my_schema_writeup.md`, last section. Its
+  two costs were filed as 🟠 (email confirmations) and 🟡 (CAPTCHA); **the first
+  is paid** as of 2026-08-25 and CAPTCHA is now the only one left.
+- **Email confirmations on** (`[auth.email] enable_confirmations = true`,
+  2026-08-25, issue #93) — a self-registration cannot sign in until it follows
+  an emailed link, redeemed by our own `/auth/confirm`. No migration; the seeded
+  users already carry `email_confirmed_at`. The local mailbox is **mailpit**
+  (`[local_smtp]`, port 54324, container still named `supabase_inbucket_*`), and
+  the CI `e2e` job now boots it deliberately — **eight containers, not nine**,
+  with the three inert `-x` names finally corrected in the same change. Verified
+  by deleting the flag and watching the spec fail. See ✅.
+- **`[auth.email.smtp]` written but disabled** — Resend, `enabled = false`, with
+  `env()` values documented in `.env.example`. Turning it on is a Phase 4
+  hosted-project step; flipping it in `config.toml` would route local dev and
+  the CI mailbox spec through a real provider.
 - **Cross-checked against the GitHub issue list 2026-08-07** (15 open). Four
   filed issues had no entry here and were added to 🟡: the Tailwind v4 full-height
   regression (#86/#89), the prettier-plugin-tailwindcss v4 options (#87), the
@@ -103,6 +116,67 @@ Done. `.editorconfig` mirrors the repository's whitespace conventions while
 preserving Markdown's significant trailing spaces, and `package.json` declares
 `"engines": { "node": ">=24 <25" }`. Wrong-Node installs now warn, while the
 existing `packageManager` field remains the pnpm version source of truth.
+### ✅ Email confirmations on — the last Phase 4 gate (2026-08-25, issue #93)
+`[auth.email] enable_confirmations` is `true`. A self-registration now gets an
+account it cannot sign in to until it follows a link that only exists in an
+email, which closes the address-squatting vector that came with opening signup
+on 2026-07-27. **No migration** — `seed.sql` already inserts all three fixtures
+with `email_confirmed_at`, so every seeded login and all 94 pgTAP assertions
+were untouched.
+
+Cheaper than filed, for the reason the entry predicted: `/auth/confirm` already
+did the `verifyOtp({ token_hash, type })` exchange, so this was `"signup"` added
+to `ALLOWED_TYPES` rather than a new endpoint. What shipped:
+
+- `supabase/templates/confirmation.html` + `[auth.email.template.confirmation]`.
+  The default body is `{{ .ConfirmationURL }}`, which is GoTrue's implicit flow
+  and unusable by a cookie-session app, so the link is built the same way
+  `buildInviteUrl()` builds the invite:
+  `{{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&type=signup`.
+- `signUp()` returns `{ confirmationSent: true }` instead of redirecting —
+  there is no session to redirect *with* — and the form swaps itself for a
+  "check your email" panel.
+- `signIn()` names the `email_not_confirmed` case instead of collapsing it into
+  "Invalid email or password."
+- `tests/e2e/mailbox.ts` reads mailpit, and the self-registration spec asserts
+  the refusal *before* the success: no `/dashboard`, then a refused sign-in,
+  then the emailed link, then the pending-access state.
+- The CI `e2e` `-x` list corrected in the same change (see the 🟡 below).
+- `[auth.email.smtp]` written for **Resend** with `enabled = false`, and
+  `[auth.rate_limit] email_sent` raised 2 → 30.
+
+**Four things that were wrong in the plan and right on the stack.** Every one
+came from running it rather than reading about it (`AGENTS.md`).
+
+1. **A duplicate signup still errors.** The Supabase docs imply the response is
+   obfuscated once confirmations are on; CLI 2.109.1 returns
+   `user_already_exists` / 422 for a *confirmed* address exactly as before. The
+   unit test written against the "obfuscated" shape would have passed forever
+   while testing a response the server never sends — the `z.uuid()` failure mode
+   again. What *did* change: re-submitting an **unconfirmed** address succeeds
+   and resends the link (two messages in the mailbox for two submissions), which
+   is why no "resend" control was built.
+2. **`content_path` under `[auth.email.template.*]` resolves from the project
+   root**, while `[auth.email.notification.*]` resolves from `supabase/`. The
+   CLI's two commented examples differ for that reason; it reads like a typo and
+   is not. Confirmed by reading the resolver out of the CLI bundle
+   (`projectRoot` vs `supabaseDir`) *and* by the template actually being served
+   at `http://supabase_kong_<project>:8088/email/confirmation.html`.
+3. **The mail container is named `supabase_inbucket_<project>` and runs the
+   `mailpit` image.** Three places carry the old name — `--help`, the container
+   name, and stale notes — and none of them is right.
+4. **`supabase status -o env` does print `MAILPIT_URL`**, contrary to the first
+   sweep for it. It is still not what the helper uses: the CI job writes
+   `.env.local`, which Next reads and the Playwright runner does not.
+
+**Verified by deleting it.** Per `CLAUDE.md` §5, `enable_confirmations` was
+flipped back to `false`, the stack restarted, and the self-registration spec
+re-run: it fails on the "Check your email" heading. The spec covers the gate.
+
+**Still owed at the Phase 4 deploy** (moved to the Phase 4 entry, not dropped):
+flip `[auth.email.smtp] enabled = true` on the hosted project with a verified
+sender domain, point `site_url` / `additional_redirect_urls` at the deployed
+origin, and confirm the custom template actually applied remotely.
 
 ### ✅ nanoid high advisory cleared again — the patched floor moved (2026-08-24, issue #110)
 The blocking `pnpm audit` gate went red on **GHSA-2v37-7h3g-55p8**, the *same*
@@ -248,6 +322,13 @@ jobs were left alone.
 > wrong call reached by plausible reasoning from the wrong source. Checking
 > `--help` was the mistake; the authoritative list is the one the CLI echoes back
 > when a name misses. See the `db` job section in `docs/tooling.md`.
+>
+> **And superseded again 2026-08-25** — the *other* half aged out too. "The
+> no-email finding is what lets the CI `e2e` job keep excluding the mail
+> container" stopped being true the moment `enable_confirmations` went on: the
+> invite still sends no email, but **signup does**, and the job now boots mailpit
+> deliberately so the spec can read the link. The finding was right; the
+> conclusion drawn from it had a dependency nobody wrote down.
 
 **The admin client reads `SUPABASE_SECRET_KEY` lazily, inside the factory.** At
 module scope it would break `next build` in the `verify` job, which has no
@@ -394,9 +475,9 @@ placeholder — and `tests/unit/server-only-stub.ts` is aliased in
 `vitest.config.ts` so Vitest can import modules guarded by `server-only`
 without switching React to its server build.
 
-**Two accepted risks came with opening signup**, both filed above: email
-confirmations are still off (🟠 High, must be on before the Phase 4 public
-deploy) and there is no CAPTCHA (🟡).
+**Two accepted risks came with opening signup**, both filed above. Email
+confirmations were the first, and are **closed as of 2026-08-25** (issue #93 —
+see ✅ below). CAPTCHA (🟡) is still open.
 
 ### ✅ Typed env vars + committed `.env.example` — closed, solved another way (2026-07-27)
 Closed rather than completed as written. The ask was `@t3-oss/env-nextjs` + zod;
@@ -683,31 +764,9 @@ required-check names are unchanged; the OSV scan surfaces as a non-required
 
 ## 🟠 High
 
-### 🟠 Turn on email confirmations before the Phase 4 public deploy (issue #93)
-**Why:** `[auth.email] enable_confirmations = false` was harmless while signup
-was invite-only. Since signup opened (2026-07-27) it means **anyone can create
-an account against an email address they do not own**, and be signed in
-immediately. Today the blast radius is nil — an unlinked self-registration reads
-nothing (`supabase/tests/03_signup_defaults.test.sql`) — but on a public
-deployment it is an address-squatting and pretext vector, and it silently
-becomes worse the moment anything is keyed on a user's email. This is a Phase 4
-gate, not a Phase 4 nice-to-have.
-**Do:** flip `enable_confirmations = true` in `supabase/config.toml`. **The
-`/auth/confirm` route handler this item used to call for now exists** — it
-shipped with the vendor invite on 2026-08-03 and already does the
-`verifyOtp({ token_hash, type })` exchange, so this is a matter of adding
-`signup` to its `ALLOWED_TYPES` rather than writing anything new. The default
-email template still has to be repointed at it: `{{ .ConfirmationURL }}` is the
-implicit flow, which the `@supabase/ssr` client cannot consume. Then
-configure production SMTP (the built-in service is rate-limited and explicitly
-not for real users); **drop `inbucket` from the `-x` list in the CI `e2e` job**,
-since signup will then send mail and the self-registration spec has to read the
-mailbox; and re-check the signup error copy in `src/server/actions/auth.ts` —
-it currently notes that GoTrue returns `user_already_exists` *because*
-confirmations are off, and that response shape changes when they are on.
-**Done when:** a new account cannot sign in until the emailed link is followed —
-locally and on the hosted deploy — with the e2e signup spec updated to walk the
-mailbox instead of landing straight on `/dashboard`.
+*Empty.* Both 🟠 items were gates on the Phase 4 public deploy and both are
+closed: the `/auth/confirm` open redirect (2026-08-12, issue #105) and email
+confirmations (2026-08-25, issue #93). See ✅ for each.
 
 ---
 
@@ -730,34 +789,25 @@ one as a duplicate.
 **Done when:** a whitespace-only value is rejected on every required text column,
 with a pgTAP assertion each.
 
-### 🟡 Scope the sign-out action to the current session (issues #92, #98)
-**Note:** #98 carries the `duplicate` label against #92 — close one as a
-duplicate, same as the #75/#77 pair below.
-**Why:** `src/server/actions/auth.ts` calls `supabase.auth.signOut()` with no
-options, and `@supabase/auth-js` (2.110.7) declares that as
-`signOut(options = { scope: 'global' })` — it revokes **every** refresh token the
-account holds, not just this browser's. The library's own JSDoc on the method
-says `{ scope: 'local' }` is what apps usually want on a "Sign out" button. So a
-manager signed in on a laptop and a phone who clicks the ordinary button
-(`src/app/(dashboard)/layout.tsx`) on one is signed out of the other — but not
-immediately: global scope revokes the *refresh* token while the access-token JWT
-stays valid until `jwt_expiry` (3600s, `supabase/config.toml`). The second device
-therefore works normally for up to an hour, then `src/proxy.ts` fails its refresh
-and bounces it to `/login`. The delayed, apparently random logout is what makes
-this worth fixing rather than documenting. The control is labeled "Sign out", not
-"Sign out everywhere". It fails in the **safe** direction — over-revoking, never
-under — which is why this is 🟡 and not a security item.
-**Do:** pass `{ scope: "local" }` in `signOut()` (`src/server/actions/auth.ts`),
-and tighten the assertion in `src/server/actions/auth.test.ts` from
-`toHaveBeenCalledOnce()` to `toHaveBeenCalledWith({ scope: "local" })` so the
-global default cannot creep back silently. Extend the comment above the redirect,
-which today explains the failure path but says nothing about scope. A deliberate
-"sign out everywhere" control is **not** in scope — that is a Phase 5
-account-settings affordance, and `scope: "others"` exists for it when wanted
-(`CLAUDE.md` §8: smallest change that satisfies the requirement).
-**Done when:** two concurrent sessions for the same seeded account exist, and
-signing out of one leaves the other able to load `/dashboard`; pinned by the unit
-assertion above.
+### ✅ Sign-out scoped to the current session (2026-08-25, issues #92, #98)
+Rode along with the email-confirmations change, which is what this entry asked
+for: "fold it into the next change that touches `src/server/actions/auth.ts`
+rather than letting it take a session of its own."
+
+`signOut()` now passes `{ scope: "local" }`. Previously it passed nothing, and
+`@supabase/auth-js` declares the default as `{ scope: 'global' }` — so clicking
+a button labeled "Sign out" revoked **every** refresh token the account held.
+The failure was delayed rather than visible: global scope kills the refresh
+token while the other device's access-token JWT stays valid until `jwt_expiry`
+(3600s), so that device worked normally for up to an hour and then bounced off
+`src/proxy.ts` to `/login`. An apparently random logout an hour later is what
+made this worth fixing rather than documenting.
+
+The unit assertion moved from `toHaveBeenCalledOnce()` to
+`toHaveBeenCalledWith({ scope: "local" })` — an arity-only assertion would let
+the global default creep back silently. A deliberate "sign out everywhere"
+control is still **not** in scope; that is a Phase 5 account-settings affordance,
+and `scope: "others"` exists for it. Close #98 as a duplicate of #92.
 
 ### 🟡 Reassignment does not revoke an outstanding invite link (PR review, P2)
 **Why:** `docs/playwright.md` and `README.md` both listed "revocation on
@@ -1018,35 +1068,28 @@ fixing while it costs one line.
 **Done when:** `pnpm test` passes from a checkout whose absolute path contains a
 space.
 
-### 🟡 Correct the `e2e` job's silently-ignored `-x` names
-**Why:** Found while trimming the `db` job (2026-08-10). `supabase start -x`
-validates against `edge-runtime, gotrue, imgproxy, kong, logflare, mailpit,
-postgres-meta, postgrest, realtime, storage-api, studio, supavisor, vector` — not
-the list `supabase start --help` prints. A name from the wrong list is **silently
-ignored, not rejected.** The `e2e` job excludes
-`studio,imgproxy,edge-runtime,functions,analytics,vector,inbucket`, of which
-`functions`, `analytics` and `inbucket` are not valid, so **logflare (930MB) and
-mailpit (48MB) are pulled and booted on every run** despite appearing excluded.
-The `db` job had the same three and they were corrected there; `e2e` was left
-alone deliberately, because its mail story is conditional rather than mechanical.
+### ✅ The `e2e` job's silently-ignored `-x` names, corrected (2026-08-25)
+Landed with issue #93, exactly as the entry said it should — the mailbox was the
+conditional part, so the two decisions were made together.
 
-**Do:** Rename `analytics` → `logflare` and drop `functions`. Decide `inbucket` →
-`mailpit` **together with** issue #93 (turn on `[auth.email]
-enable_confirmations` before the Phase 4 public deploy): today mailpit is
-genuinely unnecessary and excluding it saves the pull, but the moment
-confirmations go on, signup sends mail and this job needs the mailbox — so
-excluding it correctly now buys ~48MB and creates a trap for #93. Preferred
-order: land the logflare fix (the 930MB one) now, and settle mailpit as part of
-#93. Do **not** copy the `db` job's `kong`/`postgrest`/`realtime` exclusions here
-— this job drives the app over HTTP and needs all three.
+**Was:** `studio,imgproxy,edge-runtime,functions,analytics,vector,inbucket`, of
+which `functions`, `analytics` and `inbucket` are not valid `-x` values and were
+silently ignored rather than rejected. Logflare (930MB) and mailpit (48MB) were
+pulled on every run despite appearing excluded — nine containers, not seven.
 
-**Done when:** the `e2e` job's `supabase start` log no longer shows a logflare
-image pull, the Playwright suite is still green in CI, and the "ignored names"
-caveat is gone from all three places that now carry it — `docs/tooling.md`'s
-`e2e` section, `docs/playwright.md`'s `-x` bullet, and the comment above the
-`e2e` job's `Start Supabase stack` step in `.github/workflows/ci.yml`. The
-container counts stated alongside them (nine for `e2e`, three for `db`) are
-part of the same edit: dropping logflare makes it eight.
+**Now:** `studio,imgproxy,edge-runtime,logflare,vector`. `analytics` → the name
+the validator actually accepts, `functions` dropped (it has no valid spelling),
+and **mailpit deliberately kept** — signup sends real mail now and
+`tests/e2e/auth.spec.ts` reads the confirmation link out of it, so the mail
+container is a dependency of this job rather than dead weight. Eight containers:
+postgres, gotrue, kong, postgrest, realtime, storage-api, postgres-meta,
+mailpit.
+
+The `db` job's list is untouched and must stay untouched: it drops Kong,
+PostgREST and Realtime, which this job needs. The "ignored names" caveat is gone
+from all four places that carried it — `docs/tooling.md`, `docs/playwright.md`,
+the comment above the `e2e` job's `Start Supabase stack` step, and
+`CLAUDE.md` §0 — along with the container counts stated alongside them.
 
 ### 🟡 Coverage visibility (not a gate)
 **Why:** See what's tested without chasing a %.
@@ -1080,7 +1123,10 @@ per 5 minutes per IP — is the *only* brake on automated account creation. That
 is a speed bump, not a defense: every bot account becomes a row in `auth.users`
 and `profiles` that a human eventually has to look at and decide about. Low
 urgency while the app is unlisted; do it before or with the Phase 4 public
-deploy, alongside email confirmations.
+deploy. It is now the *last* of the two costs of opening signup — email
+confirmations closed 2026-08-25 — and confirmations raise the cost of a bot
+account without removing it: a throwaway-mailbox service defeats them, and the
+row still lands in `auth.users` either way.
 **Do:** Supabase Auth supports hCaptcha and Cloudflare Turnstile natively — the
 `[auth.captcha]` block is already in `config.toml`, commented out. Enable it
 with the secret read from an env var (`CLAUDE.md` §5, never a literal), render
@@ -1181,6 +1227,26 @@ form only offering those two.
 `@sentry/nextjs`, Vercel PR preview deploys, prod deploys only from `main`. Keep a working
 Dockerfile so self-host stays `docker run` away (`CLAUDE.md` §5/§7).
 
+**Auth tail inherited from issue #93** — the code is done, these are hosted-project
+settings and nothing else:
+- **Flip `[auth.email.smtp] enabled = true`** on the hosted project only (dashboard,
+  or a `config push` from the deploy branch with it flipped *there*). It ships `false`
+  in `config.toml` on purpose: flipping it in the file routes local dev and the CI
+  mailbox spec through a real provider, which breaks both and sends real email from a
+  test run. Provider is **Resend**; `SUPABASE_AUTH_SMTP_PASS` is the API key and
+  `SUPABASE_AUTH_SMTP_ADMIN_EMAIL` the sender (`.env.example`).
+- **Verify the sender domain** with the provider first. An unverified domain drops
+  every message silently, and the symptom is "confirmation emails never arrive",
+  which reads like an application bug.
+- **Point `site_url` and `additional_redirect_urls`** at the deployed origin. They
+  are what `{{ .SiteURL }}` interpolates into the confirmation link, so a stale
+  `127.0.0.1:3000` mails every new user a link to their own laptop.
+- **Confirm the custom template applied remotely.** A hosted project that falls back
+  to the default `{{ .ConfirmationURL }}` sends the implicit flow, which this app
+  cannot consume — the link would appear to work and then land nowhere.
+- **Watch `[auth.rate_limit] email_sent`** (raised 2 → 30). It only bites once custom
+  SMTP is on, which is to say: on the hosted project, the first time it matters.
+
 ### 🟢 Phase 5 — PWA install layer (manifest + service worker)
 Bolt-on to the already-responsive app — never a second codebase (`CLAUDE.md` §2). `src/app/manifest.ts`
 (`MetadataRoute.Manifest`) + `public/sw.js` + icons; HTTPS required (`next dev --experimental-https`
@@ -1231,52 +1297,49 @@ branch protection → pgTAP in CI → first migrations merged to `main` →
 **Supabase clients: Phase 2 complete** → **Tailwind + shadcn/ui: Phase 3
 started** → **auth loop + open signup: the read half of the slice** →
 **service-role table grants narrowed** → **the staff write path** → **the vendor
-half: Phase 3 complete**, merged to `main` 2026-08-04 as PR #94.)*
+half: Phase 3 complete**, merged to `main` 2026-08-04 as PR #94 → the
+`/auth/confirm` open redirect → **email confirmations: the last gate cleared**,
+2026-08-25.)*
 
-**Phase 4 (hosted deployment) is the critical path** (`CLAUDE.md` §1/§4). Both
-🟠 gates on it landed on `/auth/confirm`, the one endpoint the deploy exposes
-that mints a session; the first is now closed (2026-08-12, see ✅) and the
-second is the last thing standing between here and the deploy.
+**Nothing gates the deploy any more.** Both 🟠 items landed on `/auth/confirm`,
+the one endpoint the deploy exposes that mints a session, and both are closed —
+the open redirect on 2026-08-12 and email confirmations on 2026-08-25. **Phase 4
+is now not just the critical path but the *next* path** (`CLAUDE.md` §1/§4):
+there is no remaining prerequisite to do first.
 
-1. ~~**Clear the nanoid high advisory** (🟠, issue #110).~~ ✅ Done
-   2026-08-24 — `pnpm update nanoid --depth Infinity`, no override; the patched
-   floor had moved 3.3.17 → 3.3.18, undoing the 2026-08-07 clearance. Gate green
-   again.
-2. ~~**Fix the `/auth/confirm` open redirect** (🟠, issue #105).~~ ✅ Done
-   2026-08-12 — parse-and-compare, and the e2e spec now redeems real tokens
-   instead of `token_hash=bogus`, so deleting `safeNext()` no longer leaves it
-   green.
-3. **Turn on email confirmations** (🟠, issue #93). Hard gate on a public
-   deploy — today anyone can register against an address they don't own and be
-   signed in immediately. Cheaper than it was, since `/auth/confirm` already does
-   the `verifyOtp` exchange, but the tail (email template repointed off
-   `{{ .ConfirmationURL }}`, production SMTP, `inbucket` dropped from the CI
-   `e2e` `-x` list) is exactly what you do not want to discover mid-deploy.
-4. **Phase 4 itself** (🟢 above, issue #36) — Supabase Cloud project + pushed
+1. **Phase 4 itself** (🟢 above, issue #36) — Supabase Cloud project + pushed
    migrations, Vercel project + env vars, PR preview deploys, prod deploys only
-   from `main`, Sentry, and a working Dockerfile so §7 stays mechanical.
-5. **Make the `db` job blocking** — the job has reported a run (PR #78), so it
+   from `main`, Sentry, and a working Dockerfile so §7 stays mechanical. Read
+   that entry's **auth tail** before starting: SMTP, the sender domain,
+   `site_url`, and confirming the custom email template applied remotely are
+   settings work that the #93 code deliberately left for the deploy, and they
+   are exactly what you do not want to discover mid-deploy.
+2. **Make the `db` job blocking** — the job has reported a run (PR #78), so it
    is now selectable in Settings → Branches. Two minutes of web UI, and it's
    what makes the pgTAP assertions actually gate a merge. While in there: the
    `e2e` job's display name is **"E2E (Playwright auth loop)"**, and branch
    protection matches required checks **by name** — so if it was ever selected as
    required, re-select it under the new name or it silently stops gating.
-6. **SSO (Google)** (🟢 above) — blocked on registering the OAuth app, which is
+3. **CAPTCHA on signup** (🟡 above) — now the *only* remaining cost of opening
+   signup, and the one that confirmations did not pay off: a throwaway-mailbox
+   service defeats an email gate, and the row still lands in `auth.users`.
+   Do it before or with the public deploy.
+4. **SSO (Google)** (🟢 above) — blocked on registering the OAuth app, which is
    not code, so start that registration before you need it. It smooths the door;
-   it does not block the deploy.
+   it does not block the deploy. Note that its callback will be the second route
+   handler, and unlike `/auth/confirm` it *will* send the user out through
+   Supabase and back — which is the case `playwright.config.ts`'s
+   `127.0.0.1`-not-`localhost` rule was written for.
 
-*Ride-along:* the sign-out scope fix (🟡, #92/#98) is one argument plus a test
-assertion. Fold it into the next change that touches `src/server/actions/auth.ts`
-rather than letting it take a session of its own — but it should not still be
-here at the Phase 4 deploy.
+*No ride-alongs outstanding.* The sign-out scope fix (#92/#98) was the last one
+and rode along with #93, exactly as its entry asked.
 
 The security + CI + commit-hygiene foundation is green, the Phase 2 schema is on
 `main`, and as of 2026-08-04 so is the whole Phase 3 vertical slice. What shifted
-with it: the open items are no longer "wire the plumbing" or "write the
-mutations" but **"make it real for someone other than you"** — and the two 🟠
-gates (email confirmations, the open redirect — the second closed 2026-08-12)
-plus CAPTCHA all exist because signup is open to the public. They are the price
-of that call, not surprises.
+with the Phase 3 close: the open items stopped being "wire the plumbing" or
+"write the mutations" and became **"make it real for someone other than you"** —
+and both 🟠 gates plus CAPTCHA existed because signup is open to the public. They
+were the price of that call, not surprises. Two of the three are now paid.
 The 🟡 bucket is now mostly latent defects and DX debt; none of it should
 displace Phase 4, and the four items added 2026-08-07 (#86/#89, #87, #84, #102)
 are explicitly fill-in work around it.

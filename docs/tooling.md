@@ -157,23 +157,28 @@ Three consequences worth knowing before editing the job:
   and it is a `sed` rather than a third `--override-name` because the CLI
   documents no override for that key, and a wrong one emits nothing rather than
   failing.
-- **It is the slow job now.** Nine containers pulled cold, against `db`'s three
-  — the `timeout-minutes: 20` backstop is the same as `db`'s and for the same
-  reason, but the weight behind it is not.
+- **It is the slow job now.** Eight containers pulled cold, against `db`'s
+  three — the `timeout-minutes: 20` backstop is the same as `db`'s and for the
+  same reason, but the weight behind it is not.
 
 The `-x` exclusion list **no longer mirrors the `db` job below, and must not be
 synced to it.** This job drives the app over HTTP, so it genuinely needs Kong,
 PostgREST and Realtime — the containers `db` now drops. What both jobs still
 share is the rule about never excluding `storage-api`.
 
-It does still carry the ignored names described under `db` below (`analytics`,
-`inbucket`, `functions` are not valid `-x` values, so logflare and mailpit boot
-regardless). Correcting them here is a live backlog item rather than part of the
-`db` change, because this job's mailbox story is conditional: mailpit is meant to
-be absent only while `[auth.email] enable_confirmations` is `false`. Turning
-confirmations on (a backlog item, required before the Phase 4 public deploy)
-means signup sends mail and this job needs the mailbox back — so the fix and that
-flag have to be decided together. Details: [playwright.md](playwright.md).
+**The ignored names are gone (2026-08-25).** This list used to carry
+`analytics`, `inbucket` and `functions`, none of which is a valid `-x` value (see
+the trap under `db` below), so logflare booted on every run despite appearing
+excluded. It is now
+`studio,imgproxy,edge-runtime,logflare,vector`, and the correction landed
+alongside issue #93 exactly as planned: the mailbox was the conditional part.
+**Mailpit is now absent from the list on purpose.** With `[auth.email]
+enable_confirmations` on, signup sends real mail and
+`tests/e2e/auth.spec.ts` reads the confirmation link out of the mailbox
+(`tests/e2e/mailbox.ts`), so the mail container is a dependency of this job.
+That is what makes the count eight: postgres, gotrue, kong, postgrest, realtime,
+storage-api, postgres-meta, mailpit. Details:
+[playwright.md](playwright.md).
 
 ### Database suite (`db` job)
 
@@ -214,7 +219,11 @@ Three deliberate choices:
   gotrue, imgproxy, kong, logflare, mailpit, postgres-meta, postgrest, realtime,
   storage-api, studio, supavisor, vector`. This also retires the 2026-08-03
   finding that `inbucket` was "still valid because `--help` lists it" — `--help`
-  listing it is exactly the thing that misleads.
+  listing it is exactly the thing that misleads. Worth knowing when reading
+  `docker ps`: the container is still *named* `supabase_inbucket_<project>`
+  even though its image is `mailpit`, so the old name survives in three places
+  (`--help`, the container name, and stale notes) and is correct in none of
+  them.
 
   **`kong` and `postgrest` must be excluded together.** The CLI health-checks
   PostgREST *through* Kong (`HEAD 127.0.0.1:54321/rest-admin/v1/ready`), so
@@ -232,7 +241,7 @@ Three deliberate choices:
   `config.toml` change, or a CLI bump, so gating on changed paths would miss
   cases.
 
-Cold image pulls still make `e2e` — nine containers to this job's three — the
+Cold image pulls still make `e2e` — eight containers to this job's three — the
 slow job in the matrix; both keep `timeout-minutes: 20` as a backstop against a
 container that never reaches healthy. A `docker ps -a` + `supabase status` step
 runs `if: failure()` for triage.

@@ -1,5 +1,7 @@
 import { test, expect, type Page } from "@playwright/test";
 
+import { clearMailbox, waitForConfirmationLink } from "./mailbox";
+
 /**
  * The Phase 3 auth loop against a real Supabase stack seeded by
  * `supabase db reset`. The assertion that matters is not "a cookie was set" —
@@ -85,11 +87,12 @@ test("vendor signs in and sees only their assigned work orders", async ({
   }
 });
 
-test("a self-registration lands with no access at all", async ({
+test("a self-registration must confirm its email, and then has no access at all", async ({
   page,
 }, testInfo) => {
   // Unique per worker rather than per wall-clock, so the address is stable and
-  // parallel workers do not collide.
+  // parallel workers do not collide — and so the mailbox lookup below can
+  // filter by recipient.
   //
   // This is the one spec that writes: it creates a real auth user, so it needs
   // a freshly seeded database. CI runs `supabase db reset` immediately before
@@ -98,6 +101,10 @@ test("a self-registration lands with no access at all", async ({
   // address per run would pass every time while silently filling auth.users.
   const email = `selfreg-w${testInfo.workerIndex}@realtyworks.test`;
 
+  // `db reset` does not empty the mail container, so a local re-run would
+  // otherwise find the previous run's message and follow a spent token.
+  await clearMailbox(email);
+
   await page.goto("/signup");
   await page.getByLabel("Full name").fill("Self Registered");
   await page.getByLabel("Email").fill(email);
@@ -105,6 +112,21 @@ test("a self-registration lands with no access at all", async ({
   await page.getByLabel("Password").fill(SEED_PASSWORD);
   await page.getByRole("button", { name: "Create account" }).click();
 
+  // The gate itself (issue #93): the account exists, but no session came with
+  // it. Landing on /dashboard here would mean confirmations are off.
+  await expect(
+    page.getByRole("heading", { name: "Check your email" }),
+  ).toBeVisible();
+  await expect(page).toHaveURL("/signup");
+
+  // And it cannot be talked past by going in the front door.
+  await signIn(page, email);
+  await expect(page).toHaveURL("/login");
+  await expect(formAlert(page)).toContainText("Confirm your email address");
+
+  // Only the emailed link opens it. This is the half that a bogus token would
+  // silently skip — see the /auth/confirm lesson in docs/backlog.md.
+  await page.goto(await waitForConfirmationLink(email));
   await expect(page).toHaveURL("/dashboard");
 
   // The fail-safe: role defaults to vendor, nothing is linked, so RLS returns

@@ -82,8 +82,9 @@ on 2026-07-27, the staff write path on 2026-08-02, and the vendor half on
 2026-08-03 — zod schemas in `src/schemas/`, the server-only data-access layer
 and server actions in `src/server/`, the `(auth)` / `(dashboard)` route groups,
 and `src/app/auth/confirm/route.ts`, which redeems a magic link into cookie
-session. Planned for a later phase (decided, not yet installed): Sentry
-(Phase 4). There is **no separate backend service** — backend logic lives in
+session. Email confirmations followed on 2026-08-25 (the last gate before
+Phase 4), reusing that same route handler for the signup link. Planned for a
+later phase (decided, not yet installed): Sentry (Phase 4). There is **no separate backend service** — backend logic lives in
 Postgres (RLS/constraints), Next.js server actions/route handlers, and Supabase
 Edge Functions. See `CLAUDE.md` §2.
 
@@ -162,9 +163,13 @@ pnpm dev              # http://127.0.0.1:3000
 
 `/` redirects to `/dashboard`, which redirects to **`/login`** when there is no
 session. **`/signup`** is open self-registration (name, email, password,
-phone) — but a self-registered account is deliberately inert: it lands as an
-unlinked `vendor`, so RLS returns nothing until staff link it to a `vendors`
-row, and the dashboard says as much instead of rendering an empty table.
+phone), and it takes two steps: the account cannot sign in until the emailed
+confirmation link is followed (`[auth.email] enable_confirmations`). Locally
+that mail goes to **mailpit** at <http://127.0.0.1:54324>, not to a real inbox.
+Even once confirmed, a self-registered account is deliberately inert: it lands
+as an unlinked `vendor`, so RLS returns nothing until staff link it to a
+`vendors` row, and the dashboard says as much instead of rendering an empty
+table.
 
 Prefer `127.0.0.1` over `localhost` for the dev server. It is what
 `[auth] site_url` in `supabase/config.toml` and the Playwright `baseURL` both
@@ -246,7 +251,9 @@ timeout, not on an assertion. The specs sign in as the seeded users and assert
 against the seeded fixtures **by identity, not by row count**, so the variables
 must point at a **running, freshly reset** stack; placeholders no longer work.
 The vendor-loop specs also need `SUPABASE_SECRET_KEY`, since inviting a vendor
-is a service-role write. Most specs write, and the signup and invite paths
+is a service-role write. The signup spec needs the **mail container** running
+(it reads the confirmation link out of mailpit), which `supabase start` gives
+you by default. Most specs write, and the signup and invite paths
 create real `auth.users` rows that nothing cleans up, so a second run without
 `db reset` fails on "account already exists". CI's `e2e` job does exactly this —
 boots a stack, resets it, writes `.env.local` from `supabase status` — see
@@ -277,8 +284,9 @@ way — is in [Testing](#testing) below and [docs/playwright.md](docs/playwright
   `pnpm exec vitest run src/path/to/file.test.ts`, or filter by name with
   `pnpm exec vitest run -t "name of test"`.
 - **E2E (Playwright)** — owns `tests/e2e/`: the boot smoke test plus the three
-  slice suites — `auth.spec.ts` (sign in as each seeded role, self-register,
-  wrong password, signed-out redirect, sign out), `work-orders.spec.ts` (create,
+  slice suites — `auth.spec.ts` (sign in as each seeded role, self-register and
+  confirm by following a link read out of the real mailbox, wrong password,
+  signed-out redirect, sign out), `work-orders.spec.ts` (create,
   assign, note, the 404 and vendor-refusal paths), and `vendor-loop.spec.ts`
   (invite → redeem a real magic link in a second browser context → status +
   photo, plus single-use, the stale link clearing from the page on
@@ -327,8 +335,8 @@ auth loop, staff write path, and vendor loop. (The job is still *named* "E2E
 any branch-protection rule that matches the check by name.) `db`
 runs the pgTAP suite from `supabase/tests/`, so an RLS or write-guard regression
 fails CI rather than merging green — on a **deliberately smaller stack**, three
-containers to `e2e`'s nine, because pg_prove talks to Postgres directly and
-never makes an HTTP request. The two `-x` exclusion lists are not the same list
+containers to `e2e`'s eight, because pg_prove talks to Postgres directly and
+never makes an HTTP request (and, unlike `e2e`, has no mailbox to read). The two `-x` exclusion lists are not the same list
 and must not be synced. Both jobs pull Docker images cold, so they, not
 `verify`, set the wall-clock. Details: [docs/tooling.md](docs/tooling.md).
 
@@ -372,7 +380,7 @@ realtyworks/
 │   ├── app/                # Next.js App Router · globals.css carries the shadcn zinc theme
 │   │   ├── (auth)/         # login · signup (signed-out route group)
 │   │   ├── (dashboard)/    # authed shell · /dashboard · /work-orders/{new,[id]} · /vendors
-│   │   └── auth/confirm/   # route handler: redeems a magic link → session cookies
+│   │   └── auth/confirm/   # route handler: redeems a magic link or signup link → session cookies
 │   ├── components/
 │   │   ├── features/       # composed, domain-specific components (work-orders/)
 │   │   └── ui/             # shadcn/ui primitives (button, input, label, card, table, badge, textarea, native-select, form-feedback)
@@ -387,6 +395,7 @@ realtyworks/
 ├── supabase/
 │   ├── migrations/         # timestamped SQL — SOURCE OF TRUTH (RLS ships with its table)
 │   ├── tests/              # pgTAP RLS/write-guard suite
+│   ├── templates/          # confirmation.html — points signup mail at /auth/confirm
 │   ├── seed.sql            # 3 login-able users + sample data
 │   └── config.toml
 ├── tests/

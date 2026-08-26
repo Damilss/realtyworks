@@ -91,7 +91,10 @@ the authoritative gate.**
    layer over: fixtures were invented v4-shaped ids the seeded database would
    never produce, so the schema looked correct while it rejected every real id.
    For anything security-shaped, removing the protection for one run is the only
-   cheap proof that the assertion is attached to the thing it names.
+   cheap proof that the assertion is attached to the thing it names. It is
+   cheap: turning email confirmations on (issue #93) was verified by flipping
+   `enable_confirmations` back to `false`, restarting the stack, and watching
+   the self-registration spec fail — about two minutes.
 5. **Write it down if it was surprising.** Notable snags get a report in
    [`docs/reports/`](docs/reports/) from `TEMPLATE_REPORT.md`. The audit trail is
    a product feature here, not a nice-to-have.
@@ -132,7 +135,8 @@ may mirror a check for UX and is never the source of truth (`CLAUDE.md` §2). A
 client-side-only check is a bug, not a defense.
 
 **One endpoint mints a session, and its destination is guarded rather than
-trusted.** `src/app/auth/confirm/route.ts` exchanges a magic-link token for
+trusted.** `src/app/auth/confirm/route.ts` exchanges a magic-link *or signup
+confirmation* token for
 session cookies, which makes the `next` it redirects to a phishing primitive —
 a link that genuinely signs someone in and then lands them on an attacker's page
 is exactly what makes a fake "session expired, sign in again" screen work. So
@@ -143,8 +147,12 @@ at all, and re-parses what it emitted to confirm it still means the same thing
 2026-08-24 after review on the fix's own PR). The transferable rule
 is worth applying to the next value that crosses a parser boundary: **never
 string-match a URL something downstream will re-parse** — `/\evil.example`
-passes every prefix check and still normalizes to a foreign host. Reasoning:
-[`docs/vendor-access.md`](docs/vendor-access.md) §6a.
+passes every prefix check and still normalizes to a foreign host. The `type`
+parameter is allowlisted for the same reason the destination is parsed: it is
+caller-controlled, so the endpoint redeems only `magiclink`, `invite` and
+`signup`, and refuses `recovery` and `email_change` — both of which end in a
+credential change this handler was never reviewed for. Reasoning:
+[`docs/vendor-access.md`](docs/vendor-access.md) §6a and §6b.
 
 **The one documented exception proves the rule.** `src/lib/supabase/admin.ts`
 carries the secret key and bypasses RLS, because two writes are deliberately

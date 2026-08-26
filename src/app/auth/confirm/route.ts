@@ -4,14 +4,18 @@ import type { NextRequest } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 
 /**
- * Redeems a magic link and starts a session.
+ * Redeems an emailed token and starts a session.
  *
- * This is the vendor's whole login: staff mint a link with `inviteVendor`, the
- * vendor taps it, and lands here with a one-time `token_hash`. Exchanging that
- * for a session is a cookie write, which a Server Component cannot do — hence a
- * route handler. `createClient()` from `@/lib/supabase/server` is the right
- * client and needs no variant: its readonly-cookie guard only swallows the
- * Server Component case, so here `cookieStore.set()` genuinely writes.
+ * Two flows land here. It is the vendor's whole login — staff mint a link with
+ * `inviteVendor`, the vendor taps it, and arrives with a one-time `token_hash`
+ * — and since 2026-08-25 it is also where a self-registration confirms its
+ * email address (`supabase/templates/confirmation.html`, issue #93).
+ *
+ * Exchanging a token for a session is a cookie write, which a Server Component
+ * cannot do — hence a route handler. `createClient()` from
+ * `@/lib/supabase/server` is the right client and needs no variant: its
+ * readonly-cookie guard only swallows the Server Component case, so here
+ * `cookieStore.set()` genuinely writes.
  *
  * The tokens are single-use — a replayed `token_hash` comes back as "Email link
  * is invalid or has expired" — and expire after `[auth.email] otp_expiry`
@@ -23,8 +27,14 @@ import { createClient } from "@/lib/supabase/server";
  * so it is caller-controlled; passing it straight through would let someone
  * redeem a `recovery` or `email_change` token at an endpoint that was never
  * reviewed for either.
+ *
+ * `signup` joined the list when email confirmations went on. It is the same
+ * exchange as the other two — a single-use hash for a session — and it is
+ * reviewed by the same argument, which is why it belongs here rather than at a
+ * second endpoint. `recovery` and `email_change` are still refused: both end in
+ * a credential change, which this handler does nothing about.
  */
-const ALLOWED_TYPES = new Set(["magiclink", "invite"]);
+const ALLOWED_TYPES = new Set(["magiclink", "invite", "signup"]);
 
 /**
  * Resolves `value` against `origin` and returns it as a bare path, or null if it

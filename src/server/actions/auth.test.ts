@@ -135,6 +135,48 @@ describe("signIn", () => {
     expect(state.error).toBe("Too many attempts. Try again in a few minutes.");
   });
 
+  it("distinguishes an unconfirmed address, which is also actionable", async () => {
+    stubSupabase({
+      signInWithPassword: vi.fn().mockResolvedValue({
+        error: {
+          message: "Email not confirmed",
+          code: "email_not_confirmed",
+          status: 400,
+        },
+      }),
+    });
+
+    const state = await signIn({}, formData(validLogin));
+
+    // Not an enumeration oracle: GoTrue only reaches this error once the
+    // password checked out, so it reveals nothing the caller had not already
+    // proven. The alternative tells someone who has not opened their email
+    // that their password is wrong.
+    expect(state.error).toBe(
+      "Confirm your email address before signing in. Check your inbox for the link.",
+    );
+  });
+
+  it("keeps every other failure collapsed into the one message", async () => {
+    // The guard on the branch above: a new GoTrue error code must not acquire
+    // its own wording by accident.
+    for (const code of [
+      "invalid_credentials",
+      "user_not_found",
+      "unexpected",
+    ]) {
+      stubSupabase({
+        signInWithPassword: vi
+          .fn()
+          .mockResolvedValue({ error: { message: code, code, status: 400 } }),
+      });
+
+      const state = await signIn({}, formData(validLogin));
+
+      expect(state.error).toBe("Invalid email or password.");
+    }
+  });
+
   it("redirects to the dashboard on success", async () => {
     stubSupabase();
 
@@ -215,9 +257,7 @@ describe("signUp", () => {
   it("sends the name and normalized phone as user metadata", async () => {
     const auth = stubSupabase();
 
-    await expect(signUp({}, formData(validSignup))).rejects.toThrow(
-      "NEXT_REDIRECT:/dashboard",
-    );
+    await signUp({}, formData(validSignup));
 
     expect(auth.signUp).toHaveBeenCalledWith({
       email: "new@realtyworks.test",
@@ -229,12 +269,10 @@ describe("signUp", () => {
   it("sends nothing role-shaped, so a self-registration cannot self-promote", async () => {
     const auth = stubSupabase();
 
-    await expect(
-      signUp(
-        {},
-        formData({ ...validSignup, role: "landlord", app_role: "landlord" }),
-      ),
-    ).rejects.toThrow("NEXT_REDIRECT:/dashboard");
+    await signUp(
+      {},
+      formData({ ...validSignup, role: "landlord", app_role: "landlord" }),
+    );
 
     const sent = auth.signUp.mock.calls[0]?.[0];
     const metadataKeys = Object.keys(sent.options.data);
@@ -284,7 +322,24 @@ describe("signUp", () => {
     expect(state.values?.phone).toBeUndefined();
   });
 
+  it("asks the new account to confirm, instead of signing it in", async () => {
+    stubSupabase();
+
+    const state = await signUp({}, formData(validSignup));
+
+    // The heart of issue #93: with `[auth.email] enable_confirmations` on,
+    // signUp() returns no session, so a redirect to /dashboard would bounce
+    // straight back to /login.
+    expect(mockedRedirect).not.toHaveBeenCalled();
+    expect(state.confirmationSent).toBe(true);
+    // The panel greets the user by the address it just mailed.
+    expect(state.values?.email).toBe("new@realtyworks.test");
+  });
+
   it("does not confirm whether an email is already registered", async () => {
+    // The exact response a *confirmed* address still draws, checked against the
+    // running stack rather than taken from the docs: turning confirmations on
+    // did not obfuscate this into a success, so the branch is still live.
     stubSupabase({
       signUp: vi.fn().mockResolvedValue({
         error: {
@@ -297,10 +352,24 @@ describe("signUp", () => {
 
     const state = await signUp({}, formData(validSignup));
 
+    expect(state.confirmationSent).toBeUndefined();
     expect(state.error).toBe(
       "Could not create that account. If you already have one, sign in.",
     );
     expect(state.error).not.toContain("already registered");
+  });
+
+  it("shows the same panel when an outstanding link is merely resent", async () => {
+    // An address that exists but has not confirmed is not a duplicate to
+    // GoTrue: it succeeds and sends the link again. Saying nothing about which
+    // of the two happened is what keeps the form off the enumeration path — and
+    // it is why there is no separate "resend" control to build.
+    stubSupabase();
+
+    const state = await signUp({}, formData(validSignup));
+
+    expect(state.confirmationSent).toBe(true);
+    expect(state.error).toBeUndefined();
   });
 });
 
@@ -309,7 +378,11 @@ describe("signOut", () => {
     const auth = stubSupabase();
 
     await expect(signOut()).rejects.toThrow("NEXT_REDIRECT:/login");
-    expect(auth.signOut).toHaveBeenCalledOnce();
+    // Not `toHaveBeenCalledOnce()`: auth-js defaults the scope to 'global',
+    // which revokes every session the account holds, so the argument is the
+    // whole point and an arity-only assertion would let the default creep back
+    // silently (issues #92/#98).
+    expect(auth.signOut).toHaveBeenCalledWith({ scope: "local" });
   });
 
   it("still redirects when the provider call fails", async () => {

@@ -71,7 +71,10 @@ deliberate change, not a tidy-up.) That job sets no
 Its env-writing step is an **allowlist**, not a filter: it admits the CLI's
 `SECRET_KEY` and renames it to `SUPABASE_SECRET_KEY` (the invite and the
 attachment insert are service-role writes), while `SERVICE_ROLE_KEY` and
-`JWT_SECRET` never reach a file `next build` reads.
+`JWT_SECRET` never reach a file `next build` reads. Its stack is **eight
+containers**, and since 2026-08-25 that deliberately includes **mailpit**: the
+signup spec reads the confirmation email out of it (`tests/e2e/mailbox.ts`), so
+the mail container is a dependency of that job rather than dead weight.
 A parallel `db` job runs the pgTAP suite (`supabase test db`), so an RLS or
 write-guard regression fails CI instead of merging green. It boots a **strictly
 smaller stack than `e2e`** — three containers (Postgres, gotrue, storage-api),
@@ -174,11 +177,11 @@ Verify before assuming they exist:
   `20260727140000_handle_new_user_phone_from_metadata.sql` makes
   `handle_new_user()` read the signup form's phone out of `raw_user_meta_data`
   (`auth.users.phone` still wins when set) and store whitespace-only name/phone
-  as NULL. Two accepted risks, both in `docs/backlog.md`:
-  `[auth.email] enable_confirmations` is still `false` (must be on before the
-  Phase 4 public deploy), and there is no CAPTCHA —
-  `[auth.rate_limit] sign_in_sign_ups` is the only brake. One known **defect**
-  is filed alongside them (nobody chose this one): `signOut()` passes no
+  as NULL. One accepted risk remains, in `docs/backlog.md`: there is no
+  CAPTCHA, and `[auth.rate_limit] sign_in_sign_ups` is the only brake. (The
+  other, `enable_confirmations = false`, was closed 2026-08-25 — see the email
+  confirmations bullet below.) One known **defect**
+  is filed alongside it (nobody chose this one): `signOut()` passes no
   options, and auth-js defaults that to **global** scope, so signing out on one
   device revokes the account's sessions everywhere. It should pass
   `{ scope: "local" }`.
@@ -256,6 +259,33 @@ Verify before assuming they exist:
   leaves its test green, the test does not cover the guard** — check by actually
   deleting it once. Reasoning: `docs/vendor-access.md` §6a; the testing half:
   `docs/playwright.md`.
+- **In place — email confirmations (2026-08-25, issue #93), the last gate
+  before Phase 4:** `[auth.email] enable_confirmations = true`, a custom
+  `supabase/templates/confirmation.html`, `signup` added to `/auth/confirm`'s
+  `ALLOWED_TYPES`, `signUp()` returning a "check your email" state instead of
+  redirecting, and `tests/e2e/mailbox.ts` reading the real mailbox. **No
+  migration** — the seeded users already carry `email_confirmed_at`, so every
+  existing login and all 94 pgTAP assertions were untouched. Four things worth
+  carrying forward, all verified against the running stack rather than read in
+  a doc. **The default template is unusable here**: `{{ .ConfirmationURL }}` is
+  GoTrue's implicit flow, so the template points at our own `/auth/confirm`
+  with `token_hash={{ .TokenHash }}&type=signup` — the same shape
+  `buildInviteUrl()` builds. **`content_path` under
+  `[auth.email.template.*]` resolves from the project root**, while
+  `[auth.email.notification.*]` resolves from `supabase/`; the CLI's two
+  commented examples differ for that reason and it is not a typo. **A duplicate
+  signup still errors** — `user_already_exists` / 422 for a *confirmed*
+  address, contrary to the docs' claim that the response becomes obfuscated;
+  what changed is that re-submitting an *unconfirmed* address resends the link,
+  which is why there is no separate "resend" control. And **`signIn` names the
+  `email_not_confirmed` case on purpose**: GoTrue only returns it after the
+  password checked out, so it is not an enumeration oracle, while the generic
+  message would tell someone who simply has not opened their email that their
+  password is wrong. The local mailbox is **mailpit** (`[local_smtp]`, port
+  54324) even though its container is still named `supabase_inbucket_*`.
+  Production SMTP is written into `config.toml` as Resend with
+  `enabled = false`; flipping it there would route local dev and the CI mailbox
+  spec through a real provider, so it is turned on for the hosted project only.
 - **Not yet created:** `supabase/functions/`, `src/app/api/`. Neither is a gap
   to fill on its own — edge functions are Phase 5 (§6 SMS), and the only route
   handler that exists is `src/app/auth/confirm/route.ts`, which is deliberately
@@ -429,6 +459,7 @@ realtyworks/
 │   └── proxy.ts                    # Next 16 root convention (was middleware.ts)
 ├── supabase/
 │   ├── migrations/                 # timestamped SQL — SOURCE OF TRUTH (RLS ships with its table)
+│   ├── templates/                  # confirmation.html — signup mail points at /auth/confirm
 │   ├── functions/                  # edge functions (not created until needed)
 │   ├── tests/                      # pgTAP RLS/guard suite — `pnpm exec supabase test db`
 │   ├── seed.sql                    # 3 test users + sample data (db reset loads it)

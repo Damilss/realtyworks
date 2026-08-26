@@ -83,4 +83,23 @@ describe("SignupForm", () => {
       screen.getByRole("button", { name: "Creating account…" }),
     ).toBeDisabled();
   });
+
+  it("replaces the form with the confirmation panel, naming the address", () => {
+    renderWith({
+      confirmationSent: true,
+      values: { email: "new@realtyworks.test" },
+    });
+
+    expect(
+      screen.getByRole("heading", { name: "Check your email" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("new@realtyworks.test")).toBeInTheDocument();
+
+    // Replaced, not annotated: leaving the form up invites a second submit that
+    // only re-sends the same email.
+    expect(screen.queryByLabelText("Password")).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Create account" }),
+    ).not.toBeInTheDocument();
+  });
 });
