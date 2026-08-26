@@ -561,19 +561,19 @@ advisory.
 
 ### Moving Node to a new major (do it in this order)
 
-The runtime pin and the types pin are two different files. Bump the **runtime
-first**, then the types — bumping only `@types/node` recreates the exact
-mismatch this rule exists to prevent.
+The runtime constraints and the types pin are separate settings. Bump both
+**runtime constraints first**, then the types — bumping only `@types/node`
+recreates the exact mismatch this rule exists to prevent.
 
-1. **`.nvmrc`** → the new major (e.g. `24` → `26`). This is the runtime, and
-   it is the *only* runtime pin in the repo: CI reads it via
+1. **`.nvmrc`** → the new major (e.g. `24` → `26`). CI reads it via
    `node-version-file: .nvmrc` in **both** the `verify` and `e2e` jobs
-   (`ci.yml`), and `nvm use` reads it locally. There is no `engines` field in
-   `package.json` and no Dockerfile yet — if either is added later, they become
-   runtime pins too and belong in this step.
-2. **`package.json`** → `@types/node` to the matching major (`^24` → `^26`),
+   (`ci.yml`), and `nvm use` reads it locally.
+2. **`package.json` `engines.node`** → the matching major range (e.g.
+   `>=24 <25` → `>=26 <27`). Package managers read this constraint and warn
+   when a local install uses the wrong Node major.
+3. **`package.json`** → `@types/node` to the matching major (`^24` → `^26`),
    then `pnpm install`.
-3. **Leave the Dependabot `ignore:` rule alone.** It drops any `@types/node`
+4. **Leave the Dependabot `ignore:` rule alone.** It drops any `@types/node`
    major regardless of number, so it keeps working on the new major with no
    edit. Removing it would let the types start leading the runtime again.
 
