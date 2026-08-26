@@ -191,15 +191,33 @@ describe("redemption", () => {
     expect(target).toBe(INVALID_LINK);
   });
 
-  it("refuses a link type this endpoint was never reviewed for", async () => {
-    const verifyOtp = stubSupabase();
+  it.each(["magiclink", "invite", "signup"])(
+    "redeems a %s token",
+    async (type) => {
+      const verifyOtp = stubSupabase();
 
-    const target = await redeem({ token_hash: TOKEN, type: "recovery" });
+      // `signup` is the email-confirmation link (issue #93): the same
+      // single-use hash exchange as the vendor invite, arriving from
+      // supabase/templates/confirmation.html.
+      const target = await redeem({ token_hash: TOKEN, type });
 
-    expect(target).toBe(INVALID_LINK);
-    expect(mockedCreateClient).not.toHaveBeenCalled();
-    expect(verifyOtp).not.toHaveBeenCalled();
-  });
+      expect(verifyOtp).toHaveBeenCalledWith({ token_hash: TOKEN, type });
+      expect(target).toBe("/dashboard");
+    },
+  );
+
+  it.each(["recovery", "email_change"])(
+    "refuses %s, a link type this endpoint was never reviewed for",
+    async (type) => {
+      const verifyOtp = stubSupabase();
+
+      const target = await redeem({ token_hash: TOKEN, type });
+
+      expect(target).toBe(INVALID_LINK);
+      expect(mockedCreateClient).not.toHaveBeenCalled();
+      expect(verifyOtp).not.toHaveBeenCalled();
+    },
+  );
 
   it("refuses a request carrying no token", async () => {
     const verifyOtp = stubSupabase();

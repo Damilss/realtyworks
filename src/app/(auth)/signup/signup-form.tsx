@@ -13,6 +13,38 @@ const initialState: AuthFormState = {};
 export function SignupForm() {
   const [state, formAction, pending] = useActionState(signUp, initialState);
 
+  // The account exists but has no session: `[auth.email] enable_confirmations`
+  // is on, so there is nothing to redirect to and nothing left to submit. The
+  // form is replaced rather than merely annotated, because leaving it on screen
+  // invites a second submit that only re-sends the same email.
+  //
+  // An address whose confirmation is still outstanding lands here too — GoTrue
+  // resends the link rather than refusing — so this panel is what both a new
+  // registration and a second attempt at one see.
+  if (state.confirmationSent) {
+    return (
+      <div className="flex flex-col gap-3" role="status" aria-live="polite">
+        <h2 className="text-lg font-semibold">Check your email</h2>
+        <p className="text-muted-foreground text-sm">
+          We sent a confirmation link
+          {state.values?.email ? (
+            <>
+              {" to "}
+              <span className="text-foreground font-medium">
+                {state.values.email}
+              </span>
+            </>
+          ) : null}
+          . Follow it to finish setting up your account.
+        </p>
+        <p className="text-muted-foreground text-sm">
+          The link is single use and expires in an hour. Until you follow it,
+          the account cannot sign in.
+        </p>
+      </div>
+    );
+  }
+
   return (
     <form action={formAction} className="flex flex-col gap-4">
       <div className="flex flex-col gap-2">

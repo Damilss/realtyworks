@@ -298,12 +298,15 @@ describe("inviteVendor", () => {
   });
 
   /**
-   * The address squat. `enable_confirmations` is false while signup is open, so
-   * anyone can register an address they do not own; `handle_new_user()` defaults
-   * them to 'vendor', which is exactly the role the check below admits. Linking
-   * that account is what would turn a self-registration that reads nothing into
-   * one holding the vendor's work orders — and the squatter knows their own
-   * password, so the magic link never has to be intercepted.
+   * The address squat. Signup is open and `handle_new_user()` defaults a
+   * self-registration to 'vendor', which is exactly the role the check below
+   * admits. Linking that account is what would turn a self-registration that
+   * reads nothing into one holding the vendor's work orders — and the squatter
+   * knows their own password, so the magic link never has to be intercepted.
+   *
+   * `enable_confirmations` (on since 2026-08-25) narrows this to someone who
+   * genuinely controls the address — a shared mailbox, a recycled one, or an
+   * honest collision — rather than removing the case.
    */
   it("refuses a pre-existing account that is not linked to this vendor", async () => {
     stubSession({ results: [assignedWorkOrder({ profileId: null })] });

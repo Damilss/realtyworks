@@ -265,14 +265,18 @@ export async function inviteVendor(
   // Refuse an account this action did not create, unless it is already the one
   // this vendor row points at.
   //
-  // `[auth.email] enable_confirmations` is still false while signup is open
-  // (docs/backlog.md — "Turn on email confirmations before the Phase 4 public
-  // deploy"), so anyone can register an address they do not own and be signed in
-  // immediately. The backlog rates that blast radius as nil because an unlinked
-  // self-registration reads nothing — and it is this action that would end the
-  // "unlinked" part. Squat a vendor's address, wait for staff to invite them,
-  // and the link handed over is to the squatter's own account, which they hold
-  // the password for. The magic link never has to be intercepted.
+  // The attack this stops is an address squat: register a vendor's address,
+  // wait for staff to invite them, and the link handed over is to the
+  // squatter's own account, whose password they hold. The magic link never has
+  // to be intercepted — it is this action that would end the "unlinked" part
+  // that makes a self-registration harmless.
+  //
+  // `[auth.email] enable_confirmations` went on 2026-08-25 (issue #93), which
+  // narrows that window rather than closing it: an attacker now has to control
+  // the address to get a usable account. This check is what covers the
+  // remainder — a shared or recycled mailbox, an address a vendor once used, or
+  // simply an honest collision between two people — and it is cheap enough that
+  // deleting it to celebrate the config flip would be a bad trade.
   //
   // The role check below does not cover this: `handle_new_user()` defaults a
   // self-registration to 'vendor'

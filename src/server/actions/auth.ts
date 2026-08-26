@@ -41,6 +41,13 @@ export type AuthFormState = {
   error?: string;
   fieldErrors?: Record<string, string[]>;
   values?: AuthFormValues;
+  /**
+   * Set by `signUp` when the account was accepted and a confirmation email is
+   * on its way. There is no session yet — `[auth.email] enable_confirmations`
+   * is on — so there is nothing to redirect to, and the form swaps itself for a
+   * "check your inbox" panel instead.
+   */
+  confirmationSent?: boolean;
 };
 
 /**
@@ -88,9 +95,39 @@ const INVALID_CREDENTIALS = "Invalid email or password.";
  */
 const RATE_LIMITED = "Too many attempts. Try again in a few minutes.";
 
+/**
+ * The one sign-in failure worth naming, and the reason it is not an oracle:
+ * GoTrue only returns `email_not_confirmed` *after* the password checked out.
+ * Saying so therefore tells an attacker nothing they had not already proven by
+ * holding the password, while the alternative tells a real user who simply has
+ * not opened their email that their password is wrong — a support call, and one
+ * that reads like the app is broken.
+ */
+const EMAIL_NOT_CONFIRMED =
+  "Confirm your email address before signing in. Check your inbox for the link.";
+
 /** GoTrue reports throttling as HTTP 429; the code spelling varies by version. */
 function isRateLimited(error: { status?: number; code?: string }): boolean {
   return error.status === 429 || error.code === "over_request_rate_limit";
+}
+
+/**
+ * Everything that is not rate limiting or an unconfirmed address collapses to
+ * one string, deliberately — see INVALID_CREDENTIALS.
+ */
+function describeSignInError(error: {
+  status?: number;
+  code?: string;
+}): string {
+  if (isRateLimited(error)) {
+    return RATE_LIMITED;
+  }
+
+  if (error.code === "email_not_confirmed") {
+    return EMAIL_NOT_CONFIRMED;
+  }
+
+  return INVALID_CREDENTIALS;
 }
 
 export async function signIn(
@@ -120,10 +157,7 @@ export async function signIn(
       status: error.status,
     });
 
-    return {
-      error: isRateLimited(error) ? RATE_LIMITED : INVALID_CREDENTIALS,
-      values,
-    };
+    return { error: describeSignInError(error), values };
   }
 
   // Outside any try/catch: redirect() signals by throwing NEXT_REDIRECT, and a
@@ -173,21 +207,42 @@ export async function signUp(
       return { error: RATE_LIMITED, values };
     }
 
-    // With email confirmations off, GoTrue returns `user_already_exists` rather
-    // than the obfuscated response it gives when confirmations are on. Keep the
-    // wording non-committal so the form is not a registration oracle either.
+    // Keep the wording non-committal so the form is not a registration oracle.
+    //
+    // Turning confirmations on did NOT change this branch, contrary to what the
+    // Supabase docs imply about the response being obfuscated. Verified against
+    // the local stack (CLI 2.109.1): a *confirmed* address still comes back
+    // `user_already_exists` / 422. What did change is the unconfirmed case —
+    // re-submitting an address whose link is still outstanding succeeds and
+    // resends it, which is why there is no separate "resend" control.
     return {
       error: "Could not create that account. If you already have one, sign in.",
       values,
     };
   }
 
-  redirect("/dashboard");
+  // No redirect: `[auth.email] enable_confirmations` is on, so signUp() returns
+  // `session: null` and @supabase/ssr writes no cookies. Sending the browser to
+  // /dashboard would bounce it straight back to /login.
+  //
+  // An address that already exists but has *not* confirmed lands here too:
+  // GoTrue treats that as a resend rather than a duplicate (verified — two
+  // messages in the mailbox for two submissions). The panel is right for both,
+  // and saying nothing about which one happened is the point.
+  return { confirmationSent: true, values };
 }
 
 export async function signOut(): Promise<void> {
   const supabase = await createClient();
-  const { error } = await supabase.auth.signOut();
+  // `scope` is not optional in practice: auth-js declares
+  // `signOut(options = { scope: 'global' })`, which revokes every refresh token
+  // the account holds. The control is labeled "Sign out", not "Sign out
+  // everywhere" — and the failure is delayed rather than obvious, because the
+  // other device's access-token JWT stays valid until `jwt_expiry` (3600s) and
+  // only then bounces off src/proxy.ts to /login (issues #92/#98). A deliberate
+  // "sign out everywhere" affordance is a Phase 5 account-settings feature, and
+  // `scope: "others"` exists for it.
+  const { error } = await supabase.auth.signOut({ scope: "local" });
 
   if (error) {
     console.error("[auth] Sign-out failed", {

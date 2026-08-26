@@ -1,0 +1,36 @@
+<!--
+  The signup confirmation email (supabase/config.toml,
+  [auth.email.template.confirmation]).
+
+  The link points at OUR /auth/confirm, not at `{{ .ConfirmationURL }}`. That
+  default resolves to GoTrue's /auth/v1/verify, which returns the session in a
+  URL *fragment* for a browser-side client to read — the implicit flow. This app
+  keeps its session in cookies written server-side (@supabase/ssr), so the token
+  has to be redeemed by our own route handler, which calls
+  verifyOtp({ token_hash, type }). Same reasoning, and the same URL shape, as the
+  vendor invite: docs/vendor-access.md §6.
+
+  No `next` parameter. safeNext() already defaults to /dashboard, and the fewer
+  caller-controlled parts this URL has, the less there is to guard.
+
+  `{{ .SiteURL }}` is [auth] site_url — http://127.0.0.1:3000 locally, and the
+  deployed origin on the hosted project (Phase 4).
+-->
+<h2>Confirm your email address</h2>
+
+<p>
+  Someone created a RealtyWorks account with this address. Follow the link below
+  to confirm it and sign in.
+</p>
+
+<p>
+  <a href="{{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&type=signup"
+    >Confirm my email address</a
+  >
+</p>
+
+<p>
+  The link is single use and expires in an hour. If you did not sign up for
+  RealtyWorks, ignore this email — the account cannot be used until the link is
+  followed.
+</p>

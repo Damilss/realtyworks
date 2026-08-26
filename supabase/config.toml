@@ -179,9 +179,10 @@ refresh_token_reuse_interval = 10
 # every self-registration is a 'vendor', and a vendor with no `vendors` row resolves
 # current_vendor_id() to NULL and can read nothing. Staff roles still come only from a
 # server-side admin create/invite that sets app_metadata.app_role, or from set_user_role().
-# Two consequences of opening this, both tracked in docs/backlog.md: accounts can be created for
-# unowned email addresses while enable_confirmations = false below (must be on before the Phase 4
-# public deploy), and there is no CAPTCHA — [auth.rate_limit].sign_in_sign_ups is the only brake.
+# Opening this had two costs, both tracked in docs/backlog.md. The first is closed: since
+# 2026-08-25 [auth.email].enable_confirmations below is true, so registering an address you do
+# not own gets you an account you cannot sign in to. The second is open — there is no CAPTCHA,
+# and [auth.rate_limit].sign_in_sign_ups is the only brake.
 enable_signup = true
 # Allow/disallow anonymous sign-ins to your project.
 enable_anonymous_sign_ins = false
@@ -205,7 +206,10 @@ password_requirements = ""
 
 [auth.rate_limit]
 # Number of emails that can be sent per hour. Requires auth.email.smtp to be enabled.
-email_sent = 2
+# Raised from the CLI default of 2 when confirmations went on (2026-08-25): every signup now
+# sends mail, and the CI `e2e` job alone sends more than two per run. 30/hour is Supabase
+# Cloud's own default with custom SMTP, and it is still a brake on email-bombing a mailbox.
+email_sent = 30
 # Number of SMS messages that can be sent per hour. Requires auth.sms to be enabled.
 sms_sent = 30
 # Number of anonymous sign-ins that can be made per hour per IP address. Requires enable_anonymous_sign_ins = true.
@@ -236,7 +240,12 @@ enable_signup = true
 # addresses. If disabled, only the new email is required to confirm.
 double_confirm_changes = true
 # If enabled, users need to confirm their email address before signing in.
-enable_confirmations = false
+# ON since 2026-08-25 (issue #93), the gate on the Phase 4 public deploy. While this was false
+# and [auth].enable_signup was true, anyone could register an address they did not own and be
+# signed in immediately — an address-squatting vector that src/server/actions/vendors.ts still
+# carries a mitigation for. The confirmation link is redeemed by our own /auth/confirm route
+# handler, not by GoTrue: see [auth.email.template.confirmation] below.
+enable_confirmations = true
 # If enabled, users will need to reauthenticate or have logged in recently to change their password.
 secure_password_change = false
 # Controls the minimum amount of time that must pass before sending another signup confirmation or password reset email.
@@ -246,15 +255,39 @@ otp_length = 6
 # Number of seconds before the email OTP expires (defaults to 1 hour).
 otp_expiry = 3600
 
-# Use a production-ready SMTP server
-# [auth.email.smtp]
-# enabled = true
-# host = "smtp.sendgrid.net"
-# port = 587
-# user = "apikey"
-# pass = "env(SENDGRID_API_KEY)"
-# admin_email = "admin@email.com"
-# sender_name = "Admin"
+# Production SMTP. Resend rather than the built-in service, which is rate-limited and explicitly
+# not for real users. Plain SMTP with no vendor SDK, so swapping providers is three values here
+# and CLAUDE.md §7 self-host stays mechanical.
+#
+# `enabled` STAYS FALSE IN THIS FILE. Local `supabase start` reads it, so flipping it here routes
+# development mail — and the CI `e2e` job's mailbox spec — through a real provider, breaking both
+# and sending real email from a test run. Locally the mail goes to mailpit ([local_smtp] above,
+# http://127.0.0.1:54324). It is turned on for the HOSTED project only, at the Phase 4 deploy:
+# the dashboard's SMTP settings, or a `config push` from that branch with this flipped there.
+#
+# The two env() values are read by the Supabase CLI's substitution, not by Next — see
+# .env.example. Nothing local needs them while `enabled` is false.
+[auth.email.smtp]
+enabled = false
+host = "smtp.resend.com"
+port = 465
+user = "resend"
+pass = "env(SUPABASE_AUTH_SMTP_PASS)"
+admin_email = "env(SUPABASE_AUTH_SMTP_ADMIN_EMAIL)"
+sender_name = "RealtyWorks"
+
+# The signup confirmation email. GoTrue's default body is `{{ .ConfirmationURL }}`, which points
+# at its own /auth/v1/verify and hands the session back in a URL *fragment* — the implicit flow,
+# which a cookie-session app built on @supabase/ssr cannot consume. The template below points at
+# our own /auth/confirm instead, exactly like the vendor invite does
+# (buildInviteUrl() in src/server/actions/vendors.ts). See docs/vendor-access.md §6.
+#
+# NOTE the base directory: `content_path` under [auth.email.template.*] resolves from the PROJECT
+# ROOT, while [auth.email.notification.*] resolves from `supabase/`. The two commented examples
+# the CLI ships differ for exactly that reason; it is not a typo.
+[auth.email.template.confirmation]
+subject = "Confirm your RealtyWorks account"
+content_path = "./supabase/templates/confirmation.html"
 
 # Uncomment to customize email template
 # [auth.email.template.invite]
