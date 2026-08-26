@@ -1083,11 +1083,11 @@ the deliberately opaque failure message already cover credential stuffing.
 **Done when:** a signup submission without a valid captcha token is rejected in
 a captcha-enabled environment, and `pnpm test:e2e` still passes locally.
 
-### 🟡 `.editorconfig` + package.json `engines`
-**Why:** Keep formatting/runtime consistent across machines and warn on wrong Node.
-**Do:** add `.editorconfig` (mirror Prettier); add `"engines": { "node": ">=24 <25" }` and rely on
-`packageManager` for pnpm.
-**Done when:** wrong-Node installs warn; editors respect the config.
+### ✅ `.editorconfig` + package.json `engines` (2026-08-25, issue #32)
+Done. `.editorconfig` mirrors the repository's whitespace conventions while
+preserving Markdown's significant trailing spaces, and `package.json` declares
+`"engines": { "node": ">=24 <25" }`. Wrong-Node installs now warn, while the
+existing `packageManager` field remains the pnpm version source of truth.
 
 ### 🟡 Optional hygiene: `knip`
 **Why:** Catches dead deps/exports early — cheap signal for a solo dev.
