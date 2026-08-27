@@ -98,6 +98,12 @@ Pick them off at your discretion.
 
 ## ✅ Done (kept for the paper trail)
 
+### ✅ `.editorconfig` + package.json `engines` (2026-08-25, issue #32)
+Done. `.editorconfig` mirrors the repository's whitespace conventions while
+preserving Markdown's significant trailing spaces, and `package.json` declares
+`"engines": { "node": ">=24 <25" }`. Wrong-Node installs now warn, while the
+existing `packageManager` field remains the pnpm version source of truth.
+
 ### ✅ nanoid high advisory cleared again — the patched floor moved (2026-08-24, issue #110)
 The blocking `pnpm audit` gate went red on **GHSA-2v37-7h3g-55p8**, the *same*
 advisory the 2026-08-07 entry below cleared. Nothing regressed in the tree: the
@@ -1084,12 +1090,6 @@ still runs unattended. Login probably does not need it — the rate limit plus
 the deliberately opaque failure message already cover credential stuffing.
 **Done when:** a signup submission without a valid captcha token is rejected in
 a captcha-enabled environment, and `pnpm test:e2e` still passes locally.
-
-### ✅ `.editorconfig` + package.json `engines` (2026-08-25, issue #32)
-Done. `.editorconfig` mirrors the repository's whitespace conventions while
-preserving Markdown's significant trailing spaces, and `package.json` declares
-`"engines": { "node": ">=24 <25" }`. Wrong-Node installs now warn, while the
-existing `packageManager` field remains the pnpm version source of truth.
 
 ### 🟡 Optional hygiene: `knip`
 **Why:** Catches dead deps/exports early — cheap signal for a solo dev.
