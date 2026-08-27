@@ -289,6 +289,13 @@ sender_name = "RealtyWorks"
 subject = "Confirm your RealtyWorks account"
 content_path = "./supabase/templates/confirmation.html"
 
+# Recovery needs the same cookie-session bridge as confirmation. The default
+# `{{ .ConfirmationURL }}` returns the session in a URL fragment, which this
+# server-rendered app cannot consume.
+[auth.email.template.recovery]
+subject = "Reset your RealtyWorks password"
+content_path = "./supabase/templates/recovery.html"
+
 # Uncomment to customize email template
 # [auth.email.template.invite]
 # subject = "You have been invited"

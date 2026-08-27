@@ -23,7 +23,7 @@ const MAILPIT_URL = process.env.MAILPIT_URL ?? "http://127.0.0.1:54324";
 type SearchResponse = { messages?: { ID: string }[] };
 type MessageResponse = { HTML?: string; Text?: string };
 
-async function mailpit<T>(path: string, init?: RequestInit): Promise<T> {
+async function mailpit(path: string, init?: RequestInit): Promise<Response> {
   const response = await fetch(`${MAILPIT_URL}${path}`, init);
 
   if (!response.ok) {
@@ -33,11 +33,17 @@ async function mailpit<T>(path: string, init?: RequestInit): Promise<T> {
     );
   }
 
+  return response;
+}
+
+async function mailpitJson<T>(path: string, init?: RequestInit): Promise<T> {
+  const response = await mailpit(path, init);
+
   return (await response.json()) as T;
 }
 
 function search(email: string): Promise<SearchResponse> {
-  return mailpit<SearchResponse>(
+  return mailpitJson<SearchResponse>(
     `/api/v1/search?query=${encodeURIComponent(`to:${email}`)}`,
   );
 }
@@ -77,7 +83,7 @@ async function findConfirmationLink(email: string): Promise<string | null> {
   const { messages = [] } = await search(email);
 
   for (const summary of messages) {
-    const message = await mailpit<MessageResponse>(
+    const message = await mailpitJson<MessageResponse>(
       `/api/v1/message/${summary.ID}`,
     );
     const body = message.HTML || message.Text || "";
@@ -103,7 +109,7 @@ async function findConfirmationLink(email: string): Promise<string | null> {
  * handed the message to the SMTP container — so there is nothing to await on the
  * page.
  */
-export async function waitForConfirmationLink(
+export async function waitForAuthLink(
   email: string,
   timeoutMs = 15_000,
 ): Promise<string> {
@@ -118,7 +124,7 @@ export async function waitForConfirmationLink(
 
     if (Date.now() > deadline) {
       throw new Error(
-        `No confirmation email for ${email} reached Mailpit within ` +
+        `No auth email for ${email} reached Mailpit within ` +
           `${timeoutMs}ms. Check [auth.email] enable_confirmations and that ` +
           `the mail container is running.`,
       );

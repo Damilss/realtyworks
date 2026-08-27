@@ -3,8 +3,6 @@ import type { AuthFormState } from "@/server/actions/auth";
 
 import { SignupForm } from "./signup-form";
 
-// The action is a server function; in a DOM test it is only ever the reference
-// useActionState dispatches to.
 vi.mock("@/server/actions/auth", () => ({ signUp: vi.fn() }));
 
 const useActionState = vi.hoisted(() => vi.fn());
@@ -23,56 +21,35 @@ describe("SignupForm", () => {
     vi.clearAllMocks();
   });
 
-  it("renders the four labelled fields", () => {
+  it("collects only the email before ownership is verified", () => {
     renderWith({});
 
-    expect(screen.getByLabelText("Full name")).toHaveAttribute("type", "text");
     expect(screen.getByLabelText("Email")).toHaveAttribute("type", "email");
-    expect(screen.getByLabelText("Phone")).toHaveAttribute("type", "tel");
-    expect(screen.getByLabelText("Password")).toHaveAttribute(
-      "type",
-      "password",
-    );
+    expect(screen.queryByLabelText("Full name")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Phone")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Password")).not.toBeInTheDocument();
   });
 
-  it("restores every submitted field, because React resets the form on error", () => {
-    // The failure this pins: one bad phone number used to cost the user all
-    // four fields, since React resets an uncontrolled form after every action.
+  it("restores the submitted email after an error", () => {
     renderWith({
-      fieldErrors: { phone: ["Enter a valid phone number."] },
-      values: {
-        fullName: "New Person",
-        email: "new@realtyworks.test",
-        phone: "12",
-      },
+      error: "Could not create that account.",
+      values: { email: "new@realtyworks.test" },
     });
 
-    expect(screen.getByLabelText("Full name")).toHaveValue("New Person");
     expect(screen.getByLabelText("Email")).toHaveValue("new@realtyworks.test");
-    expect(screen.getByLabelText("Phone")).toHaveValue("12");
-    // The one field that is meant to clear.
-    expect(screen.getByLabelText("Password")).toHaveValue("");
   });
 
-  it("marks the field the action rejected and shows its message", () => {
+  it("marks an invalid email and shows its message", () => {
     renderWith({
-      fieldErrors: { phone: ["Enter a valid phone number."] },
+      fieldErrors: { email: ["Enter a valid email address."] },
     });
 
-    expect(screen.getByText("Enter a valid phone number.")).toBeInTheDocument();
-    expect(screen.getByLabelText("Phone")).toHaveAttribute(
+    expect(
+      screen.getByText("Enter a valid email address."),
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText("Email")).toHaveAttribute(
       "aria-invalid",
       "true",
-    );
-  });
-
-  it("shows the action's form-level error", () => {
-    renderWith({
-      error: "Could not create that account. If you already have one, sign in.",
-    });
-
-    expect(screen.getByRole("alert")).toHaveTextContent(
-      "Could not create that account.",
     );
   });
 
@@ -84,7 +61,7 @@ describe("SignupForm", () => {
     ).toBeDisabled();
   });
 
-  it("replaces the form with the confirmation panel, naming the address", () => {
+  it("replaces the form with a non-enumerating confirmation panel", () => {
     renderWith({
       confirmationSent: true,
       values: { email: "new@realtyworks.test" },
@@ -94,12 +71,7 @@ describe("SignupForm", () => {
       screen.getByRole("heading", { name: "Check your email" }),
     ).toBeInTheDocument();
     expect(screen.getByText("new@realtyworks.test")).toBeInTheDocument();
-
-    // Replaced, not annotated: leaving the form up invites a second submit that
-    // only re-sends the same email.
-    expect(screen.queryByLabelText("Password")).not.toBeInTheDocument();
-    expect(
-      screen.queryByRole("button", { name: "Create account" }),
-    ).not.toBeInTheDocument();
+    expect(screen.getByText(/choose your password/i)).toBeInTheDocument();
+    expect(screen.queryByLabelText("Email")).not.toBeInTheDocument();
   });
 });

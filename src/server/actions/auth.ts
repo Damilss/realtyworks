@@ -1,10 +1,17 @@
 "use server";
 
+import { randomBytes } from "node:crypto";
+
 import { redirect } from "next/navigation";
 import { z } from "zod";
 
 import { createClient } from "@/lib/supabase/server";
-import { loginSchema, signupSchema } from "@/schemas/auth";
+import {
+  accountSetupSchema,
+  loginSchema,
+  passwordResetSchema,
+  signupSchema,
+} from "@/schemas/auth";
 
 /**
  * Auth mutations.
@@ -48,6 +55,8 @@ export type AuthFormState = {
    * "check your inbox" panel instead.
    */
   confirmationSent?: boolean;
+  /** Set after a non-enumerating password-recovery request completes. */
+  passwordResetSent?: boolean;
 };
 
 /**
@@ -57,6 +66,17 @@ export type AuthFormState = {
  * comes straight back out in the response.
  */
 const MAX_ECHOED_LENGTH = 256;
+
+/**
+ * GoTrue's password endpoint requires a credential even though RealtyWorks does
+ * not let the user choose one until their email is verified. This random value
+ * is never returned, logged, or shown; 32 random bytes are comfortably inside
+ * GoTrue's password length limits and make the pre-confirmation account
+ * unreachable by password.
+ */
+function pendingAccountPassword(): string {
+  return randomBytes(32).toString("base64url");
+}
 
 /**
  * Reads the named fields back out as typed — not from the parsed result, which
@@ -169,12 +189,9 @@ export async function signUp(
   _prevState: AuthFormState,
   formData: FormData,
 ): Promise<AuthFormState> {
-  const values = submittedValues(formData, ["fullName", "email", "phone"]);
+  const values = submittedValues(formData, ["email"]);
   const parsed = signupSchema.safeParse({
-    fullName: formData.get("fullName"),
     email: formData.get("email"),
-    password: formData.get("password"),
-    phone: formData.get("phone"),
   });
 
   if (!parsed.success) {
@@ -184,17 +201,7 @@ export async function signUp(
   const supabase = await createClient();
   const { error } = await supabase.auth.signUp({
     email: parsed.data.email,
-    password: parsed.data.password,
-    options: {
-      // Lands in `raw_user_meta_data`, which handle_new_user() reads for the
-      // name and phone. It does NOT read that object for the role, and nothing
-      // role-shaped is sent here — every self-registration is a 'vendor' with
-      // no `vendors` link, and therefore no visibility, until staff link it.
-      data: {
-        full_name: parsed.data.fullName,
-        phone: parsed.data.phone,
-      },
-    },
+    password: pendingAccountPassword(),
   });
 
   if (error) {
@@ -208,13 +215,6 @@ export async function signUp(
     }
 
     // Keep the wording non-committal so the form is not a registration oracle.
-    //
-    // Turning confirmations on did NOT change this branch, contrary to what the
-    // Supabase docs imply about the response being obfuscated. Verified against
-    // the local stack (CLI 2.109.1): a *confirmed* address still comes back
-    // `user_already_exists` / 422. What did change is the unconfirmed case —
-    // re-submitting an address whose link is still outstanding succeeds and
-    // resends it, which is why there is no separate "resend" control.
     return {
       error: "Could not create that account. If you already have one, sign in.",
       values,
@@ -225,11 +225,138 @@ export async function signUp(
   // `session: null` and @supabase/ssr writes no cookies. Sending the browser to
   // /dashboard would bounce it straight back to /login.
   //
-  // An address that already exists but has *not* confirmed lands here too:
-  // GoTrue treats that as a resend rather than a duplicate (verified — two
-  // messages in the mailbox for two submissions). The panel is right for both,
-  // and saying nothing about which one happened is the point.
+  // An address that already exists but has *not* confirmed lands here too.
+  // GoTrue resends the link but does not replace its password or metadata. That
+  // ambiguity is why signUp accepts only an email: whichever owner follows the
+  // newest link chooses every authoritative value in completeAccountSetup().
   return { confirmationSent: true, values };
+}
+
+export async function requestPasswordReset(
+  _prevState: AuthFormState,
+  formData: FormData,
+): Promise<AuthFormState> {
+  const values = submittedValues(formData, ["email"]);
+  const parsed = passwordResetSchema.safeParse({
+    email: formData.get("email"),
+  });
+
+  if (!parsed.success) {
+    return { fieldErrors: z.flattenError(parsed.error).fieldErrors, values };
+  }
+
+  const supabase = await createClient();
+  const { error } = await supabase.auth.resetPasswordForEmail(
+    parsed.data.email,
+  );
+
+  if (error) {
+    console.error("[auth] Password-reset request failed", {
+      code: error.code,
+      status: error.status,
+    });
+
+    if (isRateLimited(error)) {
+      return { error: RATE_LIMITED, values };
+    }
+
+    return {
+      error: "Could not send a password-reset link. Try again.",
+      values,
+    };
+  }
+
+  // Supabase deliberately returns success for an unknown address. The panel is
+  // identical in both cases, so this action does not become an account oracle.
+  return { passwordResetSent: true, values };
+}
+
+export async function completeAccountSetup(
+  _prevState: AuthFormState,
+  formData: FormData,
+): Promise<AuthFormState> {
+  const values = submittedValues(formData, ["fullName", "phone"]);
+  const parsed = accountSetupSchema.safeParse({
+    fullName: formData.get("fullName"),
+    phone: formData.get("phone"),
+    password: formData.get("password"),
+    passwordConfirmation: formData.get("passwordConfirmation"),
+  });
+
+  if (!parsed.success) {
+    return { fieldErrors: z.flattenError(parsed.error).fieldErrors, values };
+  }
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+    error: userError,
+  } = await supabase.auth.getUser();
+
+  if (userError || !user) {
+    console.error("[auth] Account setup could not verify the session", {
+      code: userError?.code,
+      status: userError?.status,
+    });
+    return {
+      error: "Your setup link is no longer active. Request a new one.",
+      values,
+    };
+  }
+
+  // Write the profile first. If this fails, the unknown pending password is
+  // untouched. If the later Auth update fails, retrying is safe: these two
+  // profile columns are ordinary current-state data, not an audit record.
+  const { error: profileError } = await supabase
+    .from("profiles")
+    .update({
+      full_name: parsed.data.fullName,
+      phone: parsed.data.phone,
+    })
+    .eq("id", user.id);
+
+  if (profileError) {
+    console.error("[auth] Account setup could not update the profile", {
+      code: profileError.code,
+    });
+    return {
+      error: "Could not finish setting up your account. Try again.",
+      values,
+    };
+  }
+
+  const { error: passwordError } = await supabase.auth.updateUser({
+    password: parsed.data.password,
+    data: {
+      full_name: parsed.data.fullName,
+      phone: parsed.data.phone,
+    },
+  });
+
+  if (passwordError) {
+    console.error("[auth] Account setup could not update credentials", {
+      code: passwordError.code,
+      status: passwordError.status,
+    });
+
+    if (isRateLimited(passwordError)) {
+      return { error: RATE_LIMITED, values };
+    }
+
+    if (passwordError.code === "same_password") {
+      return {
+        fieldErrors: { password: ["Choose a different password."] },
+        values,
+      };
+    }
+
+    return {
+      error: "Could not finish setting up your account. Try again.",
+      values,
+    };
+  }
+
+  redirect("/dashboard");
 }
 
 export async function signOut(): Promise<void> {

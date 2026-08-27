@@ -1,7 +1,13 @@
 import { redirect } from "next/navigation";
 
 import { createClient } from "@/lib/supabase/server";
-import { signIn, signOut, signUp } from "@/server/actions/auth";
+import {
+  completeAccountSetup,
+  requestPasswordReset,
+  signIn,
+  signOut,
+  signUp,
+} from "@/server/actions/auth";
 
 vi.mock("@/lib/supabase/server", () => ({ createClient: vi.fn() }));
 vi.mock("next/navigation", () => ({
@@ -17,24 +23,40 @@ const mockedCreateClient = vi.mocked(createClient);
 const mockedRedirect = vi.mocked(redirect);
 
 type AuthStub = {
+  getUser: ReturnType<typeof vi.fn>;
+  resetPasswordForEmail: ReturnType<typeof vi.fn>;
   signInWithPassword: ReturnType<typeof vi.fn>;
   signUp: ReturnType<typeof vi.fn>;
   signOut: ReturnType<typeof vi.fn>;
+  updateUser: ReturnType<typeof vi.fn>;
 };
 
-function stubSupabase(overrides: Partial<AuthStub> = {}) {
+function stubSupabase(
+  overrides: Partial<AuthStub> = {},
+  profileResult: { error: null | { code: string } } = { error: null },
+) {
   const auth: AuthStub = {
+    getUser: vi.fn().mockResolvedValue({
+      data: { user: { id: "00000000-0000-0000-0000-000000000099" } },
+      error: null,
+    }),
+    resetPasswordForEmail: vi.fn().mockResolvedValue({ error: null }),
     signInWithPassword: vi.fn().mockResolvedValue({ error: null }),
     signUp: vi.fn().mockResolvedValue({ error: null }),
     signOut: vi.fn().mockResolvedValue({ error: null }),
+    updateUser: vi.fn().mockResolvedValue({ error: null }),
     ...overrides,
   };
+  const profileEq = vi.fn().mockResolvedValue(profileResult);
+  const profileUpdate = vi.fn().mockReturnValue({ eq: profileEq });
+  const from = vi.fn().mockReturnValue({ update: profileUpdate });
 
   mockedCreateClient.mockResolvedValue({
     auth,
+    from,
   } as unknown as Awaited<ReturnType<typeof createClient>>);
 
-  return auth;
+  return Object.assign(auth, { from, profileEq, profileUpdate });
 }
 
 function formData(fields: Record<string, string>) {
@@ -51,9 +73,13 @@ const validLogin = {
 };
 
 const validSignup = {
-  fullName: "New Person",
   email: "new@realtyworks.test",
+};
+
+const validAccountSetup = {
+  fullName: "New Person",
   password: "password123",
+  passwordConfirmation: "password123",
   phone: "+1 (555) 123-4567",
 };
 
@@ -242,46 +268,28 @@ describe("signUp", () => {
   it("rejects invalid input without ever reaching Supabase", async () => {
     const auth = stubSupabase();
 
-    const state = await signUp(
-      {},
-      formData({ fullName: "", email: "nope", password: "x", phone: "12" }),
-    );
+    const state = await signUp({}, formData({ email: "nope" }));
 
-    expect(state.fieldErrors?.fullName).toBeDefined();
     expect(state.fieldErrors?.email).toBeDefined();
-    expect(state.fieldErrors?.password).toBeDefined();
-    expect(state.fieldErrors?.phone).toBeDefined();
     expect(auth.signUp).not.toHaveBeenCalled();
   });
 
-  it("sends the name and normalized phone as user metadata", async () => {
+  it("creates an unreachable pending account from only the verified address", async () => {
     const auth = stubSupabase();
 
     await signUp({}, formData(validSignup));
 
-    expect(auth.signUp).toHaveBeenCalledWith({
-      email: "new@realtyworks.test",
-      password: "password123",
-      options: { data: { full_name: "New Person", phone: "+15551234567" } },
-    });
-  });
-
-  it("sends nothing role-shaped, so a self-registration cannot self-promote", async () => {
-    const auth = stubSupabase();
-
-    await signUp(
-      {},
-      formData({ ...validSignup, role: "landlord", app_role: "landlord" }),
-    );
-
     const sent = auth.signUp.mock.calls[0]?.[0];
-    const metadataKeys = Object.keys(sent.options.data);
 
-    expect(metadataKeys).toEqual(["full_name", "phone"]);
-    expect(JSON.stringify(sent)).not.toContain("landlord");
+    expect(sent).toEqual({
+      email: "new@realtyworks.test",
+      password: expect.any(String),
+    });
+    expect(sent.password).toHaveLength(43);
+    expect(sent).not.toHaveProperty("options");
   });
 
-  it("hands every non-secret field back, as typed", async () => {
+  it("hands the email back on provider failure", async () => {
     stubSupabase({
       signUp: vi.fn().mockResolvedValue({
         error: { message: "User already registered", status: 422 },
@@ -290,36 +298,15 @@ describe("signUp", () => {
 
     const state = await signUp({}, formData(validSignup));
 
-    expect(state.values).toEqual({
-      fullName: "New Person",
-      email: "new@realtyworks.test",
-      // Not "+15551234567" — the user corrects what they typed, not what the
-      // schema normalized it into.
-      phone: "+1 (555) 123-4567",
-    });
-    expect(JSON.stringify(state)).not.toContain(validSignup.password);
+    expect(state.values).toEqual({ email: "new@realtyworks.test" });
   });
 
-  it("hands back the fields that validated alongside the one that did not", async () => {
-    const state = await signUp({}, formData({ ...validSignup, phone: "12" }));
-
-    expect(state.fieldErrors?.phone).toBeDefined();
-    expect(state.values?.fullName).toBe("New Person");
-    expect(state.values?.email).toBe("new@realtyworks.test");
-    expect(state.values?.phone).toBe("12");
-  });
-
-  it("bounds what it echoes, and drops a field that is not text", async () => {
-    const data = formData({ ...validSignup, email: "nope" });
-    data.set("fullName", "a".repeat(400));
-    // A server action is a public POST endpoint: a caller can send a file part
-    // where the form sends text, and String()-ing one yields "[object File]".
-    data.set("phone", new File(["x"], "phone.txt"));
+  it("bounds what it echoes", async () => {
+    const data = formData({ email: "a".repeat(400) });
 
     const state = await signUp({}, data);
 
-    expect(state.values?.fullName).toHaveLength(256);
-    expect(state.values?.phone).toBeUndefined();
+    expect(state.values?.email).toHaveLength(256);
   });
 
   it("asks the new account to confirm, instead of signing it in", async () => {
@@ -360,16 +347,136 @@ describe("signUp", () => {
   });
 
   it("shows the same panel when an outstanding link is merely resent", async () => {
-    // An address that exists but has not confirmed is not a duplicate to
-    // GoTrue: it succeeds and sends the link again. Saying nothing about which
-    // of the two happened is what keeps the form off the enumeration path — and
-    // it is why there is no separate "resend" control to build.
+    // The second response is indistinguishable from a new account. Because the
+    // action accepted no password or profile data, that ambiguity is harmless:
+    // the email owner supplies every authoritative value after verification.
     stubSupabase();
 
     const state = await signUp({}, formData(validSignup));
 
     expect(state.confirmationSent).toBe(true);
     expect(state.error).toBeUndefined();
+  });
+});
+
+describe("requestPasswordReset", () => {
+  it("rejects an invalid email before reaching Supabase", async () => {
+    const auth = stubSupabase();
+
+    const state = await requestPasswordReset({}, formData({ email: "nope" }));
+
+    expect(state.fieldErrors?.email).toBeDefined();
+    expect(auth.resetPasswordForEmail).not.toHaveBeenCalled();
+  });
+
+  it("requests a recovery link without revealing whether the account exists", async () => {
+    const auth = stubSupabase();
+
+    const state = await requestPasswordReset(
+      {},
+      formData({ email: "  new@realtyworks.test  " }),
+    );
+
+    expect(auth.resetPasswordForEmail).toHaveBeenCalledWith(
+      "new@realtyworks.test",
+    );
+    expect(state.passwordResetSent).toBe(true);
+    expect(state.values?.email).toBe("  new@realtyworks.test  ");
+  });
+
+  it("turns provider throttling into an actionable message", async () => {
+    stubSupabase({
+      resetPasswordForEmail: vi
+        .fn()
+        .mockResolvedValue({ error: { status: 429 } }),
+    });
+
+    const state = await requestPasswordReset({}, formData(validSignup));
+
+    expect(state.passwordResetSent).toBeUndefined();
+    expect(state.error).toBe("Too many attempts. Try again in a few minutes.");
+  });
+});
+
+describe("completeAccountSetup", () => {
+  it("rejects invalid details before reading the session", async () => {
+    const auth = stubSupabase();
+
+    const state = await completeAccountSetup(
+      {},
+      formData({ ...validAccountSetup, phone: "12" }),
+    );
+
+    expect(state.fieldErrors?.phone).toBeDefined();
+    expect(auth.getUser).not.toHaveBeenCalled();
+    expect(auth.profileUpdate).not.toHaveBeenCalled();
+    expect(auth.updateUser).not.toHaveBeenCalled();
+  });
+
+  it("refuses a request without the verified-link session", async () => {
+    const auth = stubSupabase({
+      getUser: vi.fn().mockResolvedValue({
+        data: { user: null },
+        error: { code: "session_not_found", status: 401 },
+      }),
+    });
+
+    const state = await completeAccountSetup({}, formData(validAccountSetup));
+
+    expect(state.error).toContain("setup link is no longer active");
+    expect(auth.profileUpdate).not.toHaveBeenCalled();
+    expect(auth.updateUser).not.toHaveBeenCalled();
+  });
+
+  it("updates the verified user's profile and password", async () => {
+    const auth = stubSupabase();
+
+    await expect(
+      completeAccountSetup({}, formData(validAccountSetup)),
+    ).rejects.toThrow("NEXT_REDIRECT:/dashboard");
+
+    expect(auth.from).toHaveBeenCalledWith("profiles");
+    expect(auth.profileUpdate).toHaveBeenCalledWith({
+      full_name: "New Person",
+      phone: "+15551234567",
+    });
+    expect(auth.profileEq).toHaveBeenCalledWith(
+      "id",
+      "00000000-0000-0000-0000-000000000099",
+    );
+    expect(auth.updateUser).toHaveBeenCalledWith({
+      password: "password123",
+      data: { full_name: "New Person", phone: "+15551234567" },
+    });
+  });
+
+  it("does not change the password when the profile write fails", async () => {
+    const auth = stubSupabase({}, { error: { code: "42501" } });
+
+    const state = await completeAccountSetup({}, formData(validAccountSetup));
+
+    expect(state.error).toBe(
+      "Could not finish setting up your account. Try again.",
+    );
+    expect(auth.updateUser).not.toHaveBeenCalled();
+  });
+
+  it("keeps non-secret details but never echoes either password on failure", async () => {
+    stubSupabase({
+      updateUser: vi.fn().mockResolvedValue({
+        error: { code: "unexpected", status: 500 },
+      }),
+    });
+
+    const state = await completeAccountSetup({}, formData(validAccountSetup));
+    const serialized = JSON.stringify(state);
+
+    expect(state.values).toEqual({
+      fullName: "New Person",
+      phone: "+1 (555) 123-4567",
+    });
+    expect(serialized).not.toContain(validAccountSetup.password);
+    expect(serialized).not.toContain(validAccountSetup.passwordConfirmation);
   });
 });
 

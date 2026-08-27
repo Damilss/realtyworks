@@ -191,33 +191,31 @@ describe("redemption", () => {
     expect(target).toBe(INVALID_LINK);
   });
 
-  it.each(["magiclink", "invite", "signup"])(
-    "redeems a %s token",
-    async (type) => {
-      const verifyOtp = stubSupabase();
+  it.each([
+    ["magiclink", "/dashboard"],
+    ["invite", "/dashboard"],
+    ["signup", "/account-setup"],
+    ["recovery", "/account-setup"],
+  ])("redeems a %s token", async (type, destination) => {
+    const verifyOtp = stubSupabase();
 
-      // `signup` is the email-confirmation link (issue #93): the same
-      // single-use hash exchange as the vendor invite, arriving from
-      // supabase/templates/confirmation.html.
-      const target = await redeem({ token_hash: TOKEN, type });
+    // Signup and recovery prove control of the mailbox, then force the new
+    // session through account setup before normal navigation.
+    const target = await redeem({ token_hash: TOKEN, type });
 
-      expect(verifyOtp).toHaveBeenCalledWith({ token_hash: TOKEN, type });
-      expect(target).toBe("/dashboard");
-    },
-  );
+    expect(verifyOtp).toHaveBeenCalledWith({ token_hash: TOKEN, type });
+    expect(target).toBe(destination);
+  });
 
-  it.each(["recovery", "email_change"])(
-    "refuses %s, a link type this endpoint was never reviewed for",
-    async (type) => {
-      const verifyOtp = stubSupabase();
+  it("refuses email_change, a link type this endpoint was never reviewed for", async () => {
+    const verifyOtp = stubSupabase();
 
-      const target = await redeem({ token_hash: TOKEN, type });
+    const target = await redeem({ token_hash: TOKEN, type: "email_change" });
 
-      expect(target).toBe(INVALID_LINK);
-      expect(mockedCreateClient).not.toHaveBeenCalled();
-      expect(verifyOtp).not.toHaveBeenCalled();
-    },
-  );
+    expect(target).toBe(INVALID_LINK);
+    expect(mockedCreateClient).not.toHaveBeenCalled();
+    expect(verifyOtp).not.toHaveBeenCalled();
+  });
 
   it("refuses a request carrying no token", async () => {
     const verifyOtp = stubSupabase();

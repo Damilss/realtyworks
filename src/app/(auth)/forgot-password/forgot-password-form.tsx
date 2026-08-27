@@ -6,36 +6,26 @@ import { Button } from "@/components/ui/button";
 import { FieldError, FormError } from "@/components/ui/form-feedback";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { signUp, type AuthFormState } from "@/server/actions/auth";
+import {
+  requestPasswordReset,
+  type AuthFormState,
+} from "@/server/actions/auth";
 
 const initialState: AuthFormState = {};
 
-export function SignupForm() {
-  const [state, formAction, pending] = useActionState(signUp, initialState);
+export function ForgotPasswordForm() {
+  const [state, formAction, pending] = useActionState(
+    requestPasswordReset,
+    initialState,
+  );
 
-  // The account exists but has no session: `[auth.email] enable_confirmations`
-  // is on, so there is nothing to redirect to yet. An address whose confirmation
-  // is still outstanding lands here too; the wording deliberately fits both.
-  if (state.confirmationSent) {
+  if (state.passwordResetSent) {
     return (
       <div className="flex flex-col gap-3" role="status" aria-live="polite">
         <h2 className="text-lg font-semibold">Check your email</h2>
         <p className="text-muted-foreground text-sm">
-          We sent a confirmation link
-          {state.values?.email ? (
-            <>
-              {" to "}
-              <span className="text-foreground font-medium">
-                {state.values.email}
-              </span>
-            </>
-          ) : null}
-          . Follow it to verify your address, then enter your account details
-          and choose your password.
-        </p>
-        <p className="text-muted-foreground text-sm">
-          The link is single use and expires in an hour. Until you follow it,
-          the account cannot sign in.
+          If an account matches that address, we sent a password-reset link. It
+          is single use and expires in an hour.
         </p>
       </div>
     );
@@ -60,7 +50,7 @@ export function SignupForm() {
       <FormError message={state.error} />
 
       <Button type="submit" disabled={pending}>
-        {pending ? "Creating account…" : "Create account"}
+        {pending ? "Sending link…" : "Send password-reset link"}
       </Button>
     </form>
   );

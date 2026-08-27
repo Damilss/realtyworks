@@ -10,8 +10,9 @@
   verifyOtp({ token_hash, type }). Same reasoning, and the same URL shape, as the
   vendor invite: docs/vendor-access.md §6.
 
-  No `next` parameter. safeNext() already defaults to /dashboard, and the fewer
-  caller-controlled parts this URL has, the less there is to guard.
+  No `next` parameter. Signup links are forced to /account-setup after the
+  exchange, and the fewer caller-controlled parts this URL has, the less there
+  is to guard.
 
   `{{ .SiteURL }}` is [auth] site_url — http://127.0.0.1:3000 locally, and the
   deployed origin on the hosted project (Phase 4).
@@ -20,7 +21,7 @@
 
 <p>
   Someone created a RealtyWorks account with this address. Follow the link below
-  to confirm it and sign in.
+  to verify the address and finish setting it up.
 </p>
 
 <p>
@@ -31,6 +32,6 @@
 
 <p>
   The link is single use and expires in an hour. If you did not sign up for
-  RealtyWorks, ignore this email — the account cannot be used until the link is
-  followed.
+  RealtyWorks, ignore this email — no password has been exposed, and the account
+  cannot be used until the link is followed.
 </p>

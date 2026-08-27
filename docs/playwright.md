@@ -10,7 +10,7 @@ whole Phase 3 vertical slice — 23 specs across four files, all against a
 | File | Specs | Covers |
 | --- | --- | --- |
 | `smoke.spec.ts` | 1 | the app boots and serves a page |
-| `auth.spec.ts` | 8 | the auth loop: sign in as each seeded role, self-register, wrong password, rejected signup keeps its fields, signed-out redirect, root redirect, sign out |
+| `auth.spec.ts` | 8 | the auth loop: sign in as each seeded role, duplicate-unconfirmed signup → verified setup → recovery, wrong password, rejected signup keeps its email, signed-out redirect, root redirect, sign out |
 | `work-orders.spec.ts` | 7 | the staff write path: create, assign, note (and the blank-note refusal), assignment making a job visible to its vendor, select state after a failed submit, a malformed id 404, a vendor refused the create form |
 | `vendor-loop.spec.ts` | 7 | the vendor half: invite → redeem a real magic link in a second browser context → status + photo; single use, the stale link cleared from the page on reassignment (UI only — see below), the off-site redirect refusal (eight payloads, each against its own real token — see below), and the two un-invitable vendor cases |
 
@@ -168,9 +168,9 @@ playwright.config.ts           # config: testDir, baseURL, browser, webServer au
 tests/e2e/                     # E2E specs (*.spec.ts)
 tests/e2e/smoke.spec.ts        # the app boots + serves a page
 tests/e2e/auth.spec.ts         # the auth loop: sign in as each seeded role, self-register
-                               # + confirm by email, wrong password, rejected signup
-                               # keeps its fields, signed-out redirect, root
-                               # redirect, sign out
+                               # + repeat before confirmation, finish verified
+                               # setup, recover the password, rejected signup
+                               # keeps its email, signed-out/root redirects, sign out
 tests/e2e/mailbox.ts           # helper (NOT a spec): reads the local mailpit mailbox
 tests/e2e/work-orders.spec.ts  # the staff write path: create, assign, note (+ the
                                # blank-note refusal), a vendor seeing a job once
@@ -184,9 +184,9 @@ tests/e2e/vendor-loop.spec.ts  # the vendor half: invite, redeem the link in a
 
 ### Reading the mailbox
 
-Since email confirmations went on (issue #93), a self-registration cannot sign
-in until it follows a link that only exists in an email. `tests/e2e/mailbox.ts`
-reads that email out of the local mail container so the spec can follow it the
+Since email confirmations went on (issue #93), signup and password recovery both
+depend on one-time links that exist only in email. `tests/e2e/mailbox.ts` reads
+those messages out of the local mail container so the spec can follow them the
 way a person would.
 
 - **The mailbox is Mailpit** (`[local_smtp]` in `supabase/config.toml`, web UI
@@ -196,7 +196,7 @@ way a person would.
   `baseURL` is hardcoded in `playwright.config.ts`. `supabase status -o env`
   does print `MAILPIT_URL`, but nothing wires it into Playwright's environment —
   the CI job writes `.env.local`, which Next reads and the test runner does not.
-- **`clearMailbox()` runs before the signup.** `supabase db reset` empties
+- **`clearMailbox()` runs before signup and recovery.** `supabase db reset` empties
   `auth.users` but not the mailbox, so a local re-run would otherwise find the
   *previous* run's message and follow a token that has already been spent. CI
   never hits this — its container is new each time — which makes it exactly the
@@ -205,11 +205,11 @@ way a person would.
   what proves `{{ .TokenHash }}` actually interpolated and that the URL points
   at `/auth/confirm` rather than GoTrue's `/auth/v1/verify`. Reading the
   template file would prove neither.
-- **The spec asserts the *refusal* before the success**: signup lands on the
-  "Check your email" panel rather than `/dashboard`, and a sign-in attempt is
-  refused with "Confirm your email address". Deleting
-  `enable_confirmations = true` from `config.toml` and re-running makes it fail
-  at the first of those — checked, per the house rule in `CLAUDE.md` §5.
+- **The spec reaches the reported resend path before success**: it submits the
+  same unconfirmed address twice, follows the newest email, and must land on
+  `/account-setup` before it can provide profile data or a password. It then
+  tears down the session and proves that password signs in. The same spec sends
+  and redeems a real recovery email, changes the password, and signs in again.
 
 **One spec calls `test.slow()`**: the redirect-guard spec mints nine invites and
 opens nine browser contexts — eight hostile payloads plus the legitimate
@@ -217,7 +217,7 @@ deep-link — which is past the 30s default. `playwright.config.ts`
 sets no per-test timeout on purpose — the default is right for the other 22, and a
 global bump would hide a genuinely hung spec. The mailbox poll in
 `mailbox.ts` carries its own 15s budget rather than leaning on the test timeout,
-so a missing email reports as "no confirmation email reached Mailpit" instead of
+so a missing email reports as "no auth email reached Mailpit" instead of
 as an expired assertion on a heading.
 
 Test runners stay separated by directory: **Vitest** collects `src/**` and
