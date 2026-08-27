@@ -82,9 +82,10 @@ on 2026-07-27, the staff write path on 2026-08-02, and the vendor half on
 2026-08-03 — zod schemas in `src/schemas/`, the server-only data-access layer
 and server actions in `src/server/`, the `(auth)` / `(dashboard)` route groups,
 and `src/app/auth/confirm/route.ts`, which redeems a magic link into cookie
-session. Email confirmations followed on 2026-08-25 (the last gate before
-Phase 4), reusing that same route handler for the signup link. Planned for a
-later phase (decided, not yet installed): Sentry (Phase 4). There is **no separate backend service** — backend logic lives in
+    session. Email confirmations followed on 2026-08-25 (the last gate before
+    Phase 4), reusing that same route handler for signup and password-recovery
+    links. Both finish through verified account setup. Planned for a later phase
+    (decided, not yet installed): Sentry (Phase 4). There is **no separate backend service** — backend logic lives in
 Postgres (RLS/constraints), Next.js server actions/route handlers, and Supabase
 Edge Functions. See `CLAUDE.md` §2.
 
@@ -162,10 +163,14 @@ pnpm dev              # http://127.0.0.1:3000
 ```
 
 `/` redirects to `/dashboard`, which redirects to **`/login`** when there is no
-session. **`/signup`** is open self-registration (name, email, password,
-phone), and it takes two steps: the account cannot sign in until the emailed
-confirmation link is followed (`[auth.email] enable_confirmations`). Locally
-that mail goes to **mailpit** at <http://127.0.0.1:54324>, not to a real inbox.
+session. **`/signup`** is open self-registration and starts with only an email.
+The owner follows the confirmation link, then enters their name and phone and
+chooses a password in authenticated account setup. This order matters: Supabase
+resends a link for an existing unconfirmed address without replacing its old
+password or metadata, so RealtyWorks accepts neither until the mailbox has been
+verified. Locally that mail goes to **mailpit** at
+<http://127.0.0.1:54324>, not to a real inbox. **`/forgot-password`** sends a
+non-enumerating recovery link through the same setup boundary.
 Even once confirmed, a self-registered account is deliberately inert: it lands
 as an unlinked `vendor`, so RLS returns nothing until staff link it to a
 `vendors` row, and the dashboard says as much instead of rendering an empty
@@ -378,9 +383,9 @@ realtyworks/
 ├── public/
 ├── src/
 │   ├── app/                # Next.js App Router · globals.css carries the shadcn zinc theme
-│   │   ├── (auth)/         # login · signup (signed-out route group)
+│   │   ├── (auth)/         # login · signup · recovery · verified account setup
 │   │   ├── (dashboard)/    # authed shell · /dashboard · /work-orders/{new,[id]} · /vendors
-│   │   └── auth/confirm/   # route handler: redeems a magic link or signup link → session cookies
+│   │   └── auth/confirm/   # route handler: redeems auth email links → session cookies
 │   ├── components/
 │   │   ├── features/       # composed, domain-specific components (work-orders/)
 │   │   └── ui/             # shadcn/ui primitives (button, input, label, card, table, badge, textarea, native-select, form-feedback)
@@ -395,7 +400,7 @@ realtyworks/
 ├── supabase/
 │   ├── migrations/         # timestamped SQL — SOURCE OF TRUTH (RLS ships with its table)
 │   ├── tests/              # pgTAP RLS/write-guard suite
-│   ├── templates/          # confirmation.html — points signup mail at /auth/confirm
+│   ├── templates/          # confirmation/recovery mail → /auth/confirm
 │   ├── seed.sql            # 3 login-able users + sample data
 │   └── config.toml
 ├── tests/

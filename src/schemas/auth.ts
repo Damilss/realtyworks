@@ -66,40 +66,63 @@ export const loginSchema = z.object({
 });
 
 export const signupSchema = z.object({
-  fullName: z
-    .string()
-    .trim()
-    .min(1, "Enter your name.")
-    .max(
-      FULL_NAME_MAX_LENGTH,
-      `Use ${FULL_NAME_MAX_LENGTH} characters or fewer.`,
-    ),
+  // Everything else is collected only after the emailed link proves ownership.
+  // GoTrue resends signup links for an existing unconfirmed address without
+  // replacing its password or metadata, so accepting those values here would
+  // make the second submit look authoritative when it is not.
   email: emailField,
-  // Matches [auth] minimum_password_length in supabase/config.toml. Keeping the
-  // two in sync means the user sees the rule in the form rather than as a
-  // rejection from GoTrue after a round trip.
-  password: z.string().min(6, "Use at least 6 characters."),
-  // Required on the form even though `profiles.phone` is nullable: SMS is the
-  // default notification channel from Phase 5 (CLAUDE.md §6), while seeded and
-  // invited accounts may legitimately have no number yet.
-  phone: z
-    .string()
-    .trim()
-    .max(PHONE_MAX_INPUT_LENGTH, "Enter a valid phone number.")
-    .transform((value, ctx) => {
-      const normalized = normalizePhone(value);
+});
 
-      if (normalized === null) {
-        ctx.addIssue({
-          code: "custom",
-          message: "Enter a valid phone number.",
-        });
-        return z.NEVER;
-      }
+const fullNameField = z
+  .string()
+  .trim()
+  .min(1, "Enter your name.")
+  .max(
+    FULL_NAME_MAX_LENGTH,
+    `Use ${FULL_NAME_MAX_LENGTH} characters or fewer.`,
+  );
 
-      return normalized;
-    }),
+const phoneField = z
+  .string()
+  .trim()
+  .max(PHONE_MAX_INPUT_LENGTH, "Enter a valid phone number.")
+  .transform((value, ctx) => {
+    const normalized = normalizePhone(value);
+
+    if (normalized === null) {
+      ctx.addIssue({
+        code: "custom",
+        message: "Enter a valid phone number.",
+      });
+      return z.NEVER;
+    }
+
+    return normalized;
+  });
+
+const passwordField = z.string().min(6, "Use at least 6 characters.");
+
+export const accountSetupSchema = z
+  .object({
+    fullName: fullNameField,
+    // Required even though `profiles.phone` is nullable: SMS is the default
+    // notification channel from Phase 5 (CLAUDE.md §6), while seeded and
+    // invited accounts may legitimately have no number yet.
+    phone: phoneField,
+    // Matches [auth] minimum_password_length in supabase/config.toml. Keeping
+    // the two in sync means the user sees the rule before GoTrue is called.
+    password: passwordField,
+    passwordConfirmation: z.string().min(1, "Confirm your password."),
+  })
+  .refine((values) => values.password === values.passwordConfirmation, {
+    message: "Passwords do not match.",
+    path: ["passwordConfirmation"],
+  });
+
+export const passwordResetSchema = z.object({
+  email: emailField,
 });
 
 export type LoginInput = z.infer<typeof loginSchema>;
 export type SignupInput = z.infer<typeof signupSchema>;
+export type AccountSetupInput = z.infer<typeof accountSetupSchema>;

@@ -6,10 +6,11 @@ import { createClient } from "@/lib/supabase/server";
 /**
  * Redeems an emailed token and starts a session.
  *
- * Two flows land here. It is the vendor's whole login — staff mint a link with
+ * Three flows land here. It is the vendor's whole login — staff mint a link with
  * `inviteVendor`, the vendor taps it, and arrives with a one-time `token_hash`
  * — and since 2026-08-25 it is also where a self-registration confirms its
- * email address (`supabase/templates/confirmation.html`, issue #93).
+ * email address (`supabase/templates/confirmation.html`, issue #93). Password
+ * recovery uses the same exchange and then enters authenticated account setup.
  *
  * Exchanging a token for a session is a cookie write, which a Server Component
  * cannot do — hence a route handler. `createClient()` from
@@ -25,16 +26,16 @@ import { createClient } from "@/lib/supabase/server";
 /**
  * The link types this endpoint will redeem. `type` arrives in the query string,
  * so it is caller-controlled; passing it straight through would let someone
- * redeem a `recovery` or `email_change` token at an endpoint that was never
- * reviewed for either.
+ * redeem an `email_change` token at an endpoint that was never reviewed for it.
  *
- * `signup` joined the list when email confirmations went on. It is the same
- * exchange as the other two — a single-use hash for a session — and it is
- * reviewed by the same argument, which is why it belongs here rather than at a
- * second endpoint. `recovery` and `email_change` are still refused: both end in
- * a credential change, which this handler does nothing about.
+ * `signup` joined the list when email confirmations went on, and `recovery`
+ * joined when verified account setup moved behind this endpoint. Both are
+ * forced to `/account-setup`, where the session minted here authorizes the
+ * credential change. `email_change` is still refused because that flow has
+ * different two-address confirmation semantics.
  */
-const ALLOWED_TYPES = new Set(["magiclink", "invite", "signup"]);
+const ALLOWED_TYPES = new Set(["magiclink", "invite", "signup", "recovery"]);
+const ACCOUNT_SETUP_TYPES = new Set(["signup", "recovery"]);
 
 /**
  * Resolves `value` against `origin` and returns it as a bare path, or null if it
@@ -133,6 +134,10 @@ export async function GET(request: NextRequest) {
       status: error.status,
     });
     redirect("/login?error=invalid-link");
+  }
+
+  if (ACCOUNT_SETUP_TYPES.has(type)) {
+    redirect("/account-setup");
   }
 
   // Outside any try/catch: redirect() signals by throwing NEXT_REDIRECT.

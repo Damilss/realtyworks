@@ -28,8 +28,8 @@ export default async function SignupPage() {
       <CardHeader>
         <CardTitle>Create an account</CardTitle>
         <CardDescription>
-          New accounts start without access. An administrator connects yours
-          once it exists.
+          Start with your email. You will choose your password and enter your
+          details after verifying the address.
         </CardDescription>
       </CardHeader>
       <CardContent>

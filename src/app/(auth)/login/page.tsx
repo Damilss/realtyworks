@@ -54,6 +54,12 @@ export default async function LoginPage({
           </p>
         ) : null}
         <LoginForm />
+        <Link
+          href="/forgot-password"
+          className="text-muted-foreground text-center text-sm underline underline-offset-4"
+        >
+          Forgot your password?
+        </Link>
       </CardContent>
       <CardFooter>
         <p className="text-muted-foreground text-sm">

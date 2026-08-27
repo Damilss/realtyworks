@@ -1,4 +1,10 @@
-import { loginSchema, normalizePhone, signupSchema } from "@/schemas/auth";
+import {
+  accountSetupSchema,
+  loginSchema,
+  normalizePhone,
+  passwordResetSchema,
+  signupSchema,
+} from "@/schemas/auth";
 
 describe("normalizePhone", () => {
   it("strips the formatting humans type", () => {
@@ -49,15 +55,30 @@ describe("loginSchema", () => {
 });
 
 describe("signupSchema", () => {
+  it("accepts and trims an email without collecting unverified account data", () => {
+    const result = signupSchema.safeParse({
+      email: "  new@realtyworks.test  ",
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.data).toEqual({ email: "new@realtyworks.test" });
+  });
+
+  it("rejects a malformed email", () => {
+    expect(signupSchema.safeParse({ email: "nope" }).success).toBe(false);
+  });
+});
+
+describe("accountSetupSchema", () => {
   const valid = {
     fullName: "Manny Manager",
-    email: "manny@realtyworks.test",
     password: "password123",
+    passwordConfirmation: "password123",
     phone: "+1 (555) 123-0002",
   };
 
-  it("accepts a complete signup and normalizes the phone", () => {
-    const result = signupSchema.safeParse(valid);
+  it("accepts verified account details and normalizes the phone", () => {
+    const result = accountSetupSchema.safeParse(valid);
 
     expect(result.success).toBe(true);
     expect(result.data?.phone).toBe("+15551230002");
@@ -65,24 +86,47 @@ describe("signupSchema", () => {
 
   it("trims the name and rejects a whitespace-only one", () => {
     expect(
-      signupSchema.safeParse({ ...valid, fullName: "  Ada  " }).data?.fullName,
+      accountSetupSchema.safeParse({ ...valid, fullName: "  Ada  " }).data
+        ?.fullName,
     ).toBe("Ada");
-    expect(signupSchema.safeParse({ ...valid, fullName: "   " }).success).toBe(
-      false,
-    );
+    expect(
+      accountSetupSchema.safeParse({ ...valid, fullName: "   " }).success,
+    ).toBe(false);
   });
 
   it("enforces the 6-character password minimum from config.toml", () => {
     expect(
-      signupSchema.safeParse({ ...valid, password: "12345" }).success,
+      accountSetupSchema.safeParse({
+        ...valid,
+        password: "12345",
+        passwordConfirmation: "12345",
+      }).success,
     ).toBe(false);
     expect(
-      signupSchema.safeParse({ ...valid, password: "123456" }).success,
+      accountSetupSchema.safeParse({
+        ...valid,
+        password: "123456",
+        passwordConfirmation: "123456",
+      }).success,
+    ).toBe(true);
+  });
+
+  it("requires the two password entries to match", () => {
+    const result = accountSetupSchema.safeParse({
+      ...valid,
+      passwordConfirmation: "different123",
+    });
+
+    expect(result.success).toBe(false);
+    expect(
+      result.error?.issues.some(
+        (issue) => issue.path[0] === "passwordConfirmation",
+      ),
     ).toBe(true);
   });
 
   it("reports an unusable phone against the phone field", () => {
-    const result = signupSchema.safeParse({ ...valid, phone: "55512" });
+    const result = accountSetupSchema.safeParse({ ...valid, phone: "55512" });
 
     expect(result.success).toBe(false);
     expect(
@@ -92,7 +136,17 @@ describe("signupSchema", () => {
 
   it("rejects a name longer than the profiles CHECK allows", () => {
     expect(
-      signupSchema.safeParse({ ...valid, fullName: "a".repeat(121) }).success,
+      accountSetupSchema.safeParse({ ...valid, fullName: "a".repeat(121) })
+        .success,
     ).toBe(false);
+  });
+});
+
+describe("passwordResetSchema", () => {
+  it("uses the same trimmed email contract", () => {
+    expect(
+      passwordResetSchema.safeParse({ email: "  user@example.test  " }).data
+        ?.email,
+    ).toBe("user@example.test");
   });
 });

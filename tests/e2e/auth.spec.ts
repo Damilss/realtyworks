@@ -1,6 +1,6 @@
 import { test, expect, type Page } from "@playwright/test";
 
-import { clearMailbox, waitForConfirmationLink } from "./mailbox";
+import { clearMailbox, waitForAuthLink } from "./mailbox";
 
 /**
  * The Phase 3 auth loop against a real Supabase stack seeded by
@@ -100,16 +100,15 @@ test("a self-registration must confirm its email, and then has no access at all"
   // with "account already exists". Deliberately not randomized — a unique
   // address per run would pass every time while silently filling auth.users.
   const email = `selfreg-w${testInfo.workerIndex}@realtyworks.test`;
+  const password = "selfreg-password123";
+  const recoveredPassword = "selfreg-password456";
 
   // `db reset` does not empty the mail container, so a local re-run would
   // otherwise find the previous run's message and follow a spent token.
   await clearMailbox(email);
 
   await page.goto("/signup");
-  await page.getByLabel("Full name").fill("Self Registered");
   await page.getByLabel("Email").fill(email);
-  await page.getByLabel("Phone").fill("+1 (555) 123-9999");
-  await page.getByLabel("Password").fill(SEED_PASSWORD);
   await page.getByRole("button", { name: "Create account" }).click();
 
   // The gate itself (issue #93): the account exists, but no session came with
@@ -119,14 +118,26 @@ test("a self-registration must confirm its email, and then has no access at all"
   ).toBeVisible();
   await expect(page).toHaveURL("/signup");
 
-  // And it cannot be talked past by going in the front door.
-  await signIn(page, email);
-  await expect(page).toHaveURL("/login");
-  await expect(formAlert(page)).toContainText("Confirm your email address");
+  // The reported edge case: GoTrue treats a second signup for this unconfirmed
+  // address as a resend but does not replace the first password or metadata.
+  // The app now accepts neither before verification, so the ambiguous success
+  // has nothing authoritative to discard.
+  await page.goto("/signup");
+  await page.getByLabel("Email").fill(email);
+  await page.getByRole("button", { name: "Create account" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Check your email" }),
+  ).toBeVisible();
 
-  // Only the emailed link opens it. This is the half that a bogus token would
-  // silently skip — see the /auth/confirm lesson in docs/backlog.md.
-  await page.goto(await waitForConfirmationLink(email));
+  // Only the newest emailed link opens setup. This is the half that a bogus
+  // token would silently skip — see the /auth/confirm lesson in docs/backlog.md.
+  await page.goto(await waitForAuthLink(email));
+  await expect(page).toHaveURL("/account-setup");
+  await page.getByLabel("Full name").fill("Self Registered");
+  await page.getByLabel("Phone").fill("+1 (555) 123-9999");
+  await page.getByLabel("Password", { exact: true }).fill(password);
+  await page.getByLabel("Confirm password").fill(password);
+  await page.getByRole("button", { name: "Finish account setup" }).click();
   await expect(page).toHaveURL("/dashboard");
 
   // The fail-safe: role defaults to vendor, nothing is linked, so RLS returns
@@ -144,6 +155,36 @@ test("a self-registration must confirm its email, and then has no access at all"
   // Safe to count here, unlike the two specs above: this account is linked to
   // nothing, so RLS returns zero rows no matter what another spec writes.
   await expect(page.locator("tbody tr")).toHaveCount(0);
+
+  // The password selected only after mailbox ownership was proved is the real
+  // credential, including after the session is torn down.
+  await page.getByRole("button", { name: "Sign out" }).click();
+  await signIn(page, email, password);
+  await expect(page).toHaveURL("/dashboard");
+
+  // Recovery enters the same verified setup boundary. This closes the second
+  // lockout path: losing the confirmation session is not permanent.
+  await page.getByRole("button", { name: "Sign out" }).click();
+  await clearMailbox(email);
+  await page.goto("/forgot-password");
+  await page.getByLabel("Email").fill(email);
+  await page.getByRole("button", { name: "Send password-reset link" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Check your email" }),
+  ).toBeVisible();
+
+  await page.goto(await waitForAuthLink(email));
+  await expect(page).toHaveURL("/account-setup");
+  await expect(page.getByLabel("Full name")).toHaveValue("Self Registered");
+  await expect(page.getByLabel("Phone")).toHaveValue("+15551239999");
+  await page.getByLabel("Password", { exact: true }).fill(recoveredPassword);
+  await page.getByLabel("Confirm password").fill(recoveredPassword);
+  await page.getByRole("button", { name: "Finish account setup" }).click();
+  await expect(page).toHaveURL("/dashboard");
+
+  await page.getByRole("button", { name: "Sign out" }).click();
+  await signIn(page, email, recoveredPassword);
+  await expect(page).toHaveURL("/dashboard");
 });
 
 test("a wrong password is refused without saying why", async ({ page }) => {
@@ -161,41 +202,26 @@ test("a wrong password is refused without saying why", async ({ page }) => {
   await expect(page.getByLabel("Password")).toHaveValue("");
 });
 
-test("a rejected signup keeps everything but the password", async ({
-  page,
-}) => {
+test("a rejected signup keeps the submitted email", async ({ page }) => {
   // Both rejection paths, in the order a real user hits them. Nothing here
   // writes — the address is a seeded one, so the second attempt fails on the
   // duplicate — which keeps this off the fresh-seed state the self-registration
   // spec depends on.
   await page.goto("/signup");
-  await page.getByLabel("Full name").fill("Already Registered");
-  await page.getByLabel("Email").fill("manager@realtyworks.test");
-  await page.getByLabel("Phone").fill("12");
-  await page.getByLabel("Password").fill(SEED_PASSWORD);
+  await page.getByLabel("Email").fill("not-an-email");
   await page.getByRole("button", { name: "Create account" }).click();
 
-  // Rejected by the schema, before Supabase. The field the user has to fix is
-  // the only thing they should have to look at.
-  await expect(page.getByText("Enter a valid phone number.")).toBeVisible();
-  await expect(page.getByLabel("Full name")).toHaveValue("Already Registered");
-  await expect(page.getByLabel("Email")).toHaveValue(
-    "manager@realtyworks.test",
-  );
-  await expect(page.getByLabel("Phone")).toHaveValue("12");
-  await expect(page.getByLabel("Password")).toHaveValue("");
+  await expect(page.getByText("Enter a valid email address.")).toBeVisible();
+  await expect(page.getByLabel("Email")).toHaveValue("not-an-email");
 
-  // Rejected by GoTrue this time, which is a different return path in the
-  // action and resets the form just the same.
-  await page.getByLabel("Phone").fill("+1 (555) 123-9999");
-  await page.getByLabel("Password").fill(SEED_PASSWORD);
+  // Rejected by GoTrue this time, which resets the form just the same.
+  await page.getByLabel("Email").fill("manager@realtyworks.test");
   await page.getByRole("button", { name: "Create account" }).click();
 
   await expect(formAlert(page)).toContainText("Could not create that account");
-  await expect(page.getByLabel("Full name")).toHaveValue("Already Registered");
-  // As typed, not the normalized +15551239999 the schema would have produced.
-  await expect(page.getByLabel("Phone")).toHaveValue("+1 (555) 123-9999");
-  await expect(page.getByLabel("Password")).toHaveValue("");
+  await expect(page.getByLabel("Email")).toHaveValue(
+    "manager@realtyworks.test",
+  );
 });
 
 test("the dashboard is unreachable while signed out", async ({ page }) => {
