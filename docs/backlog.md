@@ -1229,12 +1229,23 @@ Dockerfile so self-host stays `docker run` away (`CLAUDE.md` §5/§7).
 
 **Auth tail inherited from issue #93** — the code is done, these are hosted-project
 settings and nothing else:
-- **Flip `[auth.email.smtp] enabled = true`** on the hosted project only (dashboard,
-  or a `config push` from the deploy branch with it flipped *there*). It ships `false`
-  in `config.toml` on purpose: flipping it in the file routes local dev and the CI
-  mailbox spec through a real provider, which breaks both and sends real email from a
-  test run. Provider is **Resend**; `SUPABASE_AUTH_SMTP_PASS` is the API key and
-  `SUPABASE_AUTH_SMTP_ADMIN_EMAIL` the sender (`.env.example`).
+- **Turn SMTP on for the hosted project through the dashboard.** Provider is **Resend**;
+  `SUPABASE_AUTH_SMTP_PASS` is the API key and `SUPABASE_AUTH_SMTP_ADMIN_EMAIL` the
+  sender (`.env.example`). The `[auth.email.smtp]` block ships **commented out** in
+  `config.toml` — not `enabled = false` — and the difference is the whole point
+  (changed 2026-08-25). Locally the two are identical: the CLI's schema default for
+  that key is already `false`, and mail goes to mailpit either way. Remotely they are
+  opposites. `supabase config push` sends the entire auth block as one Management API
+  body, and the CLI maps a *present* smtp table with `enabled = false` to
+  `smtp_host = ""` — which is how you **disable** custom SMTP, not how you leave it
+  alone. So a present-and-false block makes any later routine push (a rate-limit tweak,
+  a new template, a CLI bump) ship "wipe custom SMTP" in the same request as
+  `mailer_autoconfirm = false`, dropping the hosted project to the built-in 2/hour
+  mailer while confirmation mail is mandatory: signups succeed, no link arrives, and
+  every new account is locked out with nothing in the logs. Commented out, the CLI
+  emits no `smtp_*` field and a push cannot touch hosted SMTP. **If you would rather
+  drive it from the file, uncomment with `enabled = true` on the deploy branch only and
+  never merge that branch back.**
 - **Verify the sender domain** with the provider first. An unverified domain drops
   every message silently, and the symptom is "confirmation emails never arrive",
   which reads like an application bug.
@@ -1244,8 +1255,11 @@ settings and nothing else:
 - **Confirm the custom template applied remotely.** A hosted project that falls back
   to the default `{{ .ConfirmationURL }}` sends the implicit flow, which this app
   cannot consume — the link would appear to work and then land nowhere.
-- **Watch `[auth.rate_limit] email_sent`** (raised 2 → 30). It only bites once custom
-  SMTP is on, which is to say: on the hosted project, the first time it matters.
+- **Set `email_sent` in the dashboard as well** (raised 2 → 30 here). Same mechanism as
+  the SMTP bullet, quieter: the CLI only sends `rate_limit_email_sent` when the *local*
+  config has SMTP enabled, so with the block commented out the `30` in `config.toml`
+  never reaches the hosted project on its own. It only bites once custom SMTP is on,
+  which is to say: on the hosted project, the first time it matters.
 
 ### 🟢 Phase 5 — PWA install layer (manifest + service worker)
 Bolt-on to the already-responsive app — never a second codebase (`CLAUDE.md` §2). `src/app/manifest.ts`

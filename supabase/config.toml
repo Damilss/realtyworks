@@ -259,22 +259,44 @@ otp_expiry = 3600
 # not for real users. Plain SMTP with no vendor SDK, so swapping providers is three values here
 # and CLAUDE.md §7 self-host stays mechanical.
 #
-# `enabled` STAYS FALSE IN THIS FILE. Local `supabase start` reads it, so flipping it here routes
-# development mail — and the CI `e2e` job's mailbox spec — through a real provider, breaking both
-# and sending real email from a test run. Locally the mail goes to mailpit ([local_smtp] above,
-# http://127.0.0.1:54324). It is turned on for the HOSTED project only, at the Phase 4 deploy:
-# the dashboard's SMTP settings, or a `config push` from that branch with this flipped there.
+# THIS BLOCK STAYS COMMENTED OUT — not `enabled = false`. Two reasons; the second is the
+# load-bearing one and is why the shape changed on 2026-08-25.
+#
+# 1. Local. `supabase start` reads this, so enabling it routes development mail — and the CI
+#    `e2e` job's mailbox spec — through a real provider, breaking both and sending real email
+#    from a test run. Local mail goes to mailpit instead ([local_smtp] above,
+#    http://127.0.0.1:54324). Commenting out is not a behaviour change locally: the CLI's own
+#    schema default for auth.email.smtp.enabled is already false.
+#
+# 2. Remote. `supabase config push` sends the WHOLE auth block as one Management API body, and
+#    the CLI maps a *present* smtp table with enabled=false to `smtp_host = ""` — which is how
+#    you DISABLE custom SMTP, not how you leave it alone. A present-and-false block therefore
+#    pushes "wipe custom SMTP" in the same request as `mailer_autoconfirm = false` (this file's
+#    enable_confirmations = true). The hosted project drops to the built-in mailer at 2
+#    emails/hour while confirmation mail is mandatory: signups succeed, no link arrives, and
+#    every new account is locked out with no error anywhere. Absent, the CLI emits no smtp_*
+#    field at all and a push leaves hosted SMTP untouched. Verified against the pinned CLI
+#    (2.109.1) by reading its config mapping, not inferred from the docs.
+#
+# So: turn SMTP on for the HOSTED project only, at the Phase 4 deploy, through the dashboard's
+# SMTP settings — and leave this commented so no later `config push` (a rate-limit tweak, a new
+# template, a CLI bump) silently reverts it. Managing it from this file instead means
+# uncommenting with `enabled = true` on the deploy branch ONLY, never merged back.
+#
+# Note the knock-on: the CLI also only pushes rate_limit_email_sent when the LOCAL config has
+# SMTP enabled, so [auth.rate_limit].email_sent above never reaches the hosted project on its
+# own — set it in the dashboard too (docs/backlog.md, Phase 4 auth tail).
 #
 # The two env() values are read by the Supabase CLI's substitution, not by Next — see
-# .env.example. Nothing local needs them while `enabled` is false.
-[auth.email.smtp]
-enabled = false
-host = "smtp.resend.com"
-port = 465
-user = "resend"
-pass = "env(SUPABASE_AUTH_SMTP_PASS)"
-admin_email = "env(SUPABASE_AUTH_SMTP_ADMIN_EMAIL)"
-sender_name = "RealtyWorks"
+# .env.example. Nothing local needs them while this block is commented out.
+# [auth.email.smtp]
+# enabled = true
+# host = "smtp.resend.com"
+# port = 465
+# user = "resend"
+# pass = "env(SUPABASE_AUTH_SMTP_PASS)"
+# admin_email = "env(SUPABASE_AUTH_SMTP_ADMIN_EMAIL)"
+# sender_name = "RealtyWorks"
 
 # The signup confirmation email. GoTrue's default body is `{{ .ConfirmationURL }}`, which points
 # at its own /auth/v1/verify and hands the session back in a URL *fragment* — the implicit flow,

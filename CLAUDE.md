@@ -283,9 +283,18 @@ Verify before assuming they exist:
   message would tell someone who simply has not opened their email that their
   password is wrong. The local mailbox is **mailpit** (`[local_smtp]`, port
   54324) even though its container is still named `supabase_inbucket_*`.
-  Production SMTP is written into `config.toml` as Resend with
-  `enabled = false`; flipping it there would route local dev and the CI mailbox
-  spec through a real provider, so it is turned on for the hosted project only.
+  Production SMTP is written into `config.toml` as Resend, **commented out** —
+  deliberately not `enabled = false`. Enabling it in the file would route local
+  dev and the CI mailbox spec through a real provider, so it is turned on for
+  the hosted project only; but `enabled = false` is not the safe way to say that.
+  `supabase config push` sends the whole auth block as one body, and the CLI maps
+  a *present* smtp table with `enabled = false` to `smtp_host = ""` — the way you
+  **disable** custom SMTP. Present-and-false would therefore let any later push
+  wipe hosted SMTP alongside `mailer_autoconfirm = false`, i.e. mandatory
+  confirmation mail sent through the built-in 2/hour mailer, so new accounts get
+  no link and cannot sign in. Commented out, no `smtp_*` field is emitted at all.
+  The general rule: **in `config.toml`, "off" and "absent" are the same locally
+  and opposite remotely** — reach for absent unless you mean to push the off.
 - **Not yet created:** `supabase/functions/`, `src/app/api/`. Neither is a gap
   to fill on its own — edge functions are Phase 5 (§6 SMS), and the only route
   handler that exists is `src/app/auth/confirm/route.ts`, which is deliberately
