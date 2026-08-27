@@ -17,7 +17,8 @@ Pick them off at your discretion.
 
 ## State verified (2026-08-07)
 
-- `next 16.2.11` / `react 19.2.4` / `pnpm@11.13.1`, Node pinned to 24 (`.nvmrc`).
+- `next 16.2.11` / `react 19.2.4` / `pnpm@11.13.1`, Node pinned to 24 (`.nvmrc`
+  and `engines.node`, added 2026-08-25).
 - CI runs `lint → format:check → typecheck → test → build → audit` — with
   `!cancelled()`, concurrency-cancel, `permissions: contents: read`, and
   pnpm + Next build caching. The audit step is **blocking** (fails on any
@@ -36,7 +37,8 @@ Pick them off at your discretion.
   prefix, `dependencies` label, `@types/node` pinned to `^24` (issue #23; see ✅).
 - Husky **pre-commit** (lint-staged + gitleaks) **and `commit-msg`**
   (commitlint, conventional types + `deps`, `CI/CD` retired → `ci`).
-- Prettier configured (markdown intentionally ignored).
+- Prettier configured (markdown intentionally ignored), with `.editorconfig`
+  under it for the file types Prettier never sees (2026-08-25, issue #32).
 - **Phase 2 schema is on `main`** — merged 2026-07-21 (PR #78): `supabase/`
   (9 migrations, seed, pgTAP suite via `pnpm exec supabase test db`), generated
   `src/lib/database.types.ts`, supabase CLI pinned as a devDependency. See ✅.

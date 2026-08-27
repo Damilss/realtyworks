@@ -10,8 +10,10 @@ Read this fully before generating code, scaffolding, or migrations.
 ## 0. Quick reference
 
 **Package manager is `pnpm` (`pnpm@11.13.1`), not npm.** Node is pinned to
-**24** (`.nvmrc`, matched by CI). Stack versions are new and have breaking
-changes: **Next.js 16.2.11**, **React 19.2.4**. Per `AGENTS.md`, read the
+**24** in two places that move together — `.nvmrc` (matched by CI) and
+`engines.node` in `package.json` (`>=24 <25`, a warning on install, not a
+gate). Stack versions are new and have breaking changes:
+**Next.js 16.2.11**, **React 19.2.4**. Per `AGENTS.md`, read the
 relevant guide in `node_modules/next/dist/docs/` (`01-app`, `02-pages`,
 `03-architecture`, …) before writing Next.js code — do not assume
 training-data APIs.
@@ -436,8 +438,9 @@ realtyworks/
 │   └── e2e/                        # playwright
 ├── .env.example                    # committed — documents required vars
 ├── .env.local                      # gitignored — real secrets
+├── .editorconfig                   # editor defaults (LF, 2-space, final newline) — not CI-enforced
 ├── .gitleaks.toml                  # secret-scanning config (default rules + allowlist)
-├── .nvmrc                          # pinned Node, matches CI
+├── .nvmrc                          # pinned Node, matches CI + package.json engines
 ├── commitlint.config.mjs
 ├── eslint.config.mjs
 ├── .prettierrc

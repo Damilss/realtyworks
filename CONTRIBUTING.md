@@ -14,8 +14,10 @@ writing code. Where this file and `CLAUDE.md` disagree, `CLAUDE.md` wins.
 
 ## 1. Setup
 
-**Use `pnpm`, never npm.** Node is pinned to 24 (`.nvmrc`); pnpm to 11.13.1
-(`packageManager`). Docker must be running for the local Supabase stack.
+**Use `pnpm`, never npm.** Node is pinned to 24 (`.nvmrc`, plus `engines.node`
+in `package.json` — a wrong major only warns); pnpm to 11.13.1
+(`packageManager`). `.editorconfig` carries the whitespace conventions for your
+editor; Prettier is what CI actually checks. Docker must be running for the local Supabase stack.
 
 ```bash
 git clone <repo-url> && cd realtyworks
