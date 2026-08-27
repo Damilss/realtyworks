@@ -59,11 +59,11 @@ reporting above.
 | Framework | [Next.js](https://nextjs.org) 16 (App Router) |
 | Language | TypeScript (strict) on React 19 |
 | Package manager | **pnpm** `11.13.1` (pinned via `packageManager`) |
-| Runtime | Node **24** (pinned in `.nvmrc`, matched by CI) |
+| Runtime | Node **24** (pinned in `.nvmrc`, matched by CI; `engines.node` warns on a wrong major) |
 | Unit tests | Vitest |
 | E2E tests | Playwright (the whole vertical slice runs in CI against a real seeded stack — see [docs/playwright.md](docs/playwright.md)) |
 | Database | Supabase (Postgres 17, Auth, Storage, RLS) — local stack via the pinned `supabase` CLI; schema lives in `supabase/migrations/` (RLS ships with each table), pgTAP tests in `supabase/tests/` |
-| Lint / format | ESLint (`next/core-web-vitals` + TypeScript) · Prettier |
+| Lint / format | ESLint (`next/core-web-vitals` + TypeScript) · Prettier · `.editorconfig` (editor-side, not gated) |
 | Git hygiene | Husky + lint-staged · commitlint (conventional commits) · gitleaks |
 
 Server-side auth is `@supabase/ssr`: browser and per-request server clients in
@@ -95,6 +95,9 @@ Edge Functions. See `CLAUDE.md` §2.
 
 - **Node 24** — pinned in `.nvmrc`. `nvm use` reads it; any Node 24 also works
   if you manage versions another way (fnm, asdf, Volta, or a manual install).
+  `package.json` declares `engines.node` (`>=24 <25`) as a second signal: a
+  wrong major prints an `Unsupported engine` warning on `pnpm install` — it
+  warns, it does not stop the install.
 - **pnpm 11.13.1** — easiest via [corepack](https://nodejs.org/api/corepack.html)
   (`corepack enable`), which reads the `packageManager` field and activates the
   pinned version on first use; **do not use npm**. The first `pnpm` command may
@@ -390,8 +393,9 @@ realtyworks/
 │   ├── unit/               # Vitest (DOM harness)
 │   └── e2e/                # Playwright specs (smoke · auth · work-orders · vendor-loop)
 ├── .env.example            # committed template — documents every required var
+├── .editorconfig           # editor defaults (LF, 2-space, final newline)
 ├── .gitleaks.toml          # secret-scanning config
-├── .nvmrc                  # Node 24
+├── .nvmrc                  # Node 24 (with package.json engines)
 ├── commitlint.config.mjs   # conventional-commit rules
 ├── playwright.config.ts
 ├── vitest.config.ts

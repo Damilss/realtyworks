@@ -588,6 +588,23 @@ Prettier **intentionally ignores Markdown** (`*.md` in `.prettierignore`) —
 docs are hand-formatted. The pnpm lockfile and generated Next.js output are
 ignored too. So `pnpm format:check` failures are never about docs.
 
+**`.editorconfig` is the layer below Prettier, and nothing enforces it.**
+It sets UTF-8, LF, two-space indent, a final newline, and trailing-whitespace
+trimming for every file, so an editor gets the house style right in file types
+Prettier never sees — SQL migrations, `.env.example`, `.nvmrc`, shell scripts,
+the Husky hooks. There is no CI step for it and there is not meant to be: it
+steers editors as you type, while Prettier remains the gate for the extensions
+it owns. Where the two overlap they already agree, and `pnpm format:check`
+stays authoritative if they ever drift.
+
+Two overrides earn their place. **`[*.md] trim_trailing_whitespace = false`** —
+Markdown's hard line break *is* two trailing spaces, so trimming would silently
+rewrite docs; this is also why the setting cannot simply mirror the global
+block. **`[*.py] indent_size = 4`** covers the one Python file in the repo,
+`.github/scripts/semgrep-annotations.py` (PEP 8, not the JS two). Prettier
+formats neither extension, so in both cases `.editorconfig` is the only thing
+expressing the convention at all.
+
 **YAML is the opposite case, and it has a blind spot.** Prettier *does* format
 `*.yml`/`*.yaml` (only `pnpm-lock.yaml` is exempt), and its glob traverses
 dot-directories — that is why `supabase/.temp/` needs an explicit ignore entry,
