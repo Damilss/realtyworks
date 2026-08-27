@@ -41,6 +41,18 @@ async function signIn(page: Page, email: string, password = SEED_PASSWORD) {
 }
 
 /**
+ * Clicking "Sign out" posts to a server action that redirects; the click on its
+ * own does not wait for that to land. Going straight to /login while the POST
+ * is still in flight arrives with the session cookie intact, and /login sends
+ * an authenticated visitor to /dashboard — so the next step reads as "sign-out
+ * did nothing" when it was only unfinished. Let it settle.
+ */
+async function signOut(page: Page) {
+  await page.getByRole("button", { name: "Sign out" }).click();
+  await expect(page).toHaveURL("/login");
+}
+
+/**
  * Scoped to <main> deliberately. Next.js injects its own
  * `#__next-route-announcer__` with role="alert" once a client-side navigation
  * has happened, so a bare getByRole("alert") is a strict-mode violation in some
@@ -122,6 +134,13 @@ test("a self-registration must confirm its email, and then has no access at all"
   // address as a resend but does not replace the first password or metadata.
   // The app now accepts neither before verification, so the ambiguous success
   // has nothing authoritative to discard.
+  //
+  // Wait out [auth.email] max_frequency ("1s") before resending. A fixed sleep
+  // is normally the wrong tool, but this is a server-side time window rather
+  // than a UI state worth polling for: resend inside it and GoTrue returns 429
+  // over_email_send_rate_limit, which the action renders — correctly — as "Too
+  // many attempts", so the resend path this test exists to cover never runs.
+  await page.waitForTimeout(1_100);
   await page.goto("/signup");
   await page.getByLabel("Email").fill(email);
   await page.getByRole("button", { name: "Create account" }).click();
@@ -158,13 +177,13 @@ test("a self-registration must confirm its email, and then has no access at all"
 
   // The password selected only after mailbox ownership was proved is the real
   // credential, including after the session is torn down.
-  await page.getByRole("button", { name: "Sign out" }).click();
+  await signOut(page);
   await signIn(page, email, password);
   await expect(page).toHaveURL("/dashboard");
 
   // Recovery enters the same verified setup boundary. This closes the second
   // lockout path: losing the confirmation session is not permanent.
-  await page.getByRole("button", { name: "Sign out" }).click();
+  await signOut(page);
   await clearMailbox(email);
   await page.goto("/forgot-password");
   await page.getByLabel("Email").fill(email);
@@ -182,7 +201,7 @@ test("a self-registration must confirm its email, and then has no access at all"
   await page.getByRole("button", { name: "Finish account setup" }).click();
   await expect(page).toHaveURL("/dashboard");
 
-  await page.getByRole("button", { name: "Sign out" }).click();
+  await signOut(page);
   await signIn(page, email, recoveredPassword);
   await expect(page).toHaveURL("/dashboard");
 });
@@ -207,12 +226,17 @@ test("a rejected signup keeps the submitted email", async ({ page }) => {
   // writes — the address is a seeded one, so the second attempt fails on the
   // duplicate — which keeps this off the fresh-seed state the self-registration
   // spec depends on.
+  // Valid to the browser, invalid to zod — and that combination is the point.
+  // The field is type="email" required, so a value the browser itself rejects
+  // ("not-an-email") is never submitted at all: the server action does not run
+  // and none of our messages render. "a@b" is a plausible typo Chrome accepts
+  // and z.email() does not, so it reaches the schema the way a real user does.
   await page.goto("/signup");
-  await page.getByLabel("Email").fill("not-an-email");
+  await page.getByLabel("Email").fill("a@b");
   await page.getByRole("button", { name: "Create account" }).click();
 
   await expect(page.getByText("Enter a valid email address.")).toBeVisible();
-  await expect(page.getByLabel("Email")).toHaveValue("not-an-email");
+  await expect(page.getByLabel("Email")).toHaveValue("a@b");
 
   // Rejected by GoTrue this time, which resets the form just the same.
   await page.getByLabel("Email").fill("manager@realtyworks.test");
