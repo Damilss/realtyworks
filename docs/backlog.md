@@ -94,8 +94,9 @@ Pick them off at your discretion.
 - **Cross-checked against the GitHub issue list 2026-08-07** (15 open). Four
   filed issues had no entry here and were added to 🟡: the Tailwind v4 full-height
   regression (#86/#89), the prettier-plugin-tailwindcss v4 options (#87), the
-  `minimatch` override (#84), and the `vitest.config.ts` alias path (#102). Every
-  other visible open issue already had an entry, now cross-referenced by number.
+  `minimatch` override (#84), and the `vitest.config.ts` alias path (#102 —
+  fixed 2026-08-28, see ✅). Every other visible open issue already had an
+  entry, now cross-referenced by number.
   **Caveat:** the check was made against a screenshot of the first page of
   *Open*, so roughly three of the fifteen sat below the fold and were not
   compared — re-run the comparison on those before treating this file as a
@@ -1096,16 +1097,20 @@ nothing declares `<9`; `pnpm why minimatch` answers that in one command.
 not-reproducing with the interop check recorded on it rather than left open as a
 suspected crash.
 
-### 🟡 Use `fileURLToPath()` for the `server-only` alias in `vitest.config.ts` (issue #102)
-**Why:** The alias is built with `new URL("./tests/unit/server-only-stub.ts",
-import.meta.url).pathname`. `.pathname` is a **URL** component, not a filesystem
-path: it stays percent-encoded, and on Windows it keeps a leading slash before
-the drive letter. Under the current checkout
-(`/Users/emilio/vsprojects/realtyworks`) the two forms are identical, which is
-why every test passes — but a clone into a directory containing a space or any
-non-ASCII character resolves to `…/my%20projects/…`, the alias silently fails to
-match, and every `src/server/queries/**` test dies on the real `server-only`
-import instead. Verified:
+### ✅ `fileURLToPath()` for the `server-only` alias in `vitest.config.ts` (2026-08-28, issue #102)
+Fixed as filed — one line, one import, no behavior change on any machine that
+was already working.
+
+**Was:** `new URL("./tests/unit/server-only-stub.ts", import.meta.url).pathname`.
+`.pathname` is a **URL** component, not a filesystem path: it stays
+percent-encoded, and on Windows it keeps the leading slash before the drive
+letter. Under this checkout (`/Users/emilio/vsprojects/realtyworks`) and under
+Ubuntu CI the two forms are byte-identical, which is exactly why every test
+passed while the code was wrong — there is nothing in either path for the URL
+parser to escape. A clone into a directory with a space or a non-ASCII character
+would resolve to `…/my%20projects/…`, the alias would silently fail to match, and
+every `src/server/queries/**` test would die on the real `server-only` import
+instead of on a path error.
 
 ```
 pathname     : /Users/emilio/my%20projects/realtyworks/tests/unit/server-only-stub.ts
@@ -1113,13 +1118,22 @@ fileURLToPath: /Users/emilio/my projects/realtyworks/tests/unit/server-only-stub
 win pathname : /C:/dev/app/x.ts
 ```
 
-Latent, environment-dependent, and it fails in the worst way — as a confusing
-`server-only` import error rather than a path error — which is why it is worth
-fixing while it costs one line.
-**Do:** `import { fileURLToPath } from "node:url"` and wrap the URL:
-`fileURLToPath(new URL("./tests/unit/server-only-stub.ts", import.meta.url))`.
-**Done when:** `pnpm test` passes from a checkout whose absolute path contains a
-space.
+**Now:** `fileURLToPath(new URL(…, import.meta.url))`, with a comment beside it
+naming both failure modes so the next edit doesn't quietly reintroduce
+`.pathname`. 208 unit tests pass; lint, `format:check` and `typecheck` clean.
+
+Two things worth keeping from the fix. The **alias was verified load-bearing**
+per §5 — pointing it at a nonexistent file fails 2 test files (16 tests), which
+proves the resolved string actually reaches module resolution rather than being
+decoration. And a first attempt to fake the breakage with `server%2Donly-stub.ts`
+passed: `fileURLToPath` decoded `%2D` back to `-` and found the file. That
+accident is the property under test, demonstrated from the other side — decoding
+is precisely what `.pathname` does not do.
+
+The general shape is the one already recorded for the `-x` names and the
+mid-run template edit: **a defect that is invisible on the only two machines
+that ever run the code.** Neither this developer's checkout nor CI has a path
+that encodes, so "all tests pass" carried no information about the line at all.
 
 ### ✅ The `e2e` job's silently-ignored `-x` names, corrected (2026-08-25)
 Landed with issue #93, exactly as the entry said it should — the mailbox was the
@@ -1411,5 +1425,5 @@ with the Phase 3 close: the open items stopped being "wire the plumbing" or
 and both 🟠 gates plus CAPTCHA existed because signup is open to the public. They
 were the price of that call, not surprises. Two of the three are now paid.
 The 🟡 bucket is now mostly latent defects and DX debt; none of it should
-displace Phase 4, and the four items added 2026-08-07 (#86/#89, #87, #84, #102)
-are explicitly fill-in work around it.
+displace Phase 4, and the items added 2026-08-07 (#86/#89, #87, #84) are
+explicitly fill-in work around it — the fourth, #102, was closed 2026-08-28.
