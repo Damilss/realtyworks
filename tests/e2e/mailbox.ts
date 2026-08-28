@@ -15,6 +15,23 @@
  * Only reachable when the mail container is actually up. The CI `e2e` job boots
  * it deliberately — see the `-x` list in .github/workflows/ci.yml, which stopped
  * pretending to exclude it when email confirmations went on.
+ *
+ * **Editing `supabase/templates/*.html` while the stack is running stops mail
+ * entirely, and nothing says so.** The CLI bind-mounts each template as a single
+ * *file* into Kong. Rewriting one on the host writes a new inode — which is what
+ * an editor, `git checkout`, and a branch switch all do — while the container
+ * keeps the old, now-unlinked one: `ls` still lists it, with a link count of 0,
+ * and opening it fails. Kong then 404s, GoTrue logs
+ * `templatemailer: ... status code 404`, and sends nothing, so every spec that
+ * waits on a link times out against a mailbox that was never going to fill.
+ *
+ * `supabase db reset` does not fix it — it restarts containers but does not
+ * recreate them, so the mount is rebuilt only by `supabase stop && supabase
+ * start`. CI never sees this: it starts fresh containers from the committed
+ * templates and never edits them mid-run. It is purely a local trap, and it
+ * surfaces at the *next* restart rather than at the edit that caused it, which
+ * is what makes it hard to attribute. Confirm it with
+ * `docker logs supabase_auth_realtyworks | grep templatemailer`.
  */
 
 const MAILPIT_URL = process.env.MAILPIT_URL ?? "http://127.0.0.1:54324";
@@ -124,9 +141,15 @@ export async function waitForAuthLink(
 
     if (Date.now() > deadline) {
       throw new Error(
-        `No auth email for ${email} reached Mailpit within ` +
-          `${timeoutMs}ms. Check [auth.email] enable_confirmations and that ` +
-          `the mail container is running.`,
+        `No auth email for ${email} reached Mailpit within ${timeoutMs}ms.\n` +
+          `Causes, in the order worth checking:\n` +
+          `  1. The mail container is not running — \`pnpm exec supabase status\`.\n` +
+          `  2. [auth.email] enable_confirmations is off in supabase/config.toml.\n` +
+          `  3. The email templates are stale-mounted, so GoTrue is sending ` +
+          `nothing at all — see the template-mount note in this file's header. ` +
+          `Confirm with ` +
+          `\`docker logs supabase_auth_realtyworks | grep templatemailer\`; if ` +
+          `that shows a 404, \`supabase stop && supabase start\`.`,
       );
     }
 
