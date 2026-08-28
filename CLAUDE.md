@@ -265,7 +265,7 @@ Verify before assuming they exist:
   `ALLOWED_TYPES`, `signUp()` returning a "check your email" state instead of
   redirecting, and `tests/e2e/mailbox.ts` reading the real mailbox. **No
   migration** — the seeded users already carry `email_confirmed_at`, so every
-  existing login and all 94 pgTAP assertions were untouched. Four things worth
+  existing login and all 94 pgTAP assertions were untouched. Five things worth
   carrying forward, all verified against the running stack rather than read in
   a doc. **The default template is unusable here**: `{{ .ConfirmationURL }}` is
   GoTrue's implicit flow, so the template points at our own `/auth/confirm`
@@ -273,7 +273,15 @@ Verify before assuming they exist:
   `buildInviteUrl()` builds. **`content_path` under
   `[auth.email.template.*]` resolves from the project root**, while
   `[auth.email.notification.*]` resolves from `supabase/`; the CLI's two
-  commented examples differ for that reason and it is not a typo. **A duplicate
+  commented examples differ for that reason and it is not a typo. **Editing a
+  template while the stack runs silently stops all auth mail** (found 2026-08-28,
+  reviewing this branch): each one is bind-mounted into Kong as a single *file*,
+  so rewriting it on the host orphans the container's inode, Kong 404s, and
+  GoTrue sends nothing — reported as a spec timing out on an empty mailbox, at
+  the next container restart rather than at the edit. `supabase stop && start`
+  rebinds it and `db reset` does not; CI is immune, since it never edits a
+  template mid-run. Same shape as the `-x` trap: a local-only failure whose
+  symptom names the wrong subsystem. **A duplicate
   signup still errors** — `user_already_exists` / 422 for a *confirmed*
   address, contrary to the docs' claim that the response becomes obfuscated;
   what changed is that re-submitting an *unconfirmed* address resends the link,

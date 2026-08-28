@@ -201,6 +201,12 @@ way a person would.
   *previous* run's message and follow a token that has already been spent. CI
   never hits this — its container is new each time — which makes it exactly the
   kind of flake that only reproduces on your own machine.
+- **Do not edit `supabase/templates/*.html` with the stack running.** The
+  template is bind-mounted into Kong as a single file, so rewriting it on the
+  host orphans the container's copy and Kong 404s — GoTrue sends nothing, and
+  the failure surfaces at the next container restart rather than at the edit.
+  `supabase stop && supabase start` rebinds it; `db reset` does not. Troubleshooting
+  below has the diagnosis, and `tests/e2e/mailbox.ts`'s header has the mechanism.
 - **The link is matched out of the rendered body, not the template.** That is
   what proves `{{ .TokenHash }}` actually interpolated and that the URL points
   at `/auth/confirm` rather than GoTrue's `/auth/v1/verify`. Reading the
@@ -254,6 +260,18 @@ test("home page loads", async ({ page }) => {
   stack looks exactly like an app bug.
 - **Missing seeded rows, or "account already exists"** — the database has
   drifted from the seed. `pnpm exec supabase db reset`, then re-run.
+- **"No auth email ... reached Mailpit", with confirmations on and the mail
+  container up** — the email templates are almost certainly stale-mounted.
+  Editing `supabase/templates/*.html` while the stack is running replaces the
+  file's inode, and the CLI bind-mounts each template as a single *file*, so Kong
+  goes on serving the old unlinked one and answers 404. GoTrue then sends no mail
+  at all — not late mail, none — and the spec times out waiting on a mailbox that
+  was never going to fill. Confirm with
+  `docker logs supabase_auth_realtyworks | grep templatemailer`; a
+  `status code 404` line is the tell. Fix with `supabase stop && supabase start`.
+  **`db reset` is not enough**: it restarts containers without recreating them,
+  so the mount is never rebuilt. CI cannot hit this — it starts fresh containers
+  from the committed templates and never edits them mid-run.
 - **Only `vendor-loop.spec.ts` fails, on "not configured on this server"** —
   `SUPABASE_SECRET_KEY` is missing from `.env.local`. The invite and the upload
   are service-role writes, so they are the only things that notice; every other
