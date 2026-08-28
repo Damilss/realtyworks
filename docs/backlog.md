@@ -764,9 +764,62 @@ required-check names are unchanged; the OSV scan surfaces as a non-required
 
 ## 🟠 High
 
-*Empty.* Both 🟠 items were gates on the Phase 4 public deploy and both are
-closed: the `/auth/confirm` open redirect (2026-08-12, issue #105) and email
-confirmations (2026-08-25, issue #93). See ✅ for each.
+### 🟠 Emailed tokens are redeemed on GET, so a mail scanner spends them (2026-08-28, PR review, P2)
+**Why:** `/auth/confirm` calls `verifyOtp` from its `GET` handler, so *fetching*
+the link is redeeming it. Mail security gateways — Defender Safe Links,
+Proofpoint, Mimecast — follow URLs in a message before the recipient sees it.
+Reproduced against the local stack with plain `curl`, no browser and no JS:
+
+```
+1st GET (the scanner):    307 → /account-setup
+2nd GET (the recipient):  307 → /login?error=invalid-link
+```
+
+The recipient is locked out of their own link. Against a deterministic corporate
+scanner this is not a flake — every replacement link burns the same way, so
+signup and recovery both dead-end for that user, permanently.
+
+**Worse than losing the token:** the same GET mints the session, so the scanner
+is handed `sb-…-auth-token=…; Max-Age=34560000; SameSite=lax` — a ~400-day
+session for someone else's account. Most scanners discard cookies; nothing here
+should depend on that, and `signOut` is `scope: "local"`, so nothing revokes it.
+
+**Not introduced by email confirmations.** `/auth/confirm` has redeemed
+`magiclink` and `invite` on GET since the vendor half (2026-08-03); issue #93
+widened the same mechanism to `signup` and `recovery`. All four are exposed.
+The repo already holds the principle this breaks — `src/app/(dashboard)/layout.tsx`
+uses a form POST for sign-out precisely because "a GET logout gets fired by link
+prefetching and by anything that crawls the page."
+
+**There is no cheap mitigation.** `Cache-Control: no-store` does not deter a
+scanner, User-Agent sniffing is unreliable in exactly the direction that matters,
+and "redeem only on POST" *is* the interstitial. Real fix or nothing.
+
+**Sized 🟠, like the two gates before it:** nothing is exposed today, because
+nothing is deployed and local mail goes to mailpit, which follows nothing. It
+goes live the moment real mail leaves Resend — and it fails *closed for
+legitimate users*, which is the worst kind of onboarding bug, because the people
+it locks out are the corporate recipients this product is sold to.
+
+**Do:** land the emailed link on a non-mutating page that renders an explicit
+"Confirm your email" / "Sign in" button, and redeem through a POST that carries
+`token_hash` and `type` into a server action running `verifyOtp`. Apply it to all
+four types — leaving `invite` on GET keeps the vendor path exposed and makes one
+endpoint behave two ways. `safeNext()` moves across unchanged; it constrains the
+destination, not the method.
+
+**Expect the tests to be most of the work.** `src/app/auth/confirm/route.test.ts`
+(8 cases) and the redirect-guard loop in `tests/e2e/vendor-loop.spec.ts` (8
+hostile payloads, one browser context each) both drive the endpoint by
+navigation. Carry that coverage across intact, and re-check it the way §5
+demands — delete `safeNext()` once and watch the specs fail. That suite exists
+because the redirect hole (#105) shipped green under a test that never reached
+the guarded line.
+
+**Done when:** a bare `GET` of an emailed link leaves the token unspent and sets
+no cookie; a spec proves it by fetching the link first and *then* redeeming it in
+a browser and landing signed in; and the redirect-guard table still fails when
+`safeNext()` is removed.
 
 ---
 
@@ -1315,11 +1368,14 @@ half: Phase 3 complete**, merged to `main` 2026-08-04 as PR #94 → the
 `/auth/confirm` open redirect → **email confirmations: the last gate cleared**,
 2026-08-25.)*
 
-**Nothing gates the deploy any more.** Both 🟠 items landed on `/auth/confirm`,
-the one endpoint the deploy exposes that mints a session, and both are closed —
-the open redirect on 2026-08-12 and email confirmations on 2026-08-25. **Phase 4
-is now not just the critical path but the *next* path** (`CLAUDE.md` §1/§4):
-there is no remaining prerequisite to do first.
+**One gate is open again, and it is on the same endpoint.** The two that closed
+both landed on `/auth/confirm` — the open redirect on 2026-08-12 and email
+confirmations on 2026-08-25 — and PR review reopened a third there on
+2026-08-28: emailed tokens are redeemed on `GET`, so a mail scanner spends them
+before the recipient clicks (🟠 above). It is invisible locally, because mailpit
+follows nothing, and live the moment real mail leaves Resend. **Phase 4 is still
+the critical path**, and the deploy's *auth tail* now has one code change in it
+rather than settings alone.
 
 1. **Phase 4 itself** (🟢 above, issue #36) — Supabase Cloud project + pushed
    migrations, Vercel project + env vars, PR preview deploys, prod deploys only
