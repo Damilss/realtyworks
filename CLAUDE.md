@@ -518,7 +518,11 @@ realtyworks/
   `src/server/actions/**` is the exception: client components are *meant* to
   import server actions, because `"use server"` swaps the body for an RPC
   reference and the implementation never ships. A lint rule blocking all of
-  `@/server/*` would break the login form; scope one to `queries/` (backlog).
+  `@/server/*` would break the login form, so the one in `eslint.config.mjs`
+  (`realtyworks/no-server-queries-in-client`, 2026-08-28, issue #29) is scoped
+  to `queries/` and fires only inside a `"use client"` module. It allows
+  `import type`, which is how all five client components that name a query
+  module reach their types — those imports are erased before bundling.
 - `src/schemas/` (zod) is imported by both client and server: validate in both,
   trust only the server. Schemas do NOT live in `src/server/`.
 - `database.types.ts` is generated via `supabase gen types typescript`.

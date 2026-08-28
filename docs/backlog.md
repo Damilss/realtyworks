@@ -1163,26 +1163,46 @@ the comment above the `e2e` job's `Start Supabase stack` step, and
 **Do:** `pnpm add -D @vitest/coverage-v8`; `pnpm test -- --coverage`; report in CI, no threshold yet.
 **Done when:** a coverage summary prints in CI logs.
 
-### 🟡 ESLint import boundary for `src/server/queries/`
-**Why:** `CLAUDE.md` §3: `src/server/` is the trust boundary. **Amended
-2026-07-27 — the original wording of this item was wrong** and would now break
-the app. It said "block `@/server/*` from client components"; but client
-components are *supposed* to import server actions — `"use server"` swaps the
-body for an RPC reference, so the implementation never ships — and the login and
-signup forms do exactly that. Blocking all of `@/server/*` would fail lint on
-working, correct code. The boundary that needs enforcing is
-`src/server/queries/**` only.
-**Do:** `no-restricted-imports` (or `eslint-plugin-boundaries`) blocking
-`@/server/queries/*` from files carrying `"use client"`; leave
-`@/server/actions/*` alone.
-**Note:** mostly solved already — every module in `src/server/queries/` opens
-with `import "server-only"`, which fails the **build** if client code pulls it
-in. Lint would move that failure earlier and give it a better message, so this
-is now DX polish, not a hole. (Vitest imports those modules via the
-`server-only` alias in `vitest.config.ts` — don't let a lint rule catch the
-test files.)
-**Done when:** importing `@/server/queries/...` into a client component fails
-lint, and the login form still builds.
+### ✅ ESLint import boundary for `src/server/queries/` (2026-08-28, issue #29)
+Landed as `realtyworks/no-server-queries-in-client`, a ~50-line rule defined
+inline in `eslint.config.mjs` — no new dependency, no rules directory for a
+single rule.
+
+**The issue as filed would have failed lint on correct code, twice over.** Its
+wording — "block `@/server/*` from client components" — was already amended here
+on 2026-07-27 for the first reason: client components are *supposed* to import
+server actions, and the login and signup forms do. Implementing it surfaced a
+second: all five client-side references to a query module are `import type`
+(`PropertyOption`, `VendorOption`, `WorkOrderListItem`, `ActivityEntry`,
+`WorkOrderAttachment`), and a type import is erased before bundling. A rule that
+matched on the module path alone would have flagged every one of them.
+
+**Do (done):** the rule reports an `ImportDeclaration` whose source matches
+`@/server/queries/**` only when the module carries a `"use client"` directive,
+and skips it when `importKind === "type"` or every specifier is a type
+specifier. A bare side-effect import has no specifiers and still reports, since
+that one is not erased. `@/server/actions/**` is untouched. Path globs were not
+an option: client and server modules sit in the same directories (`page.tsx`
+beside `work-order-form.tsx`), so the directive is the only honest signal.
+
+**Done when (met):** a `"use client"` module importing `listWorkOrders` at
+runtime fails lint with a message naming the boundary; the login form still
+builds; `pnpm lint` is clean on the tree as it stands.
+
+Verified the way §5 asks. A probe file was linted with the rule on (one error,
+on the runtime import, *not* on the type import beside it) and with the rule
+off (silent — proving the probe tripped this rule and nothing else). The
+durable half is `tests/unit/server-boundary-lint.test.ts`: four cases run
+through `ESLint.lintText` against the **real** `eslint.config.mjs` rather than
+the rule in isolation, so a `files` glob that drifts or an alias that gets
+renamed fails the suite instead of silently disarming the boundary. Removing
+the rule from the config fails that test — checked, not assumed.
+
+This stays DX polish rather than a closed hole: `import "server-only"` already
+failed the *build* on a runtime import. What changed is that the failure now
+arrives at lint time and the message names the trust boundary instead of a
+module resolution error. The test files are unaffected — they have no
+`"use client"` directive, so the rule never looks at them.
 
 ### 🟡 CAPTCHA on signup
 **Why:** With self-registration open, `[auth.rate_limit] sign_in_sign_ups` — 30
