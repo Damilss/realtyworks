@@ -1,4 +1,6 @@
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+
 import type { AuthFormState } from "@/server/actions/auth";
 
 import { SignupForm } from "./signup-form";
@@ -73,5 +75,24 @@ describe("SignupForm", () => {
     expect(screen.getByText("new@realtyworks.test")).toBeInTheDocument();
     expect(screen.getByText(/choose your password/i)).toBeInTheDocument();
     expect(screen.queryByLabelText("Email")).not.toBeInTheDocument();
+  });
+
+  // The panel is otherwise terminal, and nothing upstream checks that the
+  // address can receive mail: `you@realtyworks.tst` is accepted, so without a
+  // way back the only correction is knowing to reload the page.
+  it("hands the form back so a mistyped address can be corrected", async () => {
+    renderWith({
+      confirmationSent: true,
+      values: { email: "new@realtyworks.tst" },
+    });
+
+    await userEvent.click(
+      screen.getByRole("button", { name: "Use a different address" }),
+    );
+
+    expect(screen.getByLabelText("Email")).toHaveValue("new@realtyworks.tst");
+    expect(
+      screen.queryByRole("heading", { name: "Check your email" }),
+    ).not.toBeInTheDocument();
   });
 });

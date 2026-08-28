@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState } from "react";
+import { useActionState, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { FieldError, FormError } from "@/components/ui/form-feedback";
@@ -19,7 +19,15 @@ export function ForgotPasswordForm() {
     initialState,
   );
 
-  if (state.passwordResetSent) {
+  /**
+   * Same terminal-panel problem as the signup form, and sharper here: this
+   * panel cannot name the address it sent to without becoming the account
+   * oracle the wording exists to avoid, so a typo leaves nothing on screen to
+   * notice. Handing the form back is the only correction available.
+   */
+  const [editingAddress, setEditingAddress] = useState(false);
+
+  if (state.passwordResetSent && !editingAddress) {
     return (
       <div className="flex flex-col gap-3" role="status" aria-live="polite">
         <h2 className="text-lg font-semibold">Check your email</h2>
@@ -27,12 +35,23 @@ export function ForgotPasswordForm() {
           If an account matches that address, we sent a password-reset link. It
           is single use and expires in an hour.
         </p>
+        <Button
+          type="button"
+          variant="outline"
+          onClick={() => setEditingAddress(true)}
+        >
+          Use a different address
+        </Button>
       </div>
     );
   }
 
   return (
-    <form action={formAction} className="flex flex-col gap-4">
+    <form
+      action={formAction}
+      onSubmit={() => setEditingAddress(false)}
+      className="flex flex-col gap-4"
+    >
       <div className="flex flex-col gap-2">
         <Label htmlFor="email">Email</Label>
         <Input

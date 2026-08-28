@@ -4,7 +4,7 @@ End-to-end tests for RealtyWorks. Playwright drives a real browser against the
 running app to verify user-facing behavior.
 
 **Current scope (complete since 2026-08-03):** the boot smoke test plus the
-whole Phase 3 vertical slice — 23 specs across four files, all against a
+whole Phase 3 vertical slice — 24 specs across four files, all against a
 **real, seeded Supabase stack**:
 
 | File | Specs | Covers |
@@ -220,7 +220,7 @@ way a person would.
 **One spec calls `test.slow()`**: the redirect-guard spec mints nine invites and
 opens nine browser contexts — eight hostile payloads plus the legitimate
 deep-link — which is past the 30s default. `playwright.config.ts`
-sets no per-test timeout on purpose — the default is right for the other 22, and a
+sets no per-test timeout on purpose — the default is right for the other 23, and a
 global bump would hide a genuinely hung spec. The mailbox poll in
 `mailbox.ts` carries its own 15s budget rather than leaning on the test timeout,
 so a missing email reports as "no auth email reached Mailpit" instead of

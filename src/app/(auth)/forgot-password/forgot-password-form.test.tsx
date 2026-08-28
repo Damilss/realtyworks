@@ -1,4 +1,6 @@
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+
 import type { AuthFormState } from "@/server/actions/auth";
 
 import { ForgotPasswordForm } from "./forgot-password-form";
@@ -43,6 +45,24 @@ describe("ForgotPasswordForm", () => {
     ).toBeInTheDocument();
     expect(screen.getByText(/if an account matches/i)).toBeInTheDocument();
     expect(screen.queryByLabelText("Email")).not.toBeInTheDocument();
+  });
+
+  // Sharper here than on signup: the panel cannot echo the address without
+  // becoming the oracle its wording avoids, so a typo leaves nothing to notice.
+  it("hands the form back so a mistyped address can be corrected", async () => {
+    renderWith({
+      passwordResetSent: true,
+      values: { email: "me@example.tst" },
+    });
+
+    await userEvent.click(
+      screen.getByRole("button", { name: "Use a different address" }),
+    );
+
+    expect(screen.getByLabelText("Email")).toHaveValue("me@example.tst");
+    expect(
+      screen.queryByRole("heading", { name: "Check your email" }),
+    ).not.toBeInTheDocument();
   });
 
   it("disables the request while it is pending", () => {
