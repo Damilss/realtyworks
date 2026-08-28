@@ -1,3 +1,5 @@
+import { fileURLToPath } from "node:url";
+
 import { defineConfig } from "vitest/config";
 
 export default defineConfig({
@@ -9,10 +11,12 @@ export default defineConfig({
     alias: {
       // See tests/unit/server-only-stub.ts for why this is aliased rather than
       // enabling the `react-server` resolve condition.
-      "server-only": new URL(
-        "./tests/unit/server-only-stub.ts",
-        import.meta.url,
-      ).pathname,
+      // fileURLToPath, not .pathname: a URL path is not a filesystem path —
+      // it keeps percent-encoding (a checkout under a directory with a space)
+      // and the leading slash on a Windows drive letter (/C:/...).
+      "server-only": fileURLToPath(
+        new URL("./tests/unit/server-only-stub.ts", import.meta.url),
+      ),
     },
   },
   test: {
