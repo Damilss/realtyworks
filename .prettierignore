@@ -12,3 +12,9 @@ next-env.d.ts
 # Prettier doesn't read — without this line, format:check fails locally
 # whenever the local stack has run)
 supabase/.temp/
+
+# Istanbul's generated coverage report (issue #28) — same reason as above.
+# It happens to be Prettier-clean today, so leaving it out would work until an
+# Istanbul version bump silently broke format:check for anyone who had run
+# coverage locally.
+coverage/

@@ -65,9 +65,14 @@ jobs:
         if: ${{ !cancelled() }}
         run: pnpm run typecheck
 
-      - name: Unit tests
+      # Coverage is reported, never enforced (issue #28): the config sets no
+      # thresholds, so this step fails on a failing test and nothing else. The
+      # table lands in the log to show what is untested — the coverage `include`
+      # spans all of src/, so a module with no test at all appears as 0% rather
+      # than being absent from the report.
+      - name: Unit tests (with coverage report)
         if: ${{ !cancelled() }}
-        run: pnpm run test
+        run: pnpm run test:coverage
 
       - name: Build
         if: ${{ !cancelled() }}

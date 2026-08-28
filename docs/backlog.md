@@ -1158,10 +1158,43 @@ from all four places that carried it — `docs/tooling.md`, `docs/playwright.md`
 the comment above the `e2e` job's `Start Supabase stack` step, and
 `CLAUDE.md` §0 — along with the container counts stated alongside them.
 
-### 🟡 Coverage visibility (not a gate)
-**Why:** See what's tested without chasing a %.
-**Do:** `pnpm add -D @vitest/coverage-v8`; `pnpm test -- --coverage`; report in CI, no threshold yet.
-**Done when:** a coverage summary prints in CI logs.
+### ✅ Coverage visibility — reported, never enforced (2026-08-28, issue #28)
+`@vitest/coverage-v8` installed, configured in `vitest.config.ts`, and wired
+into the `verify` job's test step as `pnpm run test:coverage`. No thresholds,
+by design: the step fails on a failing test and on nothing else.
+
+**The default report answers the wrong question.** Out of the box, v8 coverage
+counts only the modules a test actually imported — the first run here printed a
+flattering **89.69%** across ~15 files, and every module with no test at all was
+simply absent from the table. That number describes the tests, not the app, and
+it is the one shape of report that structurally cannot show what is untested,
+which is this issue's entire stated purpose ("see what's tested without chasing
+a %"). Setting `coverage.include` to `src/**/*.{ts,tsx}` reports the whole
+source tree instead: **57.38% statements**, with `src/server/queries/` at 20.49%
+(`work-orders.ts`, `vendors.ts` and `properties.ts` all at 0) and every page
+component at 0. That is the honest picture, and it matches what the 🟢 "first
+real unit tests" entry already says is outstanding — the auth half is tested and
+the rest is not.
+
+Two exclusions, both narrow: the generated `src/lib/database.types.ts` (types
+only, no runtime to cover) and `src/components/ui/**` (vendored shadcn
+primitives — `CLAUDE.md` §5, "test what matters, not the framework").
+Reporters are `text` for the CI log and `html` for reading locally.
+
+**Ride-along fix:** the generated `coverage/` report needed adding to *both*
+`eslint.config.mjs` ignores and `.prettierignore`. `.gitignore` already covered
+it, but neither tool reads that file, so `pnpm lint` began reporting on
+Istanbul's vendored report scripts the moment anyone ran coverage. This is
+invisible in CI — lint runs before the step that creates the directory — so it
+would have been a local-only annoyance of exactly the kind already recorded for
+`supabase/.temp/`, which is in `.prettierignore` for the same reason. Prettier
+happened to pass on the generated JS, so only ESLint actually complained; the
+`.prettierignore` line is there because "happens to be clean today" is not a
+configuration, and an Istanbul version bump would quietly break `format:check`
+for anyone who had run coverage.
+
+**Done when (met):** the coverage summary prints in the CI log, and no
+threshold can fail a build.
 
 ### ✅ ESLint import boundary for `src/server/queries/` (2026-08-28, issue #29)
 Landed as `realtyworks/no-server-queries-in-client`, a ~50-line rule defined
@@ -1376,7 +1409,7 @@ PCI surface) is a separate go/no-go at the start of the phase.
 |---|---|---|
 | ~~`@commitlint/cli` + `@commitlint/config-conventional`~~ | ✅ Installed (PR #40) | Done |
 | ~~`@testing-library/react` + `dom` + `jest-dom` + `user-event` + `happy-dom`~~ | ✅ Component test DOM harness (Vite 8 native `@/*` paths, no plugin) | Done |
-| `@vitest/coverage-v8` | Coverage visibility | Medium |
+| ~~`@vitest/coverage-v8`~~ | ✅ Installed 2026-08-28 — coverage reported in CI, no thresholds (issue #28) | Done |
 | ~~`zod`~~ | ✅ Installed 2026-07-27 — shared client+server schemas per §3 (`src/schemas/auth.ts`) | Done |
 | ~~`@t3-oss/env-nextjs`~~ | ❌ Declined — `env.ts` + `next.config.ts` already fail fast and reject a non-publishable key (see ✅) | Closed |
 | `knip` | Dead deps/exports detector | Medium (optional) |

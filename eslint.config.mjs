@@ -76,6 +76,11 @@ const eslintConfig = defineConfig([
     // Triple-slash reference shim (like next-env.d.ts); the TS triple-slash
     // lint rule would otherwise flag it.
     "vitest.d.ts",
+    // Istanbul's generated HTML report (issue #28). Git-ignores it, ESLint
+    // does not read .gitignore, so without this `pnpm lint` reports on
+    // vendored report scripts as soon as anyone runs coverage locally. CI
+    // never sees it: lint runs before the coverage step creates it.
+    "coverage/**",
   ]),
   {
     files: ["src/**/*.{ts,tsx}"],

@@ -27,6 +27,7 @@ pnpm start              # serve the production build
 pnpm lint               # eslint (next core-web-vitals + typescript)
 pnpm typecheck          # tsc --noEmit (strict)
 pnpm test               # vitest run --passWithNoTests
+pnpm test:coverage      # same, + the v8 coverage table (what CI runs; no thresholds)
 pnpm test:e2e           # playwright auth-loop suite (also runs in CI; boots the dev
                         # server itself, but needs a seeded local stack + .env.local)
 pnpm format             # prettier --write .
@@ -56,7 +57,12 @@ Vitest only collects `src/**/*.{test,spec}.{ts,tsx}` and
 via the `@/*` alias (`@/* → ./src/*`, `tsconfig.json`).
 
 **CI** (`.github/workflows/ci.yml`, on PR + push to `main`/`dev`): the `verify` job
-runs lint → format:check → typecheck → test → build → audit. Each check step
+runs lint → format:check → typecheck → test → build → audit. The test step
+runs `test:coverage`, so the coverage table prints in the log; it is
+**visibility, not a gate** — no thresholds are configured, and the step fails
+only on a failing test (issue #28). Coverage `include` spans all of `src/`, so
+an untested module reports 0% instead of vanishing from the table the way
+Vitest's default (loaded modules only) would show it. Each check step
 after the first uses `if: !cancelled()` so one run reports *every* failure, not
 just the first. A parallel `e2e` job boots a local Supabase stack
 (`supabase start -x …` → `db reset` → write `.env.local` from `supabase
