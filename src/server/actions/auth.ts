@@ -307,17 +307,30 @@ export async function completeAccountSetup(
   // Write the profile first. If this fails, the unknown pending password is
   // untouched. If the later Auth update fails, retrying is safe: these two
   // profile columns are ordinary current-state data, not an audit record.
-  const { error: profileError } = await supabase
+  //
+  // Selected back rather than written blind: PostgREST answers an UPDATE that
+  // matched no row with 204 and a null error, so `profileError` alone cannot
+  // tell "written" apart from "no such row". That state is not hypothetical —
+  // getCurrentProfile() handles a live session whose profile row is missing —
+  // and this is the worst place to let it pass. The password below would still
+  // change and the one-time link would still be spent, so the user would be
+  // told setup succeeded, land on a dashboard that says their account is not
+  // configured, and have no link left to try again with.
+  const { data: updatedProfile, error: profileError } = await supabase
     .from("profiles")
     .update({
       full_name: parsed.data.fullName,
       phone: parsed.data.phone,
     })
-    .eq("id", user.id);
+    .eq("id", user.id)
+    .select("id")
+    .maybeSingle();
 
-  if (profileError) {
+  if (profileError || !updatedProfile) {
     console.error("[auth] Account setup could not update the profile", {
-      code: profileError.code,
+      code: profileError?.code,
+      // Separates a rejected write from one that silently matched nothing.
+      matchedRow: Boolean(updatedProfile),
     });
     return {
       error: "Could not finish setting up your account. Try again.",

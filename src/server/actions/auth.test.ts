@@ -31,9 +31,20 @@ type AuthStub = {
   updateUser: ReturnType<typeof vi.fn>;
 };
 
+const PROFILE_ID = "00000000-0000-0000-0000-000000000099";
+
+/**
+ * `profileResult` models the *selected-back* row, not just the error, because a
+ * zero-row UPDATE is what this action has to notice: PostgREST answers one with
+ * 204 and a null error, so `data: null, error: null` is a real response shape
+ * rather than a contrived one.
+ */
 function stubSupabase(
   overrides: Partial<AuthStub> = {},
-  profileResult: { error: null | { code: string } } = { error: null },
+  profileResult: {
+    data?: { id: string } | null;
+    error: null | { code: string };
+  } = { data: { id: PROFILE_ID }, error: null },
 ) {
   const auth: AuthStub = {
     getUser: vi.fn().mockResolvedValue({
@@ -47,7 +58,14 @@ function stubSupabase(
     updateUser: vi.fn().mockResolvedValue({ error: null }),
     ...overrides,
   };
-  const profileEq = vi.fn().mockResolvedValue(profileResult);
+  const profileMaybeSingle = vi.fn().mockResolvedValue({
+    data: profileResult.data ?? null,
+    error: profileResult.error,
+  });
+  const profileSelect = vi
+    .fn()
+    .mockReturnValue({ maybeSingle: profileMaybeSingle });
+  const profileEq = vi.fn().mockReturnValue({ select: profileSelect });
   const profileUpdate = vi.fn().mockReturnValue({ eq: profileEq });
   const from = vi.fn().mockReturnValue({ update: profileUpdate });
 
@@ -56,7 +74,12 @@ function stubSupabase(
     from,
   } as unknown as Awaited<ReturnType<typeof createClient>>);
 
-  return Object.assign(auth, { from, profileEq, profileUpdate });
+  return Object.assign(auth, {
+    from,
+    profileEq,
+    profileUpdate,
+    profileSelect,
+  });
 }
 
 function formData(fields: Record<string, string>) {
@@ -451,7 +474,7 @@ describe("completeAccountSetup", () => {
   });
 
   it("does not change the password when the profile write fails", async () => {
-    const auth = stubSupabase({}, { error: { code: "42501" } });
+    const auth = stubSupabase({}, { data: null, error: { code: "42501" } });
 
     const state = await completeAccountSetup({}, formData(validAccountSetup));
 
@@ -459,6 +482,22 @@ describe("completeAccountSetup", () => {
       "Could not finish setting up your account. Try again.",
     );
     expect(auth.updateUser).not.toHaveBeenCalled();
+  });
+
+  // PostgREST reports an UPDATE matching no row as 204 with a null error, so
+  // this used to sail through: the password changed, the one-time link was
+  // spent, and the user landed on a dashboard saying the account was not
+  // configured — with no link left to retry.
+  it("refuses setup when the profile update matched no row", async () => {
+    const auth = stubSupabase({}, { data: null, error: null });
+
+    const state = await completeAccountSetup({}, formData(validAccountSetup));
+
+    expect(state.error).toBe(
+      "Could not finish setting up your account. Try again.",
+    );
+    expect(auth.updateUser).not.toHaveBeenCalled();
+    expect(mockedRedirect).not.toHaveBeenCalled();
   });
 
   it("keeps non-secret details but never echoes either password on failure", async () => {
