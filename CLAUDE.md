@@ -259,8 +259,9 @@ Verify before assuming they exist:
   leaves its test green, the test does not cover the guard** — check by actually
   deleting it once. Reasoning: `docs/vendor-access.md` §6a; the testing half:
   `docs/playwright.md`.
-- **In place — email confirmations (2026-08-25, issue #93), the last gate
-  before Phase 4:** `[auth.email] enable_confirmations = true`, a custom
+- **In place — email confirmations (2026-08-25, issue #93)** — billed at the
+  time as the last gate before Phase 4, though PR review opened another on the
+  same endpoint (see the end of this bullet): `[auth.email] enable_confirmations = true`, a custom
   `supabase/templates/confirmation.html`, `signup` added to `/auth/confirm`'s
   `ALLOWED_TYPES`, `signUp()` returning a "check your email" state instead of
   redirecting, and `tests/e2e/mailbox.ts` reading the real mailbox. **No
@@ -303,6 +304,13 @@ Verify before assuming they exist:
   no link and cannot sign in. Commented out, no `smtp_*` field is emitted at all.
   The general rule: **in `config.toml`, "off" and "absent" are the same locally
   and opposite remotely** — reach for absent unless you mean to push the off.
+  **One 🟠 gate reopened here on 2026-08-28** (`docs/backlog.md`): `/auth/confirm`
+  redeems on `GET`, so a mail gateway that prefetches links spends the one-time
+  token — and takes the session cookie — before the recipient clicks. Reproduced
+  with `curl`. It predates this work (`magiclink`/`invite` have redeemed on GET
+  since 2026-08-03) and confirmations widened it to `signup`/`recovery`; it is
+  invisible locally because mailpit follows nothing, and live as soon as real
+  mail leaves Resend. Fix it before the public deploy, not after.
 - **Not yet created:** `supabase/functions/`, `src/app/api/`. Neither is a gap
   to fill on its own — edge functions are Phase 5 (§6 SMS), and the only route
   handler that exists is `src/app/auth/confirm/route.ts`, which is deliberately
