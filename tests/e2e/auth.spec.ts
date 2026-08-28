@@ -248,6 +248,49 @@ test("a rejected signup keeps the submitted email", async ({ page }) => {
   );
 });
 
+test("a mistyped signup address can be corrected without a reload", async ({
+  page,
+}, testInfo) => {
+  // `.tst` is the point: syntactically valid, so zod and GoTrue both accept it,
+  // and the confirmation panel then names an address whose link cannot arrive.
+  // Before the reset affordance the panel was terminal — no way back short of
+  // knowing to reload.
+  const typo = `reset-probe-w${testInfo.workerIndex}@realtyworks.tst`;
+  const fixed = `reset-probe-w${testInfo.workerIndex}@realtyworks.test`;
+
+  // Unlike the self-registration spec this does not need a fresh seed: neither
+  // address is ever confirmed, so a re-run is just GoTrue resending both links.
+  await page.goto("/signup");
+  await page.getByLabel("Email").fill(typo);
+  await page.getByRole("button", { name: "Create account" }).click();
+
+  await expect(
+    page.getByRole("heading", { name: "Check your email" }),
+  ).toBeVisible();
+  await expect(page.getByText(typo)).toBeVisible();
+
+  await page.getByRole("button", { name: "Use a different address" }).click();
+
+  // The form comes back carrying the typo, which is what makes it correctable
+  // rather than retypeable.
+  await expect(page.getByLabel("Email")).toHaveValue(typo);
+  await expect(
+    page.getByRole("heading", { name: "Check your email" }),
+  ).toHaveCount(0);
+
+  // The half the unit tests structurally cannot reach: they mock
+  // `useActionState`, so only a real browser proves the flag the panel sets is
+  // cleared on submit rather than suppressing the *next* panel.
+  await page.waitForTimeout(1_100); // [auth.email] max_frequency
+  await page.getByLabel("Email").fill(fixed);
+  await page.getByRole("button", { name: "Create account" }).click();
+
+  await expect(
+    page.getByRole("heading", { name: "Check your email" }),
+  ).toBeVisible();
+  await expect(page.getByText(fixed)).toBeVisible();
+});
+
 test("the dashboard is unreachable while signed out", async ({ page }) => {
   await page.goto("/dashboard");
 
