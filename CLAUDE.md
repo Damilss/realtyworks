@@ -160,8 +160,9 @@ Verify before assuming they exist:
 - **In place — auth loop (2026-07-27):** `src/schemas/auth.ts` (zod v4
   `loginSchema` / `signupSchema` / `normalizePhone`), `src/server/queries/`
   (`session.ts` — the DAL: `getSession`, `requireSession`, `getCurrentProfile`,
-  `isStaff`, `cache()`-memoized behind `import "server-only"`; `work-orders.ts`
-  — `listWorkOrders()`), `src/server/actions/auth.ts` (`signIn` · `signUp` ·
+  `isStaff`, plus `getVerifiedCaller` since 2026-08-30, `cache()`-memoized
+  behind `import "server-only"`; `work-orders.ts` — `listWorkOrders()`),
+  `src/server/actions/auth.ts` (`signIn` · `signUp` ·
   `signOut`), the `(auth)` route group (`/login` + `/signup`, `useActionState`
   client forms), the `(dashboard)` shell (name, role badge, sign-out **form
   POST**) and `/dashboard` (work-order list, plus a pending-access state for an
@@ -169,9 +170,18 @@ Verify before assuming they exist:
   primitives: `input`, `label`, `card`, `table`, `badge`; new deps: `zod`,
   `server-only`. **Auth checks live in pages and the DAL, never in a layout** —
   Next.js Partial Rendering means a layout check stops running on client-side
-  navigation between sibling routes. **Every `useActionState` form echoes its
-  non-sensitive submitted values back** in the action's state and reads them as
-  `defaultValue` (fixed 2026-08-01) — React resets an uncontrolled form after
+  navigation between sibling routes. **A mutating action resolves its caller
+  through the DAL too, with `getVerifiedCaller()`** (2026-08-30, PR review):
+  `getSession()` reads the JWT's claims, which is a *local* signature check
+  once a project uses asymmetric signing keys, so it admits a session revoked
+  up to `jwt_expiry` ago — fine for deciding what to render, wrong for
+  changing a credential or writing an actor id. `getVerifiedCaller()` asks the
+  Auth server instead. An action may import a `server-only` module:
+  `"use server"` means the client's module graph stops at the RPC reference,
+  which is what keeps the DAL usable from both halves of `src/server/`.
+  **Every `useActionState` form echoes its non-sensitive submitted values
+  back** in the action's state and reads them as `defaultValue` (fixed
+  2026-08-01) — React resets an uncontrolled form after
   *every* function action, error paths included, so anything not echoed is
   retyped after a failed submit. Passwords are never echoed; that one field
   clears. It holds for every form added since, and for the next one.

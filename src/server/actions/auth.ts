@@ -12,6 +12,7 @@ import {
   passwordResetSchema,
   signupSchema,
 } from "@/schemas/auth";
+import { getVerifiedCaller } from "@/server/queries/session";
 
 /**
  * Auth mutations.
@@ -25,6 +26,11 @@ import {
  * That reference is a public POST endpoint, so each action re-validates its
  * input. The form only rendering on /login is not a boundary
  * (node_modules/next/dist/docs/01-app/02-guides/server-actions.md, "Security").
+ *
+ * Importing `server-only` code from here is safe for the same reason: the
+ * client's module graph stops at the RPC reference, so nothing this file pulls
+ * in is ever bundled for the browser. That is what lets an action resolve its
+ * caller through the query-side DAL instead of growing a call of its own.
  */
 
 /**
@@ -287,22 +293,19 @@ export async function completeAccountSetup(
     return { fieldErrors: z.flattenError(parsed.error).fieldErrors, values };
   }
 
-  const supabase = await createClient();
-  const {
-    data: { user },
-    error: userError,
-  } = await supabase.auth.getUser();
+  // Verified against the Auth server, not against the token's signature — this
+  // is a credential change, so a revoked session must not still pass
+  // (`getVerifiedCaller`, src/server/queries/session.ts).
+  const caller = await getVerifiedCaller();
 
-  if (userError || !user) {
-    console.error("[auth] Account setup could not verify the session", {
-      code: userError?.code,
-      status: userError?.status,
-    });
+  if (!caller) {
     return {
       error: "Your setup link is no longer active. Request a new one.",
       values,
     };
   }
+
+  const supabase = await createClient();
 
   // Write the profile first. If this fails, the unknown pending password is
   // untouched. If the later Auth update fails, retrying is safe: these two
@@ -322,7 +325,7 @@ export async function completeAccountSetup(
       full_name: parsed.data.fullName,
       phone: parsed.data.phone,
     })
-    .eq("id", user.id)
+    .eq("id", caller.userId)
     .select("id")
     .maybeSingle();
 

@@ -14,6 +14,7 @@ import {
   recordAttachmentSchema,
   updateStatusSchema,
 } from "@/schemas/work-order";
+import { getVerifiedCaller } from "@/server/queries/session";
 
 /**
  * Work-order mutations — the write half of the Phase 3 vertical slice.
@@ -368,18 +369,21 @@ export async function recordAttachment(input: {
 
   const { workOrderId, attachmentId, storagePath, fileName, kind } =
     parsed.data;
-  const supabase = await createClient();
 
   // Resolved before anything else, because it is required and unfaked-able:
   // `uploaded_by` is NOT NULL with a FK to profiles and no default, so an
   // absent actor has to stop the request here rather than fail the insert after
-  // the object is already stored.
-  const { data: claims } = await supabase.auth.getClaims();
-  const uploadedBy = claims?.claims?.sub;
+  // the object is already stored. Verified against the Auth server rather than
+  // read off the token, because this id is written into a trail that is a
+  // product feature (CLAUDE.md §5) and nothing downstream re-checks it.
+  const caller = await getVerifiedCaller();
 
-  if (!uploadedBy) {
+  if (!caller) {
     return { error: "Your session has expired. Sign in again." };
   }
+
+  const uploadedBy = caller.userId;
+  const supabase = await createClient();
 
   // Access, decided by the database, through the caller's own session. This is
   // the same predicate the storage policy used to admit the object, asked again

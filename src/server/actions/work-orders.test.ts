@@ -369,14 +369,15 @@ function stubAttachment({
   adminResults?: QueryResult[];
 }) {
   const rpc = vi.fn(async () => ({ data: access, error: null }));
-  const getClaims = vi.fn(async () => ({
-    data: { claims: { sub: MANAGER_PROFILE_ID } },
+  const getUser = vi.fn(async () => ({
+    data: { user: { id: MANAGER_PROFILE_ID } },
+    error: null,
   }));
   const sessionInfo = vi.fn(async () => info);
 
   mockedCreateClient.mockResolvedValue({
     rpc,
-    auth: { getClaims },
+    auth: { getUser },
     storage: { from: () => ({ info: sessionInfo }) },
   } as unknown as Awaited<ReturnType<typeof createClient>>);
 
