@@ -559,7 +559,16 @@ realtyworks/
   (`realtyworks/no-server-queries-in-client`, 2026-08-28, issue #29) is scoped
   to `queries/` and fires only inside a `"use client"` module. It allows
   `import type`, which is how all five client components that name a query
-  module reach their types — those imports are erased before bundling.
+  module reach their types — those imports are erased before bundling. It
+  matches by **resolving** the specifier rather than reading its text, so an
+  alias and the relative path to the same file are one case, and it covers
+  every node that pulls a module in: static import, dynamic `import()`,
+  `export … from`, `export * from`, and `require()` (2026-09-01, PR review —
+  a text-prefix check on `ImportDeclaration` alone missed all four of the
+  others). It is not the boundary and never was: `server-only` fails
+  `next build` for every one of these, verified against a real build. The rule
+  buys that same failure earlier, with a message that names the boundary —
+  which is worth nothing for a shape it does not match.
 - `src/schemas/` (zod) is imported by both client and server: validate in both,
   trust only the server. Schemas do NOT live in `src/server/`.
 - `database.types.ts` is generated via `supabase gen types typescript`.
