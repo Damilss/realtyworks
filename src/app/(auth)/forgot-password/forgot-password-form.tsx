@@ -27,7 +27,14 @@ export function ForgotPasswordForm() {
    */
   const [editingAddress, setEditingAddress] = useState(false);
 
-  if (state.passwordResetSent && !editingAddress) {
+  // `!pending` for the same reason as the signup form, and the consequence is
+  // worse here: `useActionState` holds the previous result across the next
+  // submission, so without it the panel returns the instant a corrected address
+  // is submitted and states that a reset link was sent — before the request that
+  // would send it has returned. This panel names no address, so there is nothing
+  // on screen to contradict it, and its live "Use a different address" button
+  // would restore the stale email over the correction just typed.
+  if (state.passwordResetSent && !editingAddress && !pending) {
     return (
       <div className="flex flex-col gap-3" role="status" aria-live="polite">
         <h2 className="text-lg font-semibold">Check your email</h2>

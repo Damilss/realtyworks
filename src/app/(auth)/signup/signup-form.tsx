@@ -30,7 +30,17 @@ export function SignupForm() {
   // The account exists but has no session: `[auth.email] enable_confirmations`
   // is on, so there is nothing to redirect to yet. An address whose confirmation
   // is still outstanding lands here too; the wording deliberately fits both.
-  if (state.confirmationSent && !editingAddress) {
+  //
+  // `!pending` is what stops the reset above from undoing itself. `useActionState`
+  // keeps the *previous* result for the whole of the next submission, so clearing
+  // `editingAddress` on submit re-satisfies this condition immediately: the old
+  // panel returns while the corrected address is still in flight, naming the typo
+  // the user just fixed and asserting a link was sent that has not been. Its
+  // "Use a different address" button is live in that window too, and would hand
+  // back a form whose `defaultValue` is the stale echoed email — discarding the
+  // correction. A panel is a claim about a settled result, and `pending` is
+  // precisely "not settled yet"; the form stays up and reports its own progress.
+  if (state.confirmationSent && !editingAddress && !pending) {
     return (
       <div className="flex flex-col gap-3" role="status" aria-live="polite">
         <h2 className="text-lg font-semibold">Check your email</h2>

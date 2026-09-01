@@ -72,4 +72,39 @@ describe("ForgotPasswordForm", () => {
       screen.getByRole("button", { name: "Sending link…" }),
     ).toBeDisabled();
   });
+
+  // Same defect as the signup form, stated more strongly here: this panel claims
+  // a reset link was sent, so bringing it back while the corrected address is
+  // still in flight asserts something that has not happened yet — and the panel
+  // names no address, so nothing on screen contradicts it. Delete `&& !pending`
+  // from forgot-password-form.tsx and this fails.
+  it("keeps the form up while a corrected address is still in flight", async () => {
+    const stale: AuthFormState = {
+      passwordResetSent: true,
+      values: { email: "me@example.tst" },
+    };
+
+    renderWith(stale);
+
+    await userEvent.click(
+      screen.getByRole("button", { name: "Use a different address" }),
+    );
+
+    // Submitting starts the action: the state is still the previous result and
+    // `pending` flips true. That pair is the whole bug.
+    useActionState.mockReturnValue([stale, vi.fn(), true]);
+    await userEvent.click(
+      screen.getByRole("button", { name: "Send password-reset link" }),
+    );
+
+    expect(
+      screen.queryByRole("heading", { name: "Check your email" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Use a different address" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Sending link…" }),
+    ).toBeDisabled();
+  });
 });

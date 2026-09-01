@@ -95,4 +95,40 @@ describe("SignupForm", () => {
       screen.queryByRole("heading", { name: "Check your email" }),
     ).not.toBeInTheDocument();
   });
+
+  // The correction is only worth anything if it survives being submitted.
+  // `useActionState` keeps the *previous* result for the whole of the next
+  // submission, so clearing `editingAddress` on submit re-satisfies the panel's
+  // condition straight away — bringing back a panel that names the typo, over a
+  // request that has not returned, with a live button that would restore the
+  // stale address. Delete `&& !pending` from signup-form.tsx and this fails.
+  it("keeps the form up while a corrected address is still in flight", async () => {
+    const stale: AuthFormState = {
+      confirmationSent: true,
+      values: { email: "new@realtyworks.tst" },
+    };
+
+    renderWith(stale);
+
+    await userEvent.click(
+      screen.getByRole("button", { name: "Use a different address" }),
+    );
+
+    // Submitting starts the action: the state is still the previous result and
+    // `pending` flips true. That pair is the whole bug.
+    useActionState.mockReturnValue([stale, vi.fn(), true]);
+    await userEvent.click(
+      screen.getByRole("button", { name: "Create account" }),
+    );
+
+    expect(
+      screen.queryByRole("heading", { name: "Check your email" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Use a different address" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Creating account…" }),
+    ).toBeDisabled();
+  });
 });
