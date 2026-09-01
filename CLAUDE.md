@@ -348,6 +348,47 @@ Verify before assuming they exist:
   since 2026-08-03) and confirmations widened it to `signup`/`recovery`; it is
   invisible locally because mailpit follows nothing, and live as soon as real
   mail leaves Resend. Fix it before the public deploy, not after.
+- **In place — verified account setup + password recovery (2026-08-26,
+  `defb1bd`):** `src/app/(auth)/account-setup/` and
+  `src/app/(auth)/forgot-password/` (a page + `useActionState` form each),
+  `accountSetupSchema` / `passwordResetSchema` in `src/schemas/auth.ts`,
+  `completeAccountSetup` + `requestPasswordReset` in
+  `src/server/actions/auth.ts`, `supabase/templates/recovery.html` registered at
+  `[auth.email.template.recovery]`, and `recovery` added to both `ALLOWED_TYPES`
+  and `ACCOUNT_SETUP_TYPES` in `/auth/confirm`. `/login` links to
+  `/forgot-password`. **No migration** — `profiles` already had the columns and
+  the policies. Four things worth carrying forward.
+
+  **`/signup` collects an email and nothing else.** The account it creates holds
+  a random 32-byte password (`pendingAccountPassword()`) that is never returned,
+  logged, or shown, so a pre-confirmation account is unreachable by password and
+  every authoritative value is chosen at `/account-setup` by whoever proved they
+  hold the mailbox. That is what makes GoTrue's ambiguous answer to a repeat
+  signup safe to treat as one case: a resend for an unconfirmed address does not
+  replace the first password or metadata, and here there is nothing
+  authoritative for it to fail to replace.
+
+  **Recovery re-enters the same boundary.** A `recovery` token redeems at
+  `/auth/confirm` and lands on `/account-setup`, so losing the confirmation
+  session is not a lockout — the second half of the reason `/signup` never sets
+  a password.
+
+  **The profile UPDATE is selected back, not written blind.** PostgREST answers
+  an UPDATE that matched no row with 204 and a null error, so `profileError`
+  alone cannot tell "written" from "no such row" — and that state is not
+  hypothetical, since `getCurrentProfile()` already handles a live session whose
+  profile row is missing. Missing it here would spend the one-time link, change
+  the password anyway, and land the user on a dashboard saying their account is
+  not configured, with no link left to retry.
+
+  **`/account-setup` is a default destination, not an enforced one** — a 🟡 in
+  `docs/backlog.md`. `/auth/confirm` reads `type` from the caller's own query
+  string, and GoTrue does not bind a token to the type used to redeem it, so the
+  holder can rewrite `type` and land on `next` instead. That is a bypassable
+  guardrail, not an authorization bypass — it mints no session the holder could
+  not already get, and `completeAccountSetup()` re-resolves the caller through
+  `getVerifiedCaller()` regardless. Do not add a check that reads `type` and
+  call it enforcement.
 - **Not yet created:** `supabase/functions/`, `src/app/api/`. Neither is a gap
   to fill on its own — edge functions are Phase 5 (§6 SMS), and the only route
   handler that exists is `src/app/auth/confirm/route.ts`, which is deliberately
@@ -494,7 +535,7 @@ realtyworks/
 ├── public/
 ├── src/
 │   ├── app/                        # App Router
-│   │   ├── (auth)/                 # route group: login, signup
+│   │   ├── (auth)/                 # route group: login, signup, account-setup, forgot-password
 │   │   ├── (dashboard)/            # route group: authed app shell (work orders, vendors)
 │   │   ├── auth/confirm/route.ts   # redeems a magic link → session cookies
 │   │   ├── api/                    # route handlers (webhooks etc.) — not created yet
@@ -521,7 +562,7 @@ realtyworks/
 │   └── proxy.ts                    # Next 16 root convention (was middleware.ts)
 ├── supabase/
 │   ├── migrations/                 # timestamped SQL — SOURCE OF TRUTH (RLS ships with its table)
-│   ├── templates/                  # confirmation.html — signup mail points at /auth/confirm
+│   ├── templates/                  # confirmation.html · recovery.html — both point at /auth/confirm
 │   ├── functions/                  # edge functions (not created until needed)
 │   ├── tests/                      # pgTAP RLS/guard suite — `pnpm exec supabase test db`
 │   ├── seed.sql                    # 3 test users + sample data (db reset loads it)
