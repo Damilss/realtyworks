@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useState } from "react";
+import { useActionState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { FieldError, FormError } from "@/components/ui/form-feedback";
@@ -11,6 +11,8 @@ import {
   type AuthFormState,
 } from "@/server/actions/auth";
 
+import { useCorrectableAddress } from "../use-correctable-address";
+
 const initialState: AuthFormState = {};
 
 export function ForgotPasswordForm() {
@@ -19,22 +21,16 @@ export function ForgotPasswordForm() {
     initialState,
   );
 
-  /**
-   * Same terminal-panel problem as the signup form, and sharper here: this
-   * panel cannot name the address it sent to without becoming the account
-   * oracle the wording exists to avoid, so a typo leaves nothing on screen to
-   * notice. Handing the form back is the only correction available.
-   */
-  const [editingAddress, setEditingAddress] = useState(false);
+  // Sharper here than on /signup: this panel cannot name the address it sent to
+  // without becoming the account oracle its wording exists to avoid, so a typo
+  // leaves nothing on screen to notice and handing the form back is the only
+  // correction available. Mechanism and rationale: use-correctable-address.ts.
+  const { showPanel, editAddress, formProps } = useCorrectableAddress(
+    state.passwordResetSent,
+    pending,
+  );
 
-  // `!pending` for the same reason as the signup form, and the consequence is
-  // worse here: `useActionState` holds the previous result across the next
-  // submission, so without it the panel returns the instant a corrected address
-  // is submitted and states that a reset link was sent — before the request that
-  // would send it has returned. This panel names no address, so there is nothing
-  // on screen to contradict it, and its live "Use a different address" button
-  // would restore the stale email over the correction just typed.
-  if (state.passwordResetSent && !editingAddress && !pending) {
+  if (showPanel) {
     return (
       <div className="flex flex-col gap-3" role="status" aria-live="polite">
         <h2 className="text-lg font-semibold">Check your email</h2>
@@ -42,11 +38,7 @@ export function ForgotPasswordForm() {
           If an account matches that address, we sent a password-reset link. It
           is single use and expires in an hour.
         </p>
-        <Button
-          type="button"
-          variant="outline"
-          onClick={() => setEditingAddress(true)}
-        >
+        <Button type="button" variant="outline" onClick={editAddress}>
           Use a different address
         </Button>
       </div>
@@ -54,11 +46,7 @@ export function ForgotPasswordForm() {
   }
 
   return (
-    <form
-      action={formAction}
-      onSubmit={() => setEditingAddress(false)}
-      className="flex flex-col gap-4"
-    >
+    <form action={formAction} {...formProps} className="flex flex-col gap-4">
       <div className="flex flex-col gap-2">
         <Label htmlFor="email">Email</Label>
         <Input
