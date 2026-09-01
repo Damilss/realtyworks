@@ -459,6 +459,16 @@ and silently dropped. It now falls back to `raw_user_meta_data ->> 'phone'`
 (`auth.users.phone` still wins when set), and `nullif(trim(...), '')` stops a
 whitespace-only name or phone from satisfying the length CHECKs.
 
+**The phone fallback is dormant as of 2026-08-31** and this entry is history,
+not current behaviour. Signup narrowed to an email address alone, so `signUp()`
+sends no `options.data`; `inviteVendor`'s `admin.createUser` — the only other
+inserter of an `auth.users` row — sends `user_metadata.full_name` and no phone.
+The number now reaches `profiles` through `completeAccountSetup()`, which
+UPDATEs the row after `/auth/confirm` redeems the link. The branch is kept
+rather than reverted: it is free, still correct, and `[auth.sms] enable_signup`
+(Phase 5) is what would make it live again. No new migration — editing a merged
+one is forbidden (CLAUDE.md §5) and there is no behaviour to change.
+
 **CI changed with it.** The `e2e` job — now *E2E (Playwright auth loop)*,
 `timeout-minutes: 20` — boots a real stack (`supabase start -x …` → `db reset` →
 `.env.local` written from `supabase status -o env | grep '^NEXT_PUBLIC_'`). Its

@@ -190,17 +190,28 @@ Verify before assuming they exist:
   `vendors` row, so `current_vendor_id()` is NULL and every vendor-scoped
   policy arm returns nothing (pinned by
   `supabase/tests/03_signup_defaults.test.sql`). Forward migration
-  `20260727140000_handle_new_user_phone_from_metadata.sql` makes
-  `handle_new_user()` read the signup form's phone out of `raw_user_meta_data`
-  (`auth.users.phone` still wins when set) and store whitespace-only name/phone
-  as NULL. One accepted risk remains, in `docs/backlog.md`: there is no
+  `20260727140000_handle_new_user_phone_from_metadata.sql` taught
+  `handle_new_user()` to fall back to `raw_user_meta_data ->> 'phone'`
+  (`auth.users.phone` still wins when set) and to store whitespace-only
+  name/phone as NULL. **The phone half of that fallback is now dormant**
+  (2026-08-31): `/signup` collects an email and nothing else, so `signUp()`
+  sends no `options.data` at all, and the only other account-creating path —
+  `inviteVendor`'s `admin.createUser` — sends `user_metadata.full_name` and no
+  phone. Name and phone are collected at `/account-setup` after the emailed
+  link is followed, and `completeAccountSetup()` writes them to `profiles`
+  directly; the trigger is `after insert on auth.users`, so the
+  `updateUser({ data })` it also makes never reaches it. Leave the fallback in
+  place — it is free, it stays correct, and SMS signup (`[auth.sms]
+  enable_signup`, Phase 5) is the path that would make it live again — but do
+  not describe it as the route a phone travels today. The `full_name` half is
+  still live, through the invite. One accepted risk remains, in
+  `docs/backlog.md`: there is no
   CAPTCHA, and `[auth.rate_limit] sign_in_sign_ups` is the only brake. (The
   other, `enable_confirmations = false`, was closed 2026-08-25 — see the email
-  confirmations bullet below.) One known **defect**
-  is filed alongside it (nobody chose this one): `signOut()` passes no
-  options, and auth-js defaults that to **global** scope, so signing out on one
-  device revokes the account's sessions everywhere. It should pass
-  `{ scope: "local" }`.
+  confirmations bullet below.) The `signOut()` global-scope defect filed
+  alongside it is **fixed** (2026-08-25, issues #92/#98): the action now passes
+  `{ scope: "local" }`, so signing out on one device no longer revokes the
+  account's sessions everywhere.
 - **In place — staff write path (2026-08-02):** `src/schemas/work-order.ts`,
   `src/server/actions/work-orders.ts` (`createWorkOrder` · `assignVendor` ·
   `addNote`), `src/server/queries/` (`properties.ts` · `vendors.ts`, plus

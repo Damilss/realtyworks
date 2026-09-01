@@ -7,6 +7,14 @@
 --
 -- Identity simulation matches 01/02: request.jwt.claims carries the sub, and
 -- queries run as the `authenticated` Postgres role.
+--
+-- These fixtures INSERT into auth.users directly, so they pin the trigger's
+-- contract rather than any particular caller of it. That distinction matters
+-- for the phone assertions below: since 2026-08-31 no application path writes
+-- `raw_user_meta_data.phone` at insert time — `/signup` submits an email alone
+-- and `inviteVendor` sends only `full_name` — so the fallback they cover is
+-- dormant, kept for `[auth.sms] enable_signup` in Phase 5. A green run here is
+-- not evidence that a signup form still sends a phone.
 
 begin;
 
@@ -94,13 +102,13 @@ select is(
   'a signup with no role metadata defaults to vendor'
 );
 
--- ── name and phone from the signup form ────────────────────────────────────
+-- ── name and phone as handle_new_user() resolves them ──────────────────────
 
 select is(
   (select phone from public.profiles
    where id = '00000000-0000-0000-0000-0000000000b3'),
   '+15551230098',
-  'phone submitted through signUp() metadata reaches the profile'
+  'a phone in raw_user_meta_data reaches the profile (dormant fallback)'
 );
 
 select is(

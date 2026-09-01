@@ -173,8 +173,9 @@ enable_refresh_token_rotation = true
 # Requires enable_refresh_token_rotation = true.
 refresh_token_reuse_interval = 10
 # Allow/disallow new user signups to your project.
-# Open to self-registration since 2026-07-27 (was invite-only): /signup creates an account with
-# name, email, password, and phone. A self-registration is INERT — handle_new_user() reads the
+# Open to self-registration since 2026-07-27 (was invite-only): /signup takes an email address and
+# nothing else — the name, phone, and password are collected at /account-setup once the emailed
+# confirmation link proves the address. A self-registration is INERT — handle_new_user() reads the
 # role only from raw_app_meta_data (server-set), never from the client's raw_user_meta_data, so
 # every self-registration is a 'vendor', and a vendor with no `vendors` row resolves
 # current_vendor_id() to NULL and can read nothing. Staff roles still come only from a
