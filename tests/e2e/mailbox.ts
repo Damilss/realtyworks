@@ -59,10 +59,24 @@ async function mailpitJson<T>(path: string, init?: RequestInit): Promise<T> {
   return (await response.json()) as T;
 }
 
+/**
+ * The search path for one recipient, shared by the reader and the cleaner so
+ * they cannot drift apart on what "addressed to `email`" means.
+ *
+ * Mailpit matches `to:` as a **substring**, not an equality — verified against
+ * the running stack, `to:sem-a@realtyworks.test` also returns mail addressed to
+ * `xsem-a@realtyworks.test`, and `to:realtyworks.test` returns every address at
+ * the domain. The suite's own addresses do not collide because the `@` is part
+ * of the query, so `selfreg-w1@…` cannot be a prefix of `selfreg-w10@…`. Keep
+ * that true when adding one: a new address that *contains* an existing one
+ * would have its mail read and deleted by the other spec.
+ */
+function addressedTo(email: string): string {
+  return `/api/v1/search?query=${encodeURIComponent(`to:${email}`)}`;
+}
+
 function search(email: string): Promise<SearchResponse> {
-  return mailpitJson<SearchResponse>(
-    `/api/v1/search?query=${encodeURIComponent(`to:${email}`)}`,
-  );
+  return mailpitJson<SearchResponse>(addressedTo(email));
 }
 
 /**
@@ -73,19 +87,23 @@ function search(email: string): Promise<SearchResponse> {
  * has already been spent. CI never hits it — the container is new each time —
  * which is exactly the kind of flake that only ever reproduces on the machine
  * you are working on.
+ *
+ * Deletes *through* the search endpoint rather than reading ids and posting them
+ * to /api/v1/messages. That is not a tidier spelling of the same thing: search
+ * is paged and its default page is 50, so the id-collecting version dropped the
+ * newest 50 and silently left everything older — which restores the very flake
+ * this function exists to prevent, and only on a mailbox that has had time to
+ * accumulate, i.e. never on the fresh container CI uses. Verified against the
+ * running stack both ways: 60 messages, id-collecting clear, 10 left and
+ * `waitForAuthLink` then returning one of them; 130 messages, one delete-by-
+ * search, 0 left.
+ *
+ * A Mailpit without this endpoint would 404 through `mailpit()` and fail the
+ * run loudly, which is the failure worth having — the truncating version was
+ * silent.
  */
 export async function clearMailbox(email: string): Promise<void> {
-  const { messages = [] } = await search(email);
-
-  if (messages.length === 0) {
-    return;
-  }
-
-  await mailpit("/api/v1/messages", {
-    method: "DELETE",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ IDs: messages.map((message) => message.ID) }),
-  });
+  await mailpit(addressedTo(email), { method: "DELETE" });
 }
 
 /**
