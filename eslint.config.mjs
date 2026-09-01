@@ -105,13 +105,24 @@ const serverQueriesBoundary = {
     }
 
     return {
+      // `directive` is set by the parser only for statements in the **directive
+      // prologue** — the leading run of bare string literals — which is the only
+      // place React and Next.js recognise "use client" at all. Reading it is
+      // therefore the whole check.
+      //
+      // Matching `expression.value` instead, as this did, marks a module as
+      // client code on any top-level `"use client";` anywhere in the body: after
+      // the imports, after a statement, in a string a codemod left behind. That
+      // is a *false* positive, and it lands on server modules — the ones whose
+      // runtime imports of src/server/queries are entirely correct — so it
+      // reports the boundary being respected.
+      //
+      // `.some()` over the whole body is still right with `directive`: the
+      // prologue may hold several, and `"use strict"; "use client";` is a real
+      // ordering. Nothing outside the prologue carries the property.
       Program(node) {
         isClientModule = node.body.some(
-          (statement) =>
-            statement.type === "ExpressionStatement" &&
-            (statement.directive === "use client" ||
-              (statement.expression.type === "Literal" &&
-                statement.expression.value === "use client")),
+          (statement) => statement.directive === "use client",
         );
       },
 

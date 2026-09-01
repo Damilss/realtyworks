@@ -139,4 +139,36 @@ describe("server/queries import boundary", () => {
       ),
     ).toEqual([]);
   });
+
+  // "use client" means something only in the directive prologue. A bare string
+  // anywhere else is an expression statement, and treating it as the directive
+  // reports a *server* module for an import that is entirely correct — the rule
+  // firing at the boundary being respected. Both fixtures below are server
+  // modules; neither may report.
+  it('ignores a stray "use client" string after the imports', async () => {
+    expect(
+      await lint(
+        'import { listWorkOrders } from "@/server/queries/work-orders";\n"use client";\nexport const x = listWorkOrders;\n',
+      ),
+    ).toEqual([]);
+  });
+
+  it('ignores a stray "use client" string after a statement', async () => {
+    expect(
+      await lint(
+        'const n = 1;\n"use client";\nimport { listWorkOrders } from "@/server/queries/work-orders";\nexport const x = [n, listWorkOrders];\n',
+      ),
+    ).toEqual([]);
+  });
+
+  // The other half of the same fix: narrowing to the prologue must not narrow to
+  // `body[0]`. A prologue can hold more than one directive, and this ordering is
+  // legal — a rule that only read the first statement would go quiet here.
+  it('still reports when "use client" follows another directive', async () => {
+    const messages = await lint(
+      '"use strict";\n"use client";\nimport { listWorkOrders } from "@/server/queries/work-orders";\nexport const x = listWorkOrders;\n',
+    );
+
+    expect(messages).toHaveLength(1);
+  });
 });
