@@ -87,10 +87,14 @@ Pick them off at your discretion.
   the CI `e2e` job now boots it deliberately — **eight containers, not nine**,
   with the three inert `-x` names finally corrected in the same change. Verified
   by deleting the flag and watching the spec fail. See ✅.
-- **`[auth.email.smtp]` written but disabled** — Resend, `enabled = false`, with
-  `env()` values documented in `.env.example`. Turning it on is a Phase 4
-  hosted-project step; flipping it in `config.toml` would route local dev and
-  the CI mailbox spec through a real provider.
+- **`[auth.email.smtp]` written but commented out** — Resend, with `env()`
+  values documented in `.env.example`. Commented rather than `enabled = false`
+  (corrected 2026-08-26, `f208f89`): the two are identical locally and opposite
+  remotely, because `supabase config push` maps a *present* smtp table with
+  `enabled = false` to `smtp_host = ""`, i.e. "disable custom SMTP". Turning it
+  on is a Phase 4 hosted-project step, done in the dashboard; uncommenting it
+  here would route local dev and the CI mailbox spec through a real provider.
+  Full reasoning: the Phase 4 auth tail below, and `supabase/config.toml`.
 - **Cross-checked against the GitHub issue list 2026-08-07** (15 open). Four
   filed issues had no entry here and were added to 🟡: the Tailwind v4 full-height
   regression (#86/#89), the prettier-plugin-tailwindcss v4 options (#87), the
@@ -143,8 +147,11 @@ to `ALLOWED_TYPES` rather than a new endpoint. What shipped:
   the refusal *before* the success: no `/dashboard`, then a refused sign-in,
   then the emailed link, then the pending-access state.
 - The CI `e2e` `-x` list corrected in the same change (see the 🟡 below).
-- `[auth.email.smtp]` written for **Resend** with `enabled = false`, and
-  `[auth.rate_limit] email_sent` raised 2 → 30.
+- `[auth.email.smtp]` written for **Resend** and left **commented out**, and
+  `[auth.rate_limit] email_sent` raised 2 → 30. (It first landed as
+  `enabled = false`; `f208f89` corrected it the next day. Present-and-false is
+  exactly what a later `config push` turns into `smtp_host = ""`, so the shape
+  matters more than the value.)
 
 **Four things that were wrong in the plan and right on the stack.** Every one
 came from running it rather than reading about it (`AGENTS.md`).
@@ -175,9 +182,11 @@ flipped back to `false`, the stack restarted, and the self-registration spec
 re-run: it fails on the "Check your email" heading. The spec covers the gate.
 
 **Still owed at the Phase 4 deploy** (moved to the Phase 4 entry, not dropped):
-flip `[auth.email.smtp] enabled = true` on the hosted project with a verified
-sender domain, point `site_url` / `additional_redirect_urls` at the deployed
-origin, and confirm the custom template actually applied remotely.
+turn `[auth.email.smtp]` on **through the hosted project's dashboard** — not by
+uncommenting it in `config.toml`, which is what a later `config push` would then
+undo (see the Phase 4 auth tail) — with a verified sender domain, point
+`site_url` / `additional_redirect_urls` at the deployed origin, and confirm the
+custom template actually applied remotely.
 
 ### ✅ nanoid high advisory cleared again — the patched floor moved (2026-08-24, issue #110)
 The blocking `pnpm audit` gate went red on **GHSA-2v37-7h3g-55p8**, the *same*
