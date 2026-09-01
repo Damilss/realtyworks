@@ -4,13 +4,13 @@ End-to-end tests for RealtyWorks. Playwright drives a real browser against the
 running app to verify user-facing behavior.
 
 **Current scope (complete since 2026-08-03):** the boot smoke test plus the
-whole Phase 3 vertical slice — 23 specs across four files, all against a
+whole Phase 3 vertical slice — 24 specs across four files, all against a
 **real, seeded Supabase stack**:
 
 | File | Specs | Covers |
 | --- | --- | --- |
 | `smoke.spec.ts` | 1 | the app boots and serves a page |
-| `auth.spec.ts` | 8 | the auth loop: sign in as each seeded role, self-register, wrong password, rejected signup keeps its fields, signed-out redirect, root redirect, sign out |
+| `auth.spec.ts` | 8 | the auth loop: sign in as each seeded role, duplicate-unconfirmed signup → verified setup → recovery, wrong password, rejected signup keeps its email, signed-out redirect, root redirect, sign out |
 | `work-orders.spec.ts` | 7 | the staff write path: create, assign, note (and the blank-note refusal), assignment making a job visible to its vendor, select state after a failed submit, a malformed id 404, a vendor refused the create form |
 | `vendor-loop.spec.ts` | 7 | the vendor half: invite → redeem a real magic link in a second browser context → status + photo; single use, the stale link cleared from the page on reassignment (UI only — see below), the off-site redirect refusal (eight payloads, each against its own real token — see below), and the two un-invitable vendor cases |
 
@@ -130,8 +130,9 @@ matched to `[auth] site_url` in `supabase/config.toml`. Cookies are scoped per
 host, and the two hostnames are different hosts to a browser: a session
 established through an auth redirect on one is invisible on the other. Nothing
 breaks today, because password sign-in sets the cookie on whatever host served
-the form — it breaks the moment OAuth or an email confirmation link sends the
-user through Supabase and back. `next.config.ts` carries a matching
+the form, and the confirmation link that landed with issue #93 goes to our own
+`/auth/confirm` on the same host rather than out through GoTrue. It breaks the
+moment OAuth sends the user through Supabase and back. `next.config.ts` carries a matching
 `allowedDevOrigins: ["127.0.0.1"]`, because the dev server initializes on
 `localhost` and otherwise warns on every run about cross-origin requests to
 dev-only assets.
@@ -166,9 +167,11 @@ pnpm exec playwright show-report             # open the HTML report from the las
 playwright.config.ts           # config: testDir, baseURL, browser, webServer auto-boot
 tests/e2e/                     # E2E specs (*.spec.ts)
 tests/e2e/smoke.spec.ts        # the app boots + serves a page
-tests/e2e/auth.spec.ts         # the auth loop: sign in as each seeded role, self-register,
-                               # wrong password, rejected signup keeps its fields,
-                               # signed-out redirect, root redirect, sign out
+tests/e2e/auth.spec.ts         # the auth loop: sign in as each seeded role, self-register
+                               # + repeat before confirmation, finish verified
+                               # setup, recover the password, rejected signup
+                               # keeps its email, signed-out/root redirects, sign out
+tests/e2e/mailbox.ts           # helper (NOT a spec): reads the local mailpit mailbox
 tests/e2e/work-orders.spec.ts  # the staff write path: create, assign, note (+ the
                                # blank-note refusal), a vendor seeing a job once
                                # assigned, select state after a failed submit,
@@ -179,10 +182,49 @@ tests/e2e/vendor-loop.spec.ts  # the vendor half: invite, redeem the link in a
                                # off-site redirect (real token per payload)
 ```
 
-**One spec calls `test.slow()`**: the redirect-guard spec mints seven invites and
-opens seven browser contexts, which is past the 30s default. `playwright.config.ts`
-sets no per-test timeout on purpose — the default is right for the other 22, and a
-global bump would hide a genuinely hung spec.
+### Reading the mailbox
+
+Since email confirmations went on (issue #93), signup and password recovery both
+depend on one-time links that exist only in email. `tests/e2e/mailbox.ts` reads
+those messages out of the local mail container so the spec can follow them the
+way a person would.
+
+- **The mailbox is Mailpit** (`[local_smtp]` in `supabase/config.toml`, web UI
+  and API on `http://127.0.0.1:54324`). The container is still *named*
+  `supabase_inbucket_<project>`; the name is the only thing left of Inbucket.
+- **The URL is a constant**, overridable with `MAILPIT_URL`, for the same reason
+  `baseURL` is hardcoded in `playwright.config.ts`. `supabase status -o env`
+  does print `MAILPIT_URL`, but nothing wires it into Playwright's environment —
+  the CI job writes `.env.local`, which Next reads and the test runner does not.
+- **`clearMailbox()` runs before signup and recovery.** `supabase db reset` empties
+  `auth.users` but not the mailbox, so a local re-run would otherwise find the
+  *previous* run's message and follow a token that has already been spent. CI
+  never hits this — its container is new each time — which makes it exactly the
+  kind of flake that only reproduces on your own machine.
+- **Do not edit `supabase/templates/*.html` with the stack running.** The
+  template is bind-mounted into Kong as a single file, so rewriting it on the
+  host orphans the container's copy and Kong 404s — GoTrue sends nothing, and
+  the failure surfaces at the next container restart rather than at the edit.
+  `supabase stop && supabase start` rebinds it; `db reset` does not. Troubleshooting
+  below has the diagnosis, and `tests/e2e/mailbox.ts`'s header has the mechanism.
+- **The link is matched out of the rendered body, not the template.** That is
+  what proves `{{ .TokenHash }}` actually interpolated and that the URL points
+  at `/auth/confirm` rather than GoTrue's `/auth/v1/verify`. Reading the
+  template file would prove neither.
+- **The spec reaches the reported resend path before success**: it submits the
+  same unconfirmed address twice, follows the newest email, and must land on
+  `/account-setup` before it can provide profile data or a password. It then
+  tears down the session and proves that password signs in. The same spec sends
+  and redeems a real recovery email, changes the password, and signs in again.
+
+**One spec calls `test.slow()`**: the redirect-guard spec mints nine invites and
+opens nine browser contexts — eight hostile payloads plus the legitimate
+deep-link — which is past the 30s default. `playwright.config.ts`
+sets no per-test timeout on purpose — the default is right for the other 23, and a
+global bump would hide a genuinely hung spec. The mailbox poll in
+`mailbox.ts` carries its own 15s budget rather than leaning on the test timeout,
+so a missing email reports as "no auth email reached Mailpit" instead of
+as an expired assertion on a heading.
 
 Test runners stay separated by directory: **Vitest** collects `src/**` and
 `tests/unit/**` (`vitest.config.ts`); **Playwright** owns `tests/e2e/`. They
@@ -218,6 +260,18 @@ test("home page loads", async ({ page }) => {
   stack looks exactly like an app bug.
 - **Missing seeded rows, or "account already exists"** — the database has
   drifted from the seed. `pnpm exec supabase db reset`, then re-run.
+- **"No auth email ... reached Mailpit", with confirmations on and the mail
+  container up** — the email templates are almost certainly stale-mounted.
+  Editing `supabase/templates/*.html` while the stack is running replaces the
+  file's inode, and the CLI bind-mounts each template as a single *file*, so Kong
+  goes on serving the old unlinked one and answers 404. GoTrue then sends no mail
+  at all — not late mail, none — and the spec times out waiting on a mailbox that
+  was never going to fill. Confirm with
+  `docker logs supabase_auth_realtyworks | grep templatemailer`; a
+  `status code 404` line is the tell. Fix with `supabase stop && supabase start`.
+  **`db reset` is not enough**: it restarts containers without recreating them,
+  so the mount is never rebuilt. CI cannot hit this — it starts fresh containers
+  from the committed templates and never edits them mid-run.
 - **Only `vendor-loop.spec.ts` fails, on "not configured on this server"** —
   `SUPABASE_SECRET_KEY` is missing from `.env.local`. The invite and the upload
   are service-role writes, so they are the only things that notice; every other
@@ -239,7 +293,7 @@ cached across runs on `~/.cache/ms-playwright`), then — since the auth loop
 landed — stands up a real database before testing:
 
 ```
-supabase start -x studio,imgproxy,edge-runtime,functions,analytics,vector,inbucket
+supabase start -x studio,imgproxy,edge-runtime,logflare,vector
 supabase db reset
 supabase status -o env … \
   | grep -E '^(NEXT_PUBLIC_|SECRET_KEY=)' \
@@ -278,15 +332,17 @@ Four things about that setup are load-bearing:
   it.** That job talks to Postgres directly and drops Kong, PostgREST and
   Realtime; this one drives the app over HTTP and needs all three. The shared
   rule is narrower than it looks: never exclude `storage-api`, and `db` is not
-  excludable at all. Two further things to know before editing this list.
-  `functions`, `analytics` and `inbucket` are **not valid `-x` values** and are
-  silently ignored, so logflare and mailpit boot regardless — the job runs nine
-  containers, not the seven the list implies. And `inbucket` (really `mailpit`)
-  is only *meant* to be gone while `[auth.email] enable_confirmations` is
-  `false`; turning confirmations on (backlog, required before the Phase 4 public
-  deploy) makes signup send mail and this job needs the mailbox back. That is
-  why correcting the inert names is a backlog item rather than a drive-by fix —
-  the two decisions are coupled.
+  excludable at all. Also **use the names the CLI validates, not the ones
+  `--help` prints** — a name off the validator's list is silently ignored rather
+  than rejected, which is how this list carried `functions`, `analytics` and
+  `inbucket` for weeks while logflare booted anyway (corrected 2026-08-25).
+- **`mailpit` is absent from the list on purpose, and that is new.** With
+  `[auth.email] enable_confirmations` on, signup sends real mail and the
+  self-registration spec reads the confirmation link out of the mailbox, so the
+  mail container is a **dependency** of this job. Eight containers boot:
+  postgres, gotrue, kong, postgrest, realtime, storage-api, postgres-meta,
+  mailpit. Note the naming trap when reading `docker ps` — the container is
+  called `supabase_inbucket_<project>` while its image is `mailpit`.
 
 `timeout-minutes: 20` caps a stack that never reaches healthy, same reasoning as
 the `db` job. Cold image pulls mean this is no longer a fast job — details in

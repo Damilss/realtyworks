@@ -4,14 +4,19 @@ import type { NextRequest } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 
 /**
- * Redeems a magic link and starts a session.
+ * Redeems an emailed token and starts a session.
  *
- * This is the vendor's whole login: staff mint a link with `inviteVendor`, the
- * vendor taps it, and lands here with a one-time `token_hash`. Exchanging that
- * for a session is a cookie write, which a Server Component cannot do — hence a
- * route handler. `createClient()` from `@/lib/supabase/server` is the right
- * client and needs no variant: its readonly-cookie guard only swallows the
- * Server Component case, so here `cookieStore.set()` genuinely writes.
+ * Three flows land here. It is the vendor's whole login — staff mint a link with
+ * `inviteVendor`, the vendor taps it, and arrives with a one-time `token_hash`
+ * — and since 2026-08-25 it is also where a self-registration confirms its
+ * email address (`supabase/templates/confirmation.html`, issue #93). Password
+ * recovery uses the same exchange and then enters authenticated account setup.
+ *
+ * Exchanging a token for a session is a cookie write, which a Server Component
+ * cannot do — hence a route handler. `createClient()` from
+ * `@/lib/supabase/server` is the right client and needs no variant: its
+ * readonly-cookie guard only swallows the Server Component case, so here
+ * `cookieStore.set()` genuinely writes.
  *
  * The tokens are single-use — a replayed `token_hash` comes back as "Email link
  * is invalid or has expired" — and expire after `[auth.email] otp_expiry`
@@ -21,10 +26,44 @@ import { createClient } from "@/lib/supabase/server";
 /**
  * The link types this endpoint will redeem. `type` arrives in the query string,
  * so it is caller-controlled; passing it straight through would let someone
- * redeem a `recovery` or `email_change` token at an endpoint that was never
- * reviewed for either.
+ * redeem an `email_change` token at an endpoint that was never reviewed for it.
+ *
+ * `signup` joined the list when email confirmations went on, and `recovery`
+ * joined when verified account setup moved behind this endpoint. `email_change`
+ * is still refused because that flow has different two-address confirmation
+ * semantics.
+ *
+ * **`ACCOUNT_SETUP_TYPES` is a default destination, not an enforced one.** It
+ * reads the caller's own query string, and GoTrue does not bind a token to the
+ * type used to redeem it — it looks the hash up in the column that type implies,
+ * and several types share a column. Verified against the running stack
+ * (2026-09-01), redeeming each token under a *different* type:
+ *
+ *   recovery token + `type=magiclink`  → accepted, session minted
+ *   signup token   + `type=invite`     → accepted, session minted
+ *   signup token   + `type=magiclink`  → refused (`otp_expired`)
+ *
+ * So the pairs that collide are the ones sharing storage — `recovery`/`magiclink`
+ * in `recovery_token`, `signup`/`invite` in `confirmation_token` — and each
+ * account-setup type has a non-setup partner. Whoever holds the link can edit
+ * `type` and land on `next` instead of `/account-setup`.
+ *
+ * That is a bypassable *guardrail*, and deliberately not relied on as a gate.
+ * Rewriting `type` cannot change which user the token belongs to, so it grants
+ * no session the holder could not already mint; `next` stays bounded by
+ * `safeNext` below; and nothing downstream treats "went through /account-setup"
+ * as authorization — `completeAccountSetup()` re-resolves the caller through
+ * `getVerifiedCaller()` and writes through RLS.
+ *
+ * What it does cost is the *guarantee*, and one consequence is filed in
+ * docs/backlog.md: a self-registration that skips setup keeps the unknown
+ * random password `signUp()` generated, so it is locked out once the session
+ * expires. Do not add a check here that reads `type` and calls it enforcement —
+ * for `recovery` there is nothing to enforce with, because a recovery token and
+ * a magic link are the same bytes in the same column.
  */
-const ALLOWED_TYPES = new Set(["magiclink", "invite"]);
+const ALLOWED_TYPES = new Set(["magiclink", "invite", "signup", "recovery"]);
+const ACCOUNT_SETUP_TYPES = new Set(["signup", "recovery"]);
 
 /**
  * Resolves `value` against `origin` and returns it as a bare path, or null if it
@@ -123,6 +162,10 @@ export async function GET(request: NextRequest) {
       status: error.status,
     });
     redirect("/login?error=invalid-link");
+  }
+
+  if (ACCOUNT_SETUP_TYPES.has(type)) {
+    redirect("/account-setup");
   }
 
   // Outside any try/catch: redirect() signals by throwing NEXT_REDIRECT.

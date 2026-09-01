@@ -173,15 +173,17 @@ enable_refresh_token_rotation = true
 # Requires enable_refresh_token_rotation = true.
 refresh_token_reuse_interval = 10
 # Allow/disallow new user signups to your project.
-# Open to self-registration since 2026-07-27 (was invite-only): /signup creates an account with
-# name, email, password, and phone. A self-registration is INERT — handle_new_user() reads the
+# Open to self-registration since 2026-07-27 (was invite-only): /signup takes an email address and
+# nothing else — the name, phone, and password are collected at /account-setup once the emailed
+# confirmation link proves the address. A self-registration is INERT — handle_new_user() reads the
 # role only from raw_app_meta_data (server-set), never from the client's raw_user_meta_data, so
 # every self-registration is a 'vendor', and a vendor with no `vendors` row resolves
 # current_vendor_id() to NULL and can read nothing. Staff roles still come only from a
 # server-side admin create/invite that sets app_metadata.app_role, or from set_user_role().
-# Two consequences of opening this, both tracked in docs/backlog.md: accounts can be created for
-# unowned email addresses while enable_confirmations = false below (must be on before the Phase 4
-# public deploy), and there is no CAPTCHA — [auth.rate_limit].sign_in_sign_ups is the only brake.
+# Opening this had two costs, both tracked in docs/backlog.md. The first is closed: since
+# 2026-08-25 [auth.email].enable_confirmations below is true, so registering an address you do
+# not own gets you an account you cannot sign in to. The second is open — there is no CAPTCHA,
+# and [auth.rate_limit].sign_in_sign_ups is the only brake.
 enable_signup = true
 # Allow/disallow anonymous sign-ins to your project.
 enable_anonymous_sign_ins = false
@@ -205,7 +207,27 @@ password_requirements = ""
 
 [auth.rate_limit]
 # Number of emails that can be sent per hour. Requires auth.email.smtp to be enabled.
-email_sent = 2
+# Raised from the CLI default of 2 when confirmations went on (2026-08-25): every signup now
+# sends mail, and the CI `e2e` job alone sends more than two per run. 30/hour is Supabase
+# Cloud's own default with custom SMTP.
+#
+# Read this as a BLAST RADIUS, not as a per-caller brake, and note the two limits on it
+# (both verified against the running stack on 2026-09-01, not read in a doc):
+#
+# 1. It is PROJECT-WIDE. Every other key in this block says "per IP address"; this one and
+#    sms_sent do not. /signup and /forgot-password draw on the same hourly pool, so a script
+#    hammering either one silently stops confirmation mail for real signups. That is the
+#    denial-of-service worth caring about here — not the mail itself.
+# 2. It does nothing LOCALLY. "Requires auth.email.smtp to be enabled" is literal, and the
+#    [auth.email.smtp] block below is commented out by design, so this cap is unenforced on
+#    the local stack: 34 consecutive POSTs to /auth/v1/recover for a seeded address all
+#    returned 200 and all 34 landed in mailpit. Nothing here is exercised by `pnpm test:e2e`.
+#
+# And nothing else covers those endpoints: sign_in_sign_ups (30 / 5 min / IP) does NOT apply
+# to /recover — the same 34-request probe never saw a 429 — and [auth.captcha] is off. The
+# per-address brake is [auth.email].max_frequency below, set to "1s". The mitigation is
+# tracked in docs/backlog.md under the CAPTCHA entry; do it before the public deploy.
+email_sent = 30
 # Number of SMS messages that can be sent per hour. Requires auth.sms to be enabled.
 sms_sent = 30
 # Number of anonymous sign-ins that can be made per hour per IP address. Requires enable_anonymous_sign_ins = true.
@@ -236,7 +258,12 @@ enable_signup = true
 # addresses. If disabled, only the new email is required to confirm.
 double_confirm_changes = true
 # If enabled, users need to confirm their email address before signing in.
-enable_confirmations = false
+# ON since 2026-08-25 (issue #93), the gate on the Phase 4 public deploy. While this was false
+# and [auth].enable_signup was true, anyone could register an address they did not own and be
+# signed in immediately — an address-squatting vector that src/server/actions/vendors.ts still
+# carries a mitigation for. The confirmation link is redeemed by our own /auth/confirm route
+# handler, not by GoTrue: see [auth.email.template.confirmation] below.
+enable_confirmations = true
 # If enabled, users will need to reauthenticate or have logged in recently to change their password.
 secure_password_change = false
 # Controls the minimum amount of time that must pass before sending another signup confirmation or password reset email.
@@ -246,15 +273,68 @@ otp_length = 6
 # Number of seconds before the email OTP expires (defaults to 1 hour).
 otp_expiry = 3600
 
-# Use a production-ready SMTP server
+# Production SMTP. Resend rather than the built-in service, which is rate-limited and explicitly
+# not for real users. Plain SMTP with no vendor SDK, so swapping providers is three values here
+# and CLAUDE.md §7 self-host stays mechanical.
+#
+# THIS BLOCK STAYS COMMENTED OUT — not `enabled = false`. Two reasons; the second is the
+# load-bearing one and is why the shape changed on 2026-08-25.
+#
+# 1. Local. `supabase start` reads this, so enabling it routes development mail — and the CI
+#    `e2e` job's mailbox spec — through a real provider, breaking both and sending real email
+#    from a test run. Local mail goes to mailpit instead ([local_smtp] above,
+#    http://127.0.0.1:54324). Commenting out is not a behaviour change locally: the CLI's own
+#    schema default for auth.email.smtp.enabled is already false.
+#
+# 2. Remote. `supabase config push` sends the WHOLE auth block as one Management API body, and
+#    the CLI maps a *present* smtp table with enabled=false to `smtp_host = ""` — which is how
+#    you DISABLE custom SMTP, not how you leave it alone. A present-and-false block therefore
+#    pushes "wipe custom SMTP" in the same request as `mailer_autoconfirm = false` (this file's
+#    enable_confirmations = true). The hosted project drops to the built-in mailer at 2
+#    emails/hour while confirmation mail is mandatory: signups succeed, no link arrives, and
+#    every new account is locked out with no error anywhere. Absent, the CLI emits no smtp_*
+#    field at all and a push leaves hosted SMTP untouched. Verified against the pinned CLI
+#    (2.109.1) by reading its config mapping, not inferred from the docs.
+#
+# So: turn SMTP on for the HOSTED project only, at the Phase 4 deploy, through the dashboard's
+# SMTP settings — and leave this commented so no later `config push` (a rate-limit tweak, a new
+# template, a CLI bump) silently reverts it. Managing it from this file instead means
+# uncommenting with `enabled = true` on the deploy branch ONLY, never merged back.
+#
+# Note the knock-on: the CLI also only pushes rate_limit_email_sent when the LOCAL config has
+# SMTP enabled, so [auth.rate_limit].email_sent above never reaches the hosted project on its
+# own — set it in the dashboard too (docs/backlog.md, Phase 4 auth tail).
+#
+# The two env() values are read by the Supabase CLI's substitution, not by Next — see
+# .env.example. Nothing local needs them while this block is commented out.
 # [auth.email.smtp]
 # enabled = true
-# host = "smtp.sendgrid.net"
-# port = 587
-# user = "apikey"
-# pass = "env(SENDGRID_API_KEY)"
-# admin_email = "admin@email.com"
-# sender_name = "Admin"
+# host = "smtp.resend.com"
+# port = 465
+# user = "resend"
+# pass = "env(SUPABASE_AUTH_SMTP_PASS)"
+# admin_email = "env(SUPABASE_AUTH_SMTP_ADMIN_EMAIL)"
+# sender_name = "RealtyWorks"
+
+# The signup confirmation email. GoTrue's default body is `{{ .ConfirmationURL }}`, which points
+# at its own /auth/v1/verify and hands the session back in a URL *fragment* — the implicit flow,
+# which a cookie-session app built on @supabase/ssr cannot consume. The template below points at
+# our own /auth/confirm instead, exactly like the vendor invite does
+# (buildInviteUrl() in src/server/actions/vendors.ts). See docs/vendor-access.md §6.
+#
+# NOTE the base directory: `content_path` under [auth.email.template.*] resolves from the PROJECT
+# ROOT, while [auth.email.notification.*] resolves from `supabase/`. The two commented examples
+# the CLI ships differ for exactly that reason; it is not a typo.
+[auth.email.template.confirmation]
+subject = "Confirm your RealtyWorks account"
+content_path = "./supabase/templates/confirmation.html"
+
+# Recovery needs the same cookie-session bridge as confirmation. The default
+# `{{ .ConfirmationURL }}` returns the session in a URL fragment, which this
+# server-rendered app cannot consume.
+[auth.email.template.recovery]
+subject = "Reset your RealtyWorks password"
+content_path = "./supabase/templates/recovery.html"
 
 # Uncomment to customize email template
 # [auth.email.template.invite]

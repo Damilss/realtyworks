@@ -356,10 +356,29 @@ silently dropped. It now falls back to `raw_user_meta_data ->> 'phone'`, with
 `nullif(trim(...), '')` so a whitespace-only entry stores as NULL instead of
 satisfying the length CHECKs.
 
-**What opening signup does cost — two accepted risks, both tracked in
-`docs/backlog.md`.** `[auth.email] enable_confirmations` is still `false`, so an
-account can be created against an email address the registrant does not own;
-harmless while such an account can see nothing, but it must be **on before the
-Phase 4 public deploy**. And there is no CAPTCHA — `[auth.rate_limit]
-sign_in_sign_ups` (30 per 5 minutes) is the only brake on automated
-registration.
+**The phone fallback went dormant on 2026-08-31**, when signup narrowed to an
+email address alone. `signUp()` now sends no `options.data`, and the only other
+path that inserts an `auth.users` row — `inviteVendor`'s `admin.createUser` —
+sends `user_metadata.full_name` and no phone, so nothing in the application
+writes the key this branch reads. The number reaches `profiles` by a different
+route: `/account-setup` collects it after the emailed link is redeemed and
+`completeAccountSetup()` UPDATEs the row directly. The trigger fires `after
+insert on auth.users`, so the `updateUser({ data: { phone } })` that action also
+makes cannot reach it either.
+
+The branch stays. It costs nothing, it is still correct, and `[auth.sms]
+enable_signup` (Phase 5) is exactly the switch that makes it live again — but
+the `full_name` half is the only half with a writer today, and
+`supabase/tests/03_signup_defaults.test.sql` pins the trigger's contract by
+inserting fixtures directly, not by exercising a product path. Do not read those
+assertions as proof that a signup form still sends a phone.
+
+**What opening signup cost — two risks, both tracked in `docs/backlog.md`, one
+now closed.** `[auth.email] enable_confirmations` was `false`, so an account
+could be created against an email address the registrant did not own; harmless
+while such an account could see nothing, but a squatting vector on a public
+deploy. It went **on 2026-08-25** (issue #93), which was the last gate before
+Phase 4 — and needed no migration, because `seed.sql` already sets
+`email_confirmed_at` on all three fixtures. What remains open is CAPTCHA:
+`[auth.rate_limit] sign_in_sign_ups` (30 per 5 minutes) is still the only brake
+on automated registration.

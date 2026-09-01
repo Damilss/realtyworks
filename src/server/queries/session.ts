@@ -21,6 +21,17 @@ import { createClient } from "@/lib/supabase/server";
  *
  * `cache()` memoizes per render pass, so a layout and its page reading the same
  * profile cost one round trip, not two.
+ *
+ * Two entry points resolve the caller, and the difference is not stylistic.
+ * Pages and query modules use `getSession()`, which reads the access token's
+ * claims — under asymmetric signing keys that is a local signature check with
+ * no round trip, and a signature stays valid until `jwt_expiry` (3600s) even
+ * for an account deleted, banned, or signed out a minute ago. Deciding what to
+ * *render* can live with that. Server actions that mutate use
+ * `getVerifiedCaller()`, which asks the Auth server and therefore answers about
+ * the account as it is now. Actions resolve the caller through this module too
+ * rather than each growing its own call, which is how three different answers
+ * to one question appeared across `src/server/actions/`.
  */
 
 export type Session = {
@@ -74,6 +85,44 @@ export async function requireSession(): Promise<Session> {
   }
 
   return session;
+}
+
+/**
+ * The caller of a mutation, verified against the Auth server.
+ *
+ * `getUser()` rather than the claims `getSession()` reads: `getClaims()` only
+ * falls back to a server round trip while the JWT is symmetrically signed, and
+ * verifies the signature locally the moment a project moves to asymmetric
+ * signing keys (auth-js `GoTrueClient.getClaims`). Local verification cannot
+ * know a session was revoked, so it admits one for the rest of `jwt_expiry`.
+ * A path that changes a credential — or writes an actor id no later check can
+ * repair — needs the current answer, not a valid signature over an old one.
+ *
+ * Returns null instead of redirecting, unlike `requireSession()`: an action
+ * answers `useActionState` with a message its form renders, and a redirect
+ * would discard that — and send an account-setup caller to a login form they
+ * have no password for.
+ *
+ * Deliberately not `cache()`-wrapped. The memoization above exists because a
+ * layout and its page read the same profile in one render pass; an action asks
+ * once, and caching a liveness check is the opposite of what it is for.
+ */
+export async function getVerifiedCaller(): Promise<Session | null> {
+  const supabase = await createClient();
+  const { data, error } = await supabase.auth.getUser();
+
+  if (error || !data.user) {
+    // A merely signed-out caller lands here too — auth-js reports a missing
+    // session as an error — so this is not necessarily a fault. Logged anyway,
+    // because the alternative is a refused mutation with no trace of why.
+    console.error("[session] Could not verify the caller", {
+      code: error?.code,
+      status: error?.status,
+    });
+    return null;
+  }
+
+  return { userId: data.user.id, email: data.user.email ?? null };
 }
 
 export const getCurrentProfile = cache(

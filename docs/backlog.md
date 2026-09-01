@@ -15,9 +15,10 @@ Pick them off at your discretion.
 
 ---
 
-## State verified (2026-08-07)
+## State verified (2026-08-07, auth section re-verified 2026-08-25)
 
-- `next 16.2.11` / `react 19.2.4` / `pnpm@11.13.1`, Node pinned to 24 (`.nvmrc`).
+- `next 16.2.11` / `react 19.2.4` / `pnpm@11.13.1`, Node pinned to 24 (`.nvmrc`
+  and `engines.node`, added 2026-08-25).
 - CI runs `lint → format:check → typecheck → test → build → audit` — with
   `!cancelled()`, concurrency-cancel, `permissions: contents: read`, and
   pnpm + Next build caching. The audit step is **blocking** (fails on any
@@ -36,7 +37,8 @@ Pick them off at your discretion.
   prefix, `dependencies` label, `@types/node` pinned to `^24` (issue #23; see ✅).
 - Husky **pre-commit** (lint-staged + gitleaks) **and `commit-msg`**
   (commitlint, conventional types + `deps`, `CI/CD` retired → `ci`).
-- Prettier configured (markdown intentionally ignored).
+- Prettier configured (markdown intentionally ignored), with `.editorconfig`
+  under it for the file types Prettier never sees (2026-08-25, issue #32).
 - **Phase 2 schema is on `main`** — merged 2026-07-21 (PR #78): `supabase/`
   (9 migrations, seed, pgTAP suite via `pnpm exec supabase test db`), generated
   `src/lib/database.types.ts`, supabase CLI pinned as a devDependency. See ✅.
@@ -53,8 +55,11 @@ Pick them off at your discretion.
 - **pgTAP `db` job** running in CI on `main`/`dev` (issue #72) — not yet a
   *required* check. See ✅.
 - **Branch protection on `main`** enabled 2026-07-20 (web UI). See ✅.
-- `pnpm audit --audit-level=high` **clean** as of 2026-08-07 (fast-uri + sharp
-  cleared 2026-07-21; js-yaml + nanoid cleared 2026-08-07 — see ✅).
+- `pnpm audit --audit-level=high` **clean** as of 2026-08-24 (fast-uri + sharp
+  cleared 2026-07-21; js-yaml + nanoid cleared 2026-08-07; nanoid cleared *again*
+  2026-08-24 after GHSA-2v37-7h3g-55p8's patched floor moved 3.3.17 → 3.3.18 —
+  see ✅ and `docs/tooling.md`). The rest of this block was last swept
+  2026-08-07.
 - **UI toolkit installed 2026-07-27** — Tailwind CSS v4 (`@tailwindcss/postcss`,
   no `tailwind.config.js`) + shadcn/ui (zinc base, new-york) scaffolded from the
   registry's zinc tokens (the current `shadcn` CLI dropped the classic base
@@ -71,13 +76,31 @@ Pick them off at your discretion.
 - **Signup is open** (`[auth] enable_signup = true`, 2026-07-27) — reverses the
   2026-07-17 invite-only call. Every self-registration is an unlinked `vendor`
   that can read nothing; roles come only from server-set `raw_app_meta_data`.
-  Reversal + reasoning: `docs/schema/my_schema_writeup.md`, last section. The
-  two costs are filed as 🟠 (email confirmations) and 🟡 (CAPTCHA).
+  Reversal + reasoning: `docs/schema/my_schema_writeup.md`, last section. Its
+  two costs were filed as 🟠 (email confirmations) and 🟡 (CAPTCHA); **the first
+  is paid** as of 2026-08-25 and CAPTCHA is now the only one left.
+- **Email confirmations on** (`[auth.email] enable_confirmations = true`,
+  2026-08-25, issue #93) — a self-registration cannot sign in until it follows
+  an emailed link, redeemed by our own `/auth/confirm`. No migration; the seeded
+  users already carry `email_confirmed_at`. The local mailbox is **mailpit**
+  (`[local_smtp]`, port 54324, container still named `supabase_inbucket_*`), and
+  the CI `e2e` job now boots it deliberately — **eight containers, not nine**,
+  with the three inert `-x` names finally corrected in the same change. Verified
+  by deleting the flag and watching the spec fail. See ✅.
+- **`[auth.email.smtp]` written but commented out** — Resend, with `env()`
+  values documented in `.env.example`. Commented rather than `enabled = false`
+  (corrected 2026-08-26, `f208f89`): the two are identical locally and opposite
+  remotely, because `supabase config push` maps a *present* smtp table with
+  `enabled = false` to `smtp_host = ""`, i.e. "disable custom SMTP". Turning it
+  on is a Phase 4 hosted-project step, done in the dashboard; uncommenting it
+  here would route local dev and the CI mailbox spec through a real provider.
+  Full reasoning: the Phase 4 auth tail below, and `supabase/config.toml`.
 - **Cross-checked against the GitHub issue list 2026-08-07** (15 open). Four
   filed issues had no entry here and were added to 🟡: the Tailwind v4 full-height
   regression (#86/#89), the prettier-plugin-tailwindcss v4 options (#87), the
-  `minimatch` override (#84), and the `vitest.config.ts` alias path (#102). Every
-  other visible open issue already had an entry, now cross-referenced by number.
+  `minimatch` override (#84), and the `vitest.config.ts` alias path (#102 —
+  fixed 2026-08-28, see ✅). Every other visible open issue already had an
+  entry, now cross-referenced by number.
   **Caveat:** the check was made against a screenshot of the first page of
   *Open*, so roughly three of the fifteen sat below the fold and were not
   compared — re-run the comparison on those before treating this file as a
@@ -92,6 +115,78 @@ Pick them off at your discretion.
 ---
 
 ## ✅ Done (kept for the paper trail)
+
+### ✅ `.editorconfig` + package.json `engines` (2026-08-25, issue #32)
+Done. `.editorconfig` mirrors the repository's whitespace conventions while
+preserving Markdown's significant trailing spaces, and `package.json` declares
+`"engines": { "node": ">=24 <25" }`. Wrong-Node installs now warn, while the
+existing `packageManager` field remains the pnpm version source of truth.
+### ✅ Email confirmations on — the last Phase 4 gate (2026-08-25, issue #93)
+`[auth.email] enable_confirmations` is `true`. A self-registration now gets an
+account it cannot sign in to until it follows a link that only exists in an
+email, which closes the address-squatting vector that came with opening signup
+on 2026-07-27. **No migration** — `seed.sql` already inserts all three fixtures
+with `email_confirmed_at`, so every seeded login and all 94 pgTAP assertions
+were untouched.
+
+Cheaper than filed, for the reason the entry predicted: `/auth/confirm` already
+did the `verifyOtp({ token_hash, type })` exchange, so this was `"signup"` added
+to `ALLOWED_TYPES` rather than a new endpoint. What shipped:
+
+- `supabase/templates/confirmation.html` + `[auth.email.template.confirmation]`.
+  The default body is `{{ .ConfirmationURL }}`, which is GoTrue's implicit flow
+  and unusable by a cookie-session app, so the link is built the same way
+  `buildInviteUrl()` builds the invite:
+  `{{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&type=signup`.
+- `signUp()` returns `{ confirmationSent: true }` instead of redirecting —
+  there is no session to redirect *with* — and the form swaps itself for a
+  "check your email" panel.
+- `signIn()` names the `email_not_confirmed` case instead of collapsing it into
+  "Invalid email or password."
+- `tests/e2e/mailbox.ts` reads mailpit, and the self-registration spec asserts
+  the refusal *before* the success: no `/dashboard`, then a refused sign-in,
+  then the emailed link, then the pending-access state.
+- The CI `e2e` `-x` list corrected in the same change (see the 🟡 below).
+- `[auth.email.smtp]` written for **Resend** and left **commented out**, and
+  `[auth.rate_limit] email_sent` raised 2 → 30. (It first landed as
+  `enabled = false`; `f208f89` corrected it the next day. Present-and-false is
+  exactly what a later `config push` turns into `smtp_host = ""`, so the shape
+  matters more than the value.)
+
+**Four things that were wrong in the plan and right on the stack.** Every one
+came from running it rather than reading about it (`AGENTS.md`).
+
+1. **A duplicate signup still errors.** The Supabase docs imply the response is
+   obfuscated once confirmations are on; CLI 2.109.1 returns
+   `user_already_exists` / 422 for a *confirmed* address exactly as before. The
+   unit test written against the "obfuscated" shape would have passed forever
+   while testing a response the server never sends — the `z.uuid()` failure mode
+   again. What *did* change: re-submitting an **unconfirmed** address succeeds
+   and resends the link (two messages in the mailbox for two submissions), which
+   is why no "resend" control was built.
+2. **`content_path` under `[auth.email.template.*]` resolves from the project
+   root**, while `[auth.email.notification.*]` resolves from `supabase/`. The
+   CLI's two commented examples differ for that reason; it reads like a typo and
+   is not. Confirmed by reading the resolver out of the CLI bundle
+   (`projectRoot` vs `supabaseDir`) *and* by the template actually being served
+   at `http://supabase_kong_<project>:8088/email/confirmation.html`.
+3. **The mail container is named `supabase_inbucket_<project>` and runs the
+   `mailpit` image.** Three places carry the old name — `--help`, the container
+   name, and stale notes — and none of them is right.
+4. **`supabase status -o env` does print `MAILPIT_URL`**, contrary to the first
+   sweep for it. It is still not what the helper uses: the CI job writes
+   `.env.local`, which Next reads and the Playwright runner does not.
+
+**Verified by deleting it.** Per `CLAUDE.md` §5, `enable_confirmations` was
+flipped back to `false`, the stack restarted, and the self-registration spec
+re-run: it fails on the "Check your email" heading. The spec covers the gate.
+
+**Still owed at the Phase 4 deploy** (moved to the Phase 4 entry, not dropped):
+turn `[auth.email.smtp]` on **through the hosted project's dashboard** — not by
+uncommenting it in `config.toml`, which is what a later `config push` would then
+undo (see the Phase 4 auth tail) — with a verified sender domain, point
+`site_url` / `additional_redirect_urls` at the deployed origin, and confirm the
+custom template actually applied remotely.
 
 ### ✅ nanoid high advisory cleared again — the patched floor moved (2026-08-24, issue #110)
 The blocking `pnpm audit` gate went red on **GHSA-2v37-7h3g-55p8**, the *same*
@@ -128,13 +223,15 @@ for postcss), and why Dependabot did not open a security PR for a transitive,
 lockfile-only bump. Finding out from a red CI gate is worse than finding out from
 a Dependabot PR, and this is the second nanoid occurrence.
 
-### ✅ `/auth/confirm` open redirect closed (2026-08-12, issue #105)
+### ✅ `/auth/confirm` open redirect closed (2026-08-12, finished 2026-08-24, issue #105)
 `safeNext()` string-matched a value a URL parser was about to reinterpret:
 `next=%2F%5Cevil.example` decodes to `/\evil.example`, which starts with `/`,
 does not start with `//`, and therefore passed — then normalized to
 `//evil.example` in the browser, because `\` is equivalent to `/` in the
 authority position (WHATWG URL). It now resolves `next` with `new URL(next,
-origin)`, compares origins, and returns **only** `pathname + search + hash`.
+origin)`, compares origins, returns **only** `pathname + search + hash`, and
+then parses *that* result a second time and requires it to still be the same
+same-origin path.
 
 **Parse-and-compare closes the class, not the reported instance.** The tab and
 carriage-return variants (`/%09/evil.example`, `/%0d/evil.example`) were the
@@ -144,27 +241,40 @@ it dangerous has happened. Emitting a bare path is the other half — with no
 authority in the `Location`, the guard still holds if `nextUrl.origin` were ever
 influenced by a spoofed `Host`.
 
+**One parse was not enough, and review on the fix's own PR caught it
+(2026-08-24).** `${origin}//evil.example` is same-origin by every measure `URL`
+reports — the host is `evil.example` only in the **pathname** — so the origin
+check passes and the bare path handed to `redirect()` is `//evil.example`, which
+is protocol-relative the instant the browser reads the `Location`. Next.js sets
+that header verbatim, so nothing downstream was going to catch it. Runs of
+leading slashes and the backslashes the parser folds into them are the same
+family. The round trip is the general answer rather than a longer denylist:
+**whatever we emit has to re-parse into what we think it is**, and a genuine
+destination is already a fixed point of that reduction, so nothing legitimate is
+refused. Both hostile spellings were added to the payload tables at both layers.
+
 **The test that appeared to cover this could not reach it.** The old e2e spec
 passed `token_hash=bogus`, so `verifyOtp` failed, the handler redirected to
 `/login?error=invalid-link`, and `next` was never read — it asserted we stayed
 on our own host for reasons unrelated to the guard. Confirmed the way the issue
 asked for: with `safeNext()` neutered, the rewritten spec fails on
 `net::ERR_NAME_NOT_RESOLVED at .../evil.example` — the browser genuinely leaves
-the site — and 9 of the 14 new unit cases go red. Same shape as the `z.uuid()`
+the site — and 9 of the then-14 unit cases go red. Same shape as the `z.uuid()`
 regression: a green test over a fixture that cannot reach the code under test.
 
 Two layers, deliberately duplicating one list (each table carries a comment
-pointing at the other). `src/app/auth/confirm/route.test.ts` (new, 14 cases)
-mocks `createClient` and `redirect` — the `src/server/actions/auth.test.ts`
-idiom — and covers every hostile shape plus the contract around it: a failed
-verification never reads `next`, a `type` outside `ALLOWED_TYPES` never reaches
-Supabase, and no accepted *or* refused destination ever carries a host.
-`tests/e2e/vendor-loop.spec.ts` redeems a **real, unspent token per case** (six
-hostile, then a legitimate `/work-orders/<id>` to prove deep-linking survives),
-which is what proves the redirect line executes at all. `mintInviteLink()` now
-waits for the link field's value to *change* before reading it — re-minting
-otherwise hands back the token just spent. 179 unit tests across 17 files; the
-vendor-loop suite is 7 specs, green in 7.1s locally.
+pointing at the other). `src/app/auth/confirm/route.test.ts` (new, 16 cases once
+the round trip landed) mocks `createClient` and `redirect` — the
+`src/server/actions/auth.test.ts` idiom — and covers every hostile shape plus the
+contract around it: a failed verification never reads `next`, a `type` outside
+`ALLOWED_TYPES` never reaches Supabase, and no accepted *or* refused destination
+ever carries a host. `tests/e2e/vendor-loop.spec.ts` redeems a **real, unspent
+token per case** (eight hostile, then a legitimate `/work-orders/<id>` to prove
+deep-linking survives), which is what proves the redirect line executes at all.
+`mintInviteLink()` now waits for the link field's value to *change* before
+reading it — re-minting otherwise hands back the token just spent. 181 unit
+tests across 17 files; the vendor-loop suite is 7 specs, and the redirect case
+mints nine invites, which is why it is the one spec calling `test.slow()`.
 
 ### ✅ js-yaml + nanoid high advisories cleared (2026-08-07)
 Two highs broke the blocking `pnpm audit` gate in CI: **js-yaml**
@@ -222,6 +332,13 @@ jobs were left alone.
 > wrong call reached by plausible reasoning from the wrong source. Checking
 > `--help` was the mistake; the authoritative list is the one the CLI echoes back
 > when a name misses. See the `db` job section in `docs/tooling.md`.
+>
+> **And superseded again 2026-08-25** — the *other* half aged out too. "The
+> no-email finding is what lets the CI `e2e` job keep excluding the mail
+> container" stopped being true the moment `enable_confirmations` went on: the
+> invite still sends no email, but **signup does**, and the job now boots mailpit
+> deliberately so the spec can read the link. The finding was right; the
+> conclusion drawn from it had a dependency nobody wrote down.
 
 **The admin client reads `SUPABASE_SECRET_KEY` lazily, inside the factory.** At
 module scope it would break `next build` in the `verify` job, which has no
@@ -351,6 +468,16 @@ and silently dropped. It now falls back to `raw_user_meta_data ->> 'phone'`
 (`auth.users.phone` still wins when set), and `nullif(trim(...), '')` stops a
 whitespace-only name or phone from satisfying the length CHECKs.
 
+**The phone fallback is dormant as of 2026-08-31** and this entry is history,
+not current behaviour. Signup narrowed to an email address alone, so `signUp()`
+sends no `options.data`; `inviteVendor`'s `admin.createUser` — the only other
+inserter of an `auth.users` row — sends `user_metadata.full_name` and no phone.
+The number now reaches `profiles` through `completeAccountSetup()`, which
+UPDATEs the row after `/auth/confirm` redeems the link. The branch is kept
+rather than reverted: it is free, still correct, and `[auth.sms] enable_signup`
+(Phase 5) is what would make it live again. No new migration — editing a merged
+one is forbidden (CLAUDE.md §5) and there is no behaviour to change.
+
 **CI changed with it.** The `e2e` job — now *E2E (Playwright auth loop)*,
 `timeout-minutes: 20` — boots a real stack (`supabase start -x …` → `db reset` →
 `.env.local` written from `supabase status -o env | grep '^NEXT_PUBLIC_'`). Its
@@ -368,9 +495,9 @@ placeholder — and `tests/unit/server-only-stub.ts` is aliased in
 `vitest.config.ts` so Vitest can import modules guarded by `server-only`
 without switching React to its server build.
 
-**Two accepted risks came with opening signup**, both filed above: email
-confirmations are still off (🟠 High, must be on before the Phase 4 public
-deploy) and there is no CAPTCHA (🟡).
+**Two accepted risks came with opening signup**, both filed above. Email
+confirmations were the first, and are **closed as of 2026-08-25** (issue #93 —
+see ✅ below). CAPTCHA (🟡) is still open.
 
 ### ✅ Typed env vars + committed `.env.example` — closed, solved another way (2026-07-27)
 Closed rather than completed as written. The ask was `@t3-oss/env-nextjs` + zod;
@@ -657,35 +784,126 @@ required-check names are unchanged; the OSV scan surfaces as a non-required
 
 ## 🟠 High
 
-### 🟠 Turn on email confirmations before the Phase 4 public deploy (issue #93)
-**Why:** `[auth.email] enable_confirmations = false` was harmless while signup
-was invite-only. Since signup opened (2026-07-27) it means **anyone can create
-an account against an email address they do not own**, and be signed in
-immediately. Today the blast radius is nil — an unlinked self-registration reads
-nothing (`supabase/tests/03_signup_defaults.test.sql`) — but on a public
-deployment it is an address-squatting and pretext vector, and it silently
-becomes worse the moment anything is keyed on a user's email. This is a Phase 4
-gate, not a Phase 4 nice-to-have.
-**Do:** flip `enable_confirmations = true` in `supabase/config.toml`. **The
-`/auth/confirm` route handler this item used to call for now exists** — it
-shipped with the vendor invite on 2026-08-03 and already does the
-`verifyOtp({ token_hash, type })` exchange, so this is a matter of adding
-`signup` to its `ALLOWED_TYPES` rather than writing anything new. The default
-email template still has to be repointed at it: `{{ .ConfirmationURL }}` is the
-implicit flow, which the `@supabase/ssr` client cannot consume. Then
-configure production SMTP (the built-in service is rate-limited and explicitly
-not for real users); **drop `inbucket` from the `-x` list in the CI `e2e` job**,
-since signup will then send mail and the self-registration spec has to read the
-mailbox; and re-check the signup error copy in `src/server/actions/auth.ts` —
-it currently notes that GoTrue returns `user_already_exists` *because*
-confirmations are off, and that response shape changes when they are on.
-**Done when:** a new account cannot sign in until the emailed link is followed —
-locally and on the hosted deploy — with the e2e signup spec updated to walk the
-mailbox instead of landing straight on `/dashboard`.
+### 🟠 Emailed tokens are redeemed on GET, so a mail scanner spends them (2026-08-28, PR review, P2)
+**Why:** `/auth/confirm` calls `verifyOtp` from its `GET` handler, so *fetching*
+the link is redeeming it. Mail security gateways — Defender Safe Links,
+Proofpoint, Mimecast — follow URLs in a message before the recipient sees it.
+Reproduced against the local stack with plain `curl`, no browser and no JS:
+
+```
+1st GET (the scanner):    307 → /account-setup
+2nd GET (the recipient):  307 → /login?error=invalid-link
+```
+
+The recipient is locked out of their own link. Against a deterministic corporate
+scanner this is not a flake — every replacement link burns the same way, so
+signup and recovery both dead-end for that user, permanently.
+
+**Worse than losing the token:** the same GET mints the session, so the scanner
+is handed `sb-…-auth-token=…; Max-Age=34560000; SameSite=lax` — a ~400-day
+session for someone else's account. Most scanners discard cookies; nothing here
+should depend on that, and `signOut` is `scope: "local"`, so nothing revokes it.
+
+**Not introduced by email confirmations.** `/auth/confirm` has redeemed
+`magiclink` and `invite` on GET since the vendor half (2026-08-03); issue #93
+widened the same mechanism to `signup` and `recovery`. All four are exposed.
+The repo already holds the principle this breaks — `src/app/(dashboard)/layout.tsx`
+uses a form POST for sign-out precisely because "a GET logout gets fired by link
+prefetching and by anything that crawls the page."
+
+**There is no cheap mitigation.** `Cache-Control: no-store` does not deter a
+scanner, User-Agent sniffing is unreliable in exactly the direction that matters,
+and "redeem only on POST" *is* the interstitial. Real fix or nothing.
+
+**Sized 🟠, like the two gates before it:** nothing is exposed today, because
+nothing is deployed and local mail goes to mailpit, which follows nothing. It
+goes live the moment real mail leaves Resend — and it fails *closed for
+legitimate users*, which is the worst kind of onboarding bug, because the people
+it locks out are the corporate recipients this product is sold to.
+
+**Do:** land the emailed link on a non-mutating page that renders an explicit
+"Confirm your email" / "Sign in" button, and redeem through a POST that carries
+`token_hash` and `type` into a server action running `verifyOtp`. Apply it to all
+four types — leaving `invite` on GET keeps the vendor path exposed and makes one
+endpoint behave two ways. `safeNext()` moves across unchanged; it constrains the
+destination, not the method.
+
+**Expect the tests to be most of the work.** `src/app/auth/confirm/route.test.ts`
+(8 cases) and the redirect-guard loop in `tests/e2e/vendor-loop.spec.ts` (8
+hostile payloads, one browser context each) both drive the endpoint by
+navigation. Carry that coverage across intact, and re-check it the way §5
+demands — delete `safeNext()` once and watch the specs fail. That suite exists
+because the redirect hole (#105) shipped green under a test that never reached
+the guarded line.
+
+**Done when:** a bare `GET` of an emailed link leaves the token unspent and sets
+no cookie; a spec proves it by fetching the link first and *then* redeeming it in
+a browser and landing signed in; and the redirect-guard table still fails when
+`safeNext()` is removed.
 
 ---
 
 ## 🟡 Medium
+
+### 🟡 `/account-setup` is a default destination, not an enforced one (2026-09-01, PR review)
+**Why:** `/auth/confirm` decides whether to force `/account-setup` by reading
+`ACCOUNT_SETUP_TYPES.has(type)` — and `type` comes from the caller's query
+string. GoTrue does not bind a token to the type used to redeem it: it looks the
+hash up in whichever column that type implies, and several types share a column.
+Verified against the running stack, redeeming each token under a *different*
+type than it was minted for:
+
+```
+recovery token + type=magiclink  → accepted, session minted
+signup   token + type=invite     → accepted, session minted
+signup   token + type=magiclink  → refused (otp_expired)
+```
+
+So the collisions are exactly the pairs sharing storage — `recovery`/`magiclink`
+in `recovery_token`, `signup`/`invite` in `confirmation_token` — and **both**
+account-setup types have a non-setup partner. Whoever holds the link can edit
+`type` and land on `next` instead.
+
+**This is not an authorization bypass, and should not be filed as one.**
+Rewriting `type` cannot change which user the token belongs to, so it mints no
+session the holder could not already get; `next` is still bounded by
+`safeNext()`; and nothing downstream treats "arrived via /account-setup" as
+authorization — `completeAccountSetup()` re-resolves its caller with
+`getVerifiedCaller()` and writes through RLS. What is lost is the *guarantee*,
+and the only person who can spend it is the one it protects.
+
+**The consequence worth fixing is a lockout.** `signUp()` sets
+`pendingAccountPassword()` — 32 random bytes nobody keeps — and `/account-setup`
+is where the real password gets chosen. A self-registration that redeems its
+confirmation as `type=invite` gets a session and skips that step, leaving an
+account whose password is unknown permanently. It works until the session
+expires, then cannot sign in; recovery is the only way back, and the same edit
+skips that too. `tests/e2e/auth.spec.ts` calls recovery-into-setup "the second
+lockout path" closed — this reopens it for anyone who edits the URL.
+
+**Do:** stop deriving the destination solely from `type`, and add a check on
+state the caller cannot forge: after a successful exchange, if the profile is
+incomplete (`full_name is null`, which `completeAccountSetup()` is what fills),
+force `/account-setup` regardless of the type claimed. That closes the signup
+half robustly and costs one indexed read on a path that already round-trips to
+GoTrue. An invited vendor is unaffected — `inviteVendor` sets `full_name` from
+`vendors.name`, which `createVendorSchema` requires.
+
+**The recovery half is not fixable here, and that is the honest answer.** A
+recovery token and a magic link are the same bytes in the same column; the
+endpoint cannot tell "reset my password" from "log me in" once the type is a
+lie. A user who chooses to skip setting a new password keeps their old one and
+harms only themselves. Do not add a `type`-reading check and call it enforcement.
+
+**Interacts with the 🟠 GET entry above.** Moving redemption to a POST
+interstitial does *not* fix this — `type` just moves from the query string to a
+form field and stays caller-supplied. Whoever does that work should land the
+profile-completeness check in the same change rather than assume the method
+change covers it.
+
+**Done when:** a signup token redeemed as `type=invite` still lands on
+`/account-setup`, proven by a spec that fails if the completeness check is
+deleted (§5 — delete it once and watch it go red).
 
 ### 🟡 Trim required text fields before the length CHECK (issues #75, #77)
 **Why:** Round 5 fixed `city`/`state`/`postal_code` with `char_length(trim(...)) > 0`
@@ -704,34 +922,25 @@ one as a duplicate.
 **Done when:** a whitespace-only value is rejected on every required text column,
 with a pgTAP assertion each.
 
-### 🟡 Scope the sign-out action to the current session (issues #92, #98)
-**Note:** #98 carries the `duplicate` label against #92 — close one as a
-duplicate, same as the #75/#77 pair below.
-**Why:** `src/server/actions/auth.ts` calls `supabase.auth.signOut()` with no
-options, and `@supabase/auth-js` (2.110.7) declares that as
-`signOut(options = { scope: 'global' })` — it revokes **every** refresh token the
-account holds, not just this browser's. The library's own JSDoc on the method
-says `{ scope: 'local' }` is what apps usually want on a "Sign out" button. So a
-manager signed in on a laptop and a phone who clicks the ordinary button
-(`src/app/(dashboard)/layout.tsx`) on one is signed out of the other — but not
-immediately: global scope revokes the *refresh* token while the access-token JWT
-stays valid until `jwt_expiry` (3600s, `supabase/config.toml`). The second device
-therefore works normally for up to an hour, then `src/proxy.ts` fails its refresh
-and bounces it to `/login`. The delayed, apparently random logout is what makes
-this worth fixing rather than documenting. The control is labeled "Sign out", not
-"Sign out everywhere". It fails in the **safe** direction — over-revoking, never
-under — which is why this is 🟡 and not a security item.
-**Do:** pass `{ scope: "local" }` in `signOut()` (`src/server/actions/auth.ts`),
-and tighten the assertion in `src/server/actions/auth.test.ts` from
-`toHaveBeenCalledOnce()` to `toHaveBeenCalledWith({ scope: "local" })` so the
-global default cannot creep back silently. Extend the comment above the redirect,
-which today explains the failure path but says nothing about scope. A deliberate
-"sign out everywhere" control is **not** in scope — that is a Phase 5
-account-settings affordance, and `scope: "others"` exists for it when wanted
-(`CLAUDE.md` §8: smallest change that satisfies the requirement).
-**Done when:** two concurrent sessions for the same seeded account exist, and
-signing out of one leaves the other able to load `/dashboard`; pinned by the unit
-assertion above.
+### ✅ Sign-out scoped to the current session (2026-08-25, issues #92, #98)
+Rode along with the email-confirmations change, which is what this entry asked
+for: "fold it into the next change that touches `src/server/actions/auth.ts`
+rather than letting it take a session of its own."
+
+`signOut()` now passes `{ scope: "local" }`. Previously it passed nothing, and
+`@supabase/auth-js` declares the default as `{ scope: 'global' }` — so clicking
+a button labeled "Sign out" revoked **every** refresh token the account held.
+The failure was delayed rather than visible: global scope kills the refresh
+token while the other device's access-token JWT stays valid until `jwt_expiry`
+(3600s), so that device worked normally for up to an hour and then bounced off
+`src/proxy.ts` to `/login`. An apparently random logout an hour later is what
+made this worth fixing rather than documenting.
+
+The unit assertion moved from `toHaveBeenCalledOnce()` to
+`toHaveBeenCalledWith({ scope: "local" })` — an arity-only assertion would let
+the global default creep back silently. A deliberate "sign out everywhere"
+control is still **not** in scope; that is a Phase 5 account-settings affordance,
+and `scope: "others"` exists for it. Close #98 as a duplicate of #92.
 
 ### 🟡 Reassignment does not revoke an outstanding invite link (PR review, P2)
 **Why:** `docs/playwright.md` and `README.md` both listed "revocation on
@@ -967,16 +1176,20 @@ nothing declares `<9`; `pnpm why minimatch` answers that in one command.
 not-reproducing with the interop check recorded on it rather than left open as a
 suspected crash.
 
-### 🟡 Use `fileURLToPath()` for the `server-only` alias in `vitest.config.ts` (issue #102)
-**Why:** The alias is built with `new URL("./tests/unit/server-only-stub.ts",
-import.meta.url).pathname`. `.pathname` is a **URL** component, not a filesystem
-path: it stays percent-encoded, and on Windows it keeps a leading slash before
-the drive letter. Under the current checkout
-(`/Users/emilio/vsprojects/realtyworks`) the two forms are identical, which is
-why every test passes — but a clone into a directory containing a space or any
-non-ASCII character resolves to `…/my%20projects/…`, the alias silently fails to
-match, and every `src/server/queries/**` test dies on the real `server-only`
-import instead. Verified:
+### ✅ `fileURLToPath()` for the `server-only` alias in `vitest.config.ts` (2026-08-28, issue #102)
+Fixed as filed — one line, one import, no behavior change on any machine that
+was already working.
+
+**Was:** `new URL("./tests/unit/server-only-stub.ts", import.meta.url).pathname`.
+`.pathname` is a **URL** component, not a filesystem path: it stays
+percent-encoded, and on Windows it keeps the leading slash before the drive
+letter. Under this checkout (`/Users/emilio/vsprojects/realtyworks`) and under
+Ubuntu CI the two forms are byte-identical, which is exactly why every test
+passed while the code was wrong — there is nothing in either path for the URL
+parser to escape. A clone into a directory with a space or a non-ASCII character
+would resolve to `…/my%20projects/…`, the alias would silently fail to match, and
+every `src/server/queries/**` test would die on the real `server-only` import
+instead of on a path error.
 
 ```
 pathname     : /Users/emilio/my%20projects/realtyworks/tests/unit/server-only-stub.ts
@@ -984,92 +1197,187 @@ fileURLToPath: /Users/emilio/my projects/realtyworks/tests/unit/server-only-stub
 win pathname : /C:/dev/app/x.ts
 ```
 
-Latent, environment-dependent, and it fails in the worst way — as a confusing
-`server-only` import error rather than a path error — which is why it is worth
-fixing while it costs one line.
-**Do:** `import { fileURLToPath } from "node:url"` and wrap the URL:
-`fileURLToPath(new URL("./tests/unit/server-only-stub.ts", import.meta.url))`.
-**Done when:** `pnpm test` passes from a checkout whose absolute path contains a
-space.
+**Now:** `fileURLToPath(new URL(…, import.meta.url))`, with a comment beside it
+naming both failure modes so the next edit doesn't quietly reintroduce
+`.pathname`. 208 unit tests pass; lint, `format:check` and `typecheck` clean.
 
-### 🟡 Correct the `e2e` job's silently-ignored `-x` names
-**Why:** Found while trimming the `db` job (2026-08-10). `supabase start -x`
-validates against `edge-runtime, gotrue, imgproxy, kong, logflare, mailpit,
-postgres-meta, postgrest, realtime, storage-api, studio, supavisor, vector` — not
-the list `supabase start --help` prints. A name from the wrong list is **silently
-ignored, not rejected.** The `e2e` job excludes
-`studio,imgproxy,edge-runtime,functions,analytics,vector,inbucket`, of which
-`functions`, `analytics` and `inbucket` are not valid, so **logflare (930MB) and
-mailpit (48MB) are pulled and booted on every run** despite appearing excluded.
-The `db` job had the same three and they were corrected there; `e2e` was left
-alone deliberately, because its mail story is conditional rather than mechanical.
+Two things worth keeping from the fix. The **alias was verified load-bearing**
+per §5 — pointing it at a nonexistent file fails 2 test files (16 tests), which
+proves the resolved string actually reaches module resolution rather than being
+decoration. And a first attempt to fake the breakage with `server%2Donly-stub.ts`
+passed: `fileURLToPath` decoded `%2D` back to `-` and found the file. That
+accident is the property under test, demonstrated from the other side — decoding
+is precisely what `.pathname` does not do.
 
-**Do:** Rename `analytics` → `logflare` and drop `functions`. Decide `inbucket` →
-`mailpit` **together with** issue #93 (turn on `[auth.email]
-enable_confirmations` before the Phase 4 public deploy): today mailpit is
-genuinely unnecessary and excluding it saves the pull, but the moment
-confirmations go on, signup sends mail and this job needs the mailbox — so
-excluding it correctly now buys ~48MB and creates a trap for #93. Preferred
-order: land the logflare fix (the 930MB one) now, and settle mailpit as part of
-#93. Do **not** copy the `db` job's `kong`/`postgrest`/`realtime` exclusions here
-— this job drives the app over HTTP and needs all three.
+The general shape is the one already recorded for the `-x` names and the
+mid-run template edit: **a defect that is invisible on the only two machines
+that ever run the code.** Neither this developer's checkout nor CI has a path
+that encodes, so "all tests pass" carried no information about the line at all.
 
-**Done when:** the `e2e` job's `supabase start` log no longer shows a logflare
-image pull, the Playwright suite is still green in CI, and the "ignored names"
-caveat is gone from all three places that now carry it — `docs/tooling.md`'s
-`e2e` section, `docs/playwright.md`'s `-x` bullet, and the comment above the
-`e2e` job's `Start Supabase stack` step in `.github/workflows/ci.yml`. The
-container counts stated alongside them (nine for `e2e`, three for `db`) are
-part of the same edit: dropping logflare makes it eight.
+### ✅ The `e2e` job's silently-ignored `-x` names, corrected (2026-08-25)
+Landed with issue #93, exactly as the entry said it should — the mailbox was the
+conditional part, so the two decisions were made together.
 
-### 🟡 Coverage visibility (not a gate)
-**Why:** See what's tested without chasing a %.
-**Do:** `pnpm add -D @vitest/coverage-v8`; `pnpm test -- --coverage`; report in CI, no threshold yet.
-**Done when:** a coverage summary prints in CI logs.
+**Was:** `studio,imgproxy,edge-runtime,functions,analytics,vector,inbucket`, of
+which `functions`, `analytics` and `inbucket` are not valid `-x` values and were
+silently ignored rather than rejected. Logflare (930MB) and mailpit (48MB) were
+pulled on every run despite appearing excluded — nine containers, not seven.
 
-### 🟡 ESLint import boundary for `src/server/queries/`
-**Why:** `CLAUDE.md` §3: `src/server/` is the trust boundary. **Amended
-2026-07-27 — the original wording of this item was wrong** and would now break
-the app. It said "block `@/server/*` from client components"; but client
-components are *supposed* to import server actions — `"use server"` swaps the
-body for an RPC reference, so the implementation never ships — and the login and
-signup forms do exactly that. Blocking all of `@/server/*` would fail lint on
-working, correct code. The boundary that needs enforcing is
-`src/server/queries/**` only.
-**Do:** `no-restricted-imports` (or `eslint-plugin-boundaries`) blocking
-`@/server/queries/*` from files carrying `"use client"`; leave
-`@/server/actions/*` alone.
-**Note:** mostly solved already — every module in `src/server/queries/` opens
-with `import "server-only"`, which fails the **build** if client code pulls it
-in. Lint would move that failure earlier and give it a better message, so this
-is now DX polish, not a hole. (Vitest imports those modules via the
-`server-only` alias in `vitest.config.ts` — don't let a lint rule catch the
-test files.)
-**Done when:** importing `@/server/queries/...` into a client component fails
-lint, and the login form still builds.
+**Now:** `studio,imgproxy,edge-runtime,logflare,vector`. `analytics` → the name
+the validator actually accepts, `functions` dropped (it has no valid spelling),
+and **mailpit deliberately kept** — signup sends real mail now and
+`tests/e2e/auth.spec.ts` reads the confirmation link out of it, so the mail
+container is a dependency of this job rather than dead weight. Eight containers:
+postgres, gotrue, kong, postgrest, realtime, storage-api, postgres-meta,
+mailpit.
 
-### 🟡 CAPTCHA on signup
-**Why:** With self-registration open, `[auth.rate_limit] sign_in_sign_ups` — 30
-per 5 minutes per IP — is the *only* brake on automated account creation. That
-is a speed bump, not a defense: every bot account becomes a row in `auth.users`
-and `profiles` that a human eventually has to look at and decide about. Low
-urgency while the app is unlisted; do it before or with the Phase 4 public
-deploy, alongside email confirmations.
+The `db` job's list is untouched and must stay untouched: it drops Kong,
+PostgREST and Realtime, which this job needs. The "ignored names" caveat is gone
+from all four places that carried it — `docs/tooling.md`, `docs/playwright.md`,
+the comment above the `e2e` job's `Start Supabase stack` step, and
+`CLAUDE.md` §0 — along with the container counts stated alongside them.
+
+### ✅ Coverage visibility — reported, never enforced (2026-08-28, issue #28)
+`@vitest/coverage-v8` installed, configured in `vitest.config.ts`, and wired
+into the `verify` job's test step as `pnpm run test:coverage`. No thresholds,
+by design: the step fails on a failing test and on nothing else.
+
+**The default report answers the wrong question.** Out of the box, v8 coverage
+counts only the modules a test actually imported — the first run here printed a
+flattering **89.69%** across ~15 files, and every module with no test at all was
+simply absent from the table. That number describes the tests, not the app, and
+it is the one shape of report that structurally cannot show what is untested,
+which is this issue's entire stated purpose ("see what's tested without chasing
+a %"). Setting `coverage.include` to `src/**/*.{ts,tsx}` reports the whole
+source tree instead: **57.38% statements**, with `src/server/queries/` at 20.49%
+(`work-orders.ts`, `vendors.ts` and `properties.ts` all at 0) and every page
+component at 0. That is the honest picture, and it matches what the 🟢 "first
+real unit tests" entry already says is outstanding — the auth half is tested and
+the rest is not.
+
+Two exclusions, both narrow: the generated `src/lib/database.types.ts` (types
+only, no runtime to cover) and `src/components/ui/**` (vendored shadcn
+primitives — `CLAUDE.md` §5, "test what matters, not the framework").
+Reporters are `text` for the CI log and `html` for reading locally.
+
+**Ride-along fix:** the generated `coverage/` report needed adding to *both*
+`eslint.config.mjs` ignores and `.prettierignore`. `.gitignore` already covered
+it, but neither tool reads that file, so `pnpm lint` began reporting on
+Istanbul's vendored report scripts the moment anyone ran coverage. This is
+invisible in CI — lint runs before the step that creates the directory — so it
+would have been a local-only annoyance of exactly the kind already recorded for
+`supabase/.temp/`, which is in `.prettierignore` for the same reason. Prettier
+happened to pass on the generated JS, so only ESLint actually complained; the
+`.prettierignore` line is there because "happens to be clean today" is not a
+configuration, and an Istanbul version bump would quietly break `format:check`
+for anyone who had run coverage.
+
+**Done when (met):** the coverage summary prints in the CI log, and no
+threshold can fail a build.
+
+### ✅ ESLint import boundary for `src/server/queries/` (2026-08-28, issue #29)
+Landed as `realtyworks/no-server-queries-in-client`, a ~50-line rule defined
+inline in `eslint.config.mjs` — no new dependency, no rules directory for a
+single rule.
+
+**The issue as filed would have failed lint on correct code, twice over.** Its
+wording — "block `@/server/*` from client components" — was already amended here
+on 2026-07-27 for the first reason: client components are *supposed* to import
+server actions, and the login and signup forms do. Implementing it surfaced a
+second: all five client-side references to a query module are `import type`
+(`PropertyOption`, `VendorOption`, `WorkOrderListItem`, `ActivityEntry`,
+`WorkOrderAttachment`), and a type import is erased before bundling. A rule that
+matched on the module path alone would have flagged every one of them.
+
+**Do (done):** the rule reports an `ImportDeclaration` whose source matches
+`@/server/queries/**` only when the module carries a `"use client"` directive,
+and skips it when `importKind === "type"` or every specifier is a type
+specifier. A bare side-effect import has no specifiers and still reports, since
+that one is not erased. `@/server/actions/**` is untouched. Path globs were not
+an option: client and server modules sit in the same directories (`page.tsx`
+beside `work-order-form.tsx`), so the directive is the only honest signal.
+
+**Done when (met):** a `"use client"` module importing `listWorkOrders` at
+runtime fails lint with a message naming the boundary; the login form still
+builds; `pnpm lint` is clean on the tree as it stands.
+
+Verified the way §5 asks. A probe file was linted with the rule on (one error,
+on the runtime import, *not* on the type import beside it) and with the rule
+off (silent — proving the probe tripped this rule and nothing else). The
+durable half is `tests/unit/server-boundary-lint.test.ts`: four cases run
+through `ESLint.lintText` against the **real** `eslint.config.mjs` rather than
+the rule in isolation, so a `files` glob that drifts or an alias that gets
+renamed fails the suite instead of silently disarming the boundary. Removing
+the rule from the config fails that test — checked, not assumed.
+
+This stays DX polish rather than a closed hole: `import "server-only"` already
+failed the *build* on a runtime import. What changed is that the failure now
+arrives at lint time and the message names the trust boundary instead of a
+module resolution error. The test files are unaffected — they have no
+`"use client"` directive, so the rule never looks at them.
+
+### 🟡 CAPTCHA on the mail-sending endpoints (signup **and** password reset)
+*Widened 2026-09-01 from "CAPTCHA on signup", on PR review of the
+`/forgot-password` change.*
+
+**Why:** Two unauthenticated endpoints now send mail on an anonymous caller's
+say-so — `/signup` and `/forgot-password` — and neither has a per-caller brake.
+
+The bot-account half is the original entry: `[auth.rate_limit]
+sign_in_sign_ups` — 30 per 5 minutes per IP — is the only brake on automated
+account creation, and that is a speed bump, not a defense. Every bot account
+becomes a row in `auth.users` and `profiles` that a human eventually has to
+look at and decide about. Email confirmations (closed 2026-08-25) raise the
+cost without removing it: a throwaway-mailbox service defeats them and the row
+lands either way.
+
+The mail-spend half is new, and it is the sharper of the two. Verified against
+the running stack on 2026-09-01 rather than read in a doc:
+
+- **`sign_in_sign_ups` does not cover `/recover`.** 34 consecutive POSTs to
+  `/auth/v1/recover` from one IP returned 200 every time — no 429, no
+  throttling of any kind. The per-IP limits in `[auth.rate_limit]` are scoped
+  to the endpoints their comments name, and recovery is not one of them.
+- **All 34 actually sent** — mailpit received 34 messages for the one seeded
+  address. So this is a working mailbox-flood primitive against any address an
+  attacker can guess is a user, with no account needed and nothing to solve.
+- **`email_sent = 30` is a blast radius, not a brake.** It is project-wide, not
+  per IP, and `/signup` and `/forgot-password` draw on the same hourly pool. In
+  the hosted project, ~30 recovery requests an hour is enough to stop
+  confirmation mail for *real* signups. That collateral — a signup path that
+  silently stops working — matters more than the wasted mail.
+- **It is unenforced locally.** "Requires auth.email.smtp to be enabled" is
+  literal, and `[auth.email.smtp]` is commented out by design, which is why the
+  34 probes sailed through. Nothing in `pnpm test:e2e` exercises this, so CI
+  will never warn about it.
+
+Low urgency while the app is unlisted; **do it before or with the Phase 4
+public deploy**, which is the moment the address space stops being three seeded
+test users.
+
 **Do:** Supabase Auth supports hCaptcha and Cloudflare Turnstile natively — the
 `[auth.captcha]` block is already in `config.toml`, commented out. Enable it
-with the secret read from an env var (`CLAUDE.md` §5, never a literal), render
-the widget on the signup form, and pass the token through
-`signUp({ options: { captchaToken } })`. Keep it off locally so the e2e suite
-still runs unattended. Login probably does not need it — the rate limit plus
-the deliberately opaque failure message already cover credential stuffing.
-**Done when:** a signup submission without a valid captcha token is rejected in
-a captcha-enabled environment, and `pnpm test:e2e` still passes locally.
+with the secret read from an env var (`CLAUDE.md` §5, never a literal), and
+render the widget on **both** the signup and forgot-password forms, passing the
+token through `signUp({ options: { captchaToken } })` and
+`resetPasswordForEmail(email, { captchaToken })`. Supabase applies the captcha
+to `/recover` as well as `/signup`, so one provider covers both. Keep it off
+locally so the e2e suite still runs unattended. Login probably does not need it
+— the rate limit plus the deliberately opaque failure message already cover
+credential stuffing.
 
-### 🟡 `.editorconfig` + package.json `engines`
-**Why:** Keep formatting/runtime consistent across machines and warn on wrong Node.
-**Do:** add `.editorconfig` (mirror Prettier); add `"engines": { "node": ">=24 <25" }` and rely on
-`packageManager` for pnpm.
-**Done when:** wrong-Node installs warn; editors respect the config.
+**Cheap partial mitigation, deliberately not taken yet:** `[auth.email]
+max_frequency` is `"1s"`, and raising it throttles repeat sends *to one
+address*, which is exactly the mailbox-flood half. It does nothing about budget
+exhaustion across many addresses, and it is not free —
+`tests/e2e/auth.spec.ts` waits that window out (`page.waitForTimeout(1_100)`)
+to exercise GoTrue's resend path, so a 60s value adds a minute to the suite and
+changes what a user sees when they resubmit an unconfirmed signup. Worth
+deciding on with the deploy, alongside the captcha, rather than in isolation.
+
+**Done when:** a signup *and* a password-reset submission without a valid
+captcha token are rejected in a captcha-enabled environment, and
+`pnpm test:e2e` still passes locally.
 
 ### 🟡 Optional hygiene: `knip`
 **Why:** Catches dead deps/exports early — cheap signal for a solo dev.
@@ -1161,6 +1469,40 @@ form only offering those two.
 `@sentry/nextjs`, Vercel PR preview deploys, prod deploys only from `main`. Keep a working
 Dockerfile so self-host stays `docker run` away (`CLAUDE.md` §5/§7).
 
+**Auth tail inherited from issue #93** — the code is done, these are hosted-project
+settings and nothing else:
+- **Turn SMTP on for the hosted project through the dashboard.** Provider is **Resend**;
+  `SUPABASE_AUTH_SMTP_PASS` is the API key and `SUPABASE_AUTH_SMTP_ADMIN_EMAIL` the
+  sender (`.env.example`). The `[auth.email.smtp]` block ships **commented out** in
+  `config.toml` — not `enabled = false` — and the difference is the whole point
+  (changed 2026-08-25). Locally the two are identical: the CLI's schema default for
+  that key is already `false`, and mail goes to mailpit either way. Remotely they are
+  opposites. `supabase config push` sends the entire auth block as one Management API
+  body, and the CLI maps a *present* smtp table with `enabled = false` to
+  `smtp_host = ""` — which is how you **disable** custom SMTP, not how you leave it
+  alone. So a present-and-false block makes any later routine push (a rate-limit tweak,
+  a new template, a CLI bump) ship "wipe custom SMTP" in the same request as
+  `mailer_autoconfirm = false`, dropping the hosted project to the built-in 2/hour
+  mailer while confirmation mail is mandatory: signups succeed, no link arrives, and
+  every new account is locked out with nothing in the logs. Commented out, the CLI
+  emits no `smtp_*` field and a push cannot touch hosted SMTP. **If you would rather
+  drive it from the file, uncomment with `enabled = true` on the deploy branch only and
+  never merge that branch back.**
+- **Verify the sender domain** with the provider first. An unverified domain drops
+  every message silently, and the symptom is "confirmation emails never arrive",
+  which reads like an application bug.
+- **Point `site_url` and `additional_redirect_urls`** at the deployed origin. They
+  are what `{{ .SiteURL }}` interpolates into the confirmation link, so a stale
+  `127.0.0.1:3000` mails every new user a link to their own laptop.
+- **Confirm the custom template applied remotely.** A hosted project that falls back
+  to the default `{{ .ConfirmationURL }}` sends the implicit flow, which this app
+  cannot consume — the link would appear to work and then land nowhere.
+- **Set `email_sent` in the dashboard as well** (raised 2 → 30 here). Same mechanism as
+  the SMTP bullet, quieter: the CLI only sends `rate_limit_email_sent` when the *local*
+  config has SMTP enabled, so with the block commented out the `30` in `config.toml`
+  never reaches the hosted project on its own. It only bites once custom SMTP is on,
+  which is to say: on the hosted project, the first time it matters.
+
 ### 🟢 Phase 5 — PWA install layer (manifest + service worker)
 Bolt-on to the already-responsive app — never a second codebase (`CLAUDE.md` §2). `src/app/manifest.ts`
 (`MetadataRoute.Manifest`) + `public/sw.js` + icons; HTTPS required (`next dev --experimental-https`
@@ -1189,7 +1531,7 @@ PCI surface) is a separate go/no-go at the start of the phase.
 |---|---|---|
 | ~~`@commitlint/cli` + `@commitlint/config-conventional`~~ | ✅ Installed (PR #40) | Done |
 | ~~`@testing-library/react` + `dom` + `jest-dom` + `user-event` + `happy-dom`~~ | ✅ Component test DOM harness (Vite 8 native `@/*` paths, no plugin) | Done |
-| `@vitest/coverage-v8` | Coverage visibility | Medium |
+| ~~`@vitest/coverage-v8`~~ | ✅ Installed 2026-08-28 — coverage reported in CI, no thresholds (issue #28) | Done |
 | ~~`zod`~~ | ✅ Installed 2026-07-27 — shared client+server schemas per §3 (`src/schemas/auth.ts`) | Done |
 | ~~`@t3-oss/env-nextjs`~~ | ❌ Declined — `env.ts` + `next.config.ts` already fail fast and reject a non-publishable key (see ✅) | Closed |
 | `knip` | Dead deps/exports detector | Medium (optional) |
@@ -1211,52 +1553,55 @@ branch protection → pgTAP in CI → first migrations merged to `main` →
 **Supabase clients: Phase 2 complete** → **Tailwind + shadcn/ui: Phase 3
 started** → **auth loop + open signup: the read half of the slice** →
 **service-role table grants narrowed** → **the staff write path** → **the vendor
-half: Phase 3 complete**, merged to `main` 2026-08-04 as PR #94.)*
+half: Phase 3 complete**, merged to `main` 2026-08-04 as PR #94 → the
+`/auth/confirm` open redirect → **email confirmations: the last gate cleared**,
+2026-08-25.)*
 
-**Phase 4 (hosted deployment) is the critical path** (`CLAUDE.md` §1/§4). Both
-🟠 gates on it landed on `/auth/confirm`, the one endpoint the deploy exposes
-that mints a session; the first is now closed (2026-08-12, see ✅) and the
-second is the last thing standing between here and the deploy.
+**One gate is open again, and it is on the same endpoint.** The two that closed
+both landed on `/auth/confirm` — the open redirect on 2026-08-12 and email
+confirmations on 2026-08-25 — and PR review reopened a third there on
+2026-08-28: emailed tokens are redeemed on `GET`, so a mail scanner spends them
+before the recipient clicks (🟠 above). It is invisible locally, because mailpit
+follows nothing, and live the moment real mail leaves Resend. **Phase 4 is still
+the critical path**, and the deploy's *auth tail* now has one code change in it
+rather than settings alone.
 
-1. ~~**Clear the nanoid high advisory** (🟠, issue #110).~~ ✅ Done
-   2026-08-24 — `pnpm update nanoid --depth Infinity`, no override; the patched
-   floor had moved 3.3.17 → 3.3.18, undoing the 2026-08-07 clearance. Gate green
-   again.
-2. ~~**Fix the `/auth/confirm` open redirect** (🟠, issue #105).~~ ✅ Done
-   2026-08-12 — parse-and-compare, and the e2e spec now redeems real tokens
-   instead of `token_hash=bogus`, so deleting `safeNext()` no longer leaves it
-   green.
-3. **Turn on email confirmations** (🟠, issue #93). Hard gate on a public
-   deploy — today anyone can register against an address they don't own and be
-   signed in immediately. Cheaper than it was, since `/auth/confirm` already does
-   the `verifyOtp` exchange, but the tail (email template repointed off
-   `{{ .ConfirmationURL }}`, production SMTP, `inbucket` dropped from the CI
-   `e2e` `-x` list) is exactly what you do not want to discover mid-deploy.
-4. **Phase 4 itself** (🟢 above, issue #36) — Supabase Cloud project + pushed
+1. **Phase 4 itself** (🟢 above, issue #36) — Supabase Cloud project + pushed
    migrations, Vercel project + env vars, PR preview deploys, prod deploys only
-   from `main`, Sentry, and a working Dockerfile so §7 stays mechanical.
-5. **Make the `db` job blocking** — the job has reported a run (PR #78), so it
+   from `main`, Sentry, and a working Dockerfile so §7 stays mechanical. Read
+   that entry's **auth tail** before starting: SMTP, the sender domain,
+   `site_url`, and confirming the custom email template applied remotely are
+   settings work that the #93 code deliberately left for the deploy, and they
+   are exactly what you do not want to discover mid-deploy.
+2. **Make the `db` job blocking** — the job has reported a run (PR #78), so it
    is now selectable in Settings → Branches. Two minutes of web UI, and it's
    what makes the pgTAP assertions actually gate a merge. While in there: the
    `e2e` job's display name is **"E2E (Playwright auth loop)"**, and branch
    protection matches required checks **by name** — so if it was ever selected as
    required, re-select it under the new name or it silently stops gating.
-6. **SSO (Google)** (🟢 above) — blocked on registering the OAuth app, which is
+3. **CAPTCHA on the mail-sending endpoints** (🟡 above) — the *only* remaining
+   cost of opening signup, and the one that confirmations did not pay off: a
+   throwaway-mailbox service defeats an email gate, and the row still lands in
+   `auth.users`. Widened 2026-09-01: `/forgot-password` is a second
+   unauthenticated endpoint spending the same project-wide mail budget, with
+   *no* per-IP limit on it at all (verified — 34 unthrottled sends). Do it
+   before or with the public deploy.
+4. **SSO (Google)** (🟢 above) — blocked on registering the OAuth app, which is
    not code, so start that registration before you need it. It smooths the door;
-   it does not block the deploy.
+   it does not block the deploy. Note that its callback will be the second route
+   handler, and unlike `/auth/confirm` it *will* send the user out through
+   Supabase and back — which is the case `playwright.config.ts`'s
+   `127.0.0.1`-not-`localhost` rule was written for.
 
-*Ride-along:* the sign-out scope fix (🟡, #92/#98) is one argument plus a test
-assertion. Fold it into the next change that touches `src/server/actions/auth.ts`
-rather than letting it take a session of its own — but it should not still be
-here at the Phase 4 deploy.
+*No ride-alongs outstanding.* The sign-out scope fix (#92/#98) was the last one
+and rode along with #93, exactly as its entry asked.
 
 The security + CI + commit-hygiene foundation is green, the Phase 2 schema is on
 `main`, and as of 2026-08-04 so is the whole Phase 3 vertical slice. What shifted
-with it: the open items are no longer "wire the plumbing" or "write the
-mutations" but **"make it real for someone other than you"** — and the two 🟠
-gates (email confirmations, the open redirect — the second closed 2026-08-12)
-plus CAPTCHA all exist because signup is open to the public. They are the price
-of that call, not surprises.
+with the Phase 3 close: the open items stopped being "wire the plumbing" or
+"write the mutations" and became **"make it real for someone other than you"** —
+and both 🟠 gates plus CAPTCHA existed because signup is open to the public. They
+were the price of that call, not surprises. Two of the three are now paid.
 The 🟡 bucket is now mostly latent defects and DX debt; none of it should
-displace Phase 4, and the four items added 2026-08-07 (#86/#89, #87, #84, #102)
-are explicitly fill-in work around it.
+displace Phase 4, and the items added 2026-08-07 (#86/#89, #87, #84) are
+explicitly fill-in work around it — the fourth, #102, was closed 2026-08-28.

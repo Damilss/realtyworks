@@ -191,10 +191,26 @@ describe("redemption", () => {
     expect(target).toBe(INVALID_LINK);
   });
 
-  it("refuses a link type this endpoint was never reviewed for", async () => {
+  it.each([
+    ["magiclink", "/dashboard"],
+    ["invite", "/dashboard"],
+    ["signup", "/account-setup"],
+    ["recovery", "/account-setup"],
+  ])("redeems a %s token", async (type, destination) => {
     const verifyOtp = stubSupabase();
 
-    const target = await redeem({ token_hash: TOKEN, type: "recovery" });
+    // Signup and recovery prove control of the mailbox, then force the new
+    // session through account setup before normal navigation.
+    const target = await redeem({ token_hash: TOKEN, type });
+
+    expect(verifyOtp).toHaveBeenCalledWith({ token_hash: TOKEN, type });
+    expect(target).toBe(destination);
+  });
+
+  it("refuses email_change, a link type this endpoint was never reviewed for", async () => {
+    const verifyOtp = stubSupabase();
+
+    const target = await redeem({ token_hash: TOKEN, type: "email_change" });
 
     expect(target).toBe(INVALID_LINK);
     expect(mockedCreateClient).not.toHaveBeenCalled();

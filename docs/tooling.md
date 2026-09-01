@@ -157,23 +157,28 @@ Three consequences worth knowing before editing the job:
   and it is a `sed` rather than a third `--override-name` because the CLI
   documents no override for that key, and a wrong one emits nothing rather than
   failing.
-- **It is the slow job now.** Nine containers pulled cold, against `db`'s three
-  — the `timeout-minutes: 20` backstop is the same as `db`'s and for the same
-  reason, but the weight behind it is not.
+- **It is the slow job now.** Eight containers pulled cold, against `db`'s
+  three — the `timeout-minutes: 20` backstop is the same as `db`'s and for the
+  same reason, but the weight behind it is not.
 
 The `-x` exclusion list **no longer mirrors the `db` job below, and must not be
 synced to it.** This job drives the app over HTTP, so it genuinely needs Kong,
 PostgREST and Realtime — the containers `db` now drops. What both jobs still
 share is the rule about never excluding `storage-api`.
 
-It does still carry the ignored names described under `db` below (`analytics`,
-`inbucket`, `functions` are not valid `-x` values, so logflare and mailpit boot
-regardless). Correcting them here is a live backlog item rather than part of the
-`db` change, because this job's mailbox story is conditional: mailpit is meant to
-be absent only while `[auth.email] enable_confirmations` is `false`. Turning
-confirmations on (a backlog item, required before the Phase 4 public deploy)
-means signup sends mail and this job needs the mailbox back — so the fix and that
-flag have to be decided together. Details: [playwright.md](playwright.md).
+**The ignored names are gone (2026-08-25).** This list used to carry
+`analytics`, `inbucket` and `functions`, none of which is a valid `-x` value (see
+the trap under `db` below), so logflare booted on every run despite appearing
+excluded. It is now
+`studio,imgproxy,edge-runtime,logflare,vector`, and the correction landed
+alongside issue #93 exactly as planned: the mailbox was the conditional part.
+**Mailpit is now absent from the list on purpose.** With `[auth.email]
+enable_confirmations` on, signup sends real mail and
+`tests/e2e/auth.spec.ts` reads the confirmation link out of the mailbox
+(`tests/e2e/mailbox.ts`), so the mail container is a dependency of this job.
+That is what makes the count eight: postgres, gotrue, kong, postgrest, realtime,
+storage-api, postgres-meta, mailpit. Details:
+[playwright.md](playwright.md).
 
 ### Database suite (`db` job)
 
@@ -214,7 +219,11 @@ Three deliberate choices:
   gotrue, imgproxy, kong, logflare, mailpit, postgres-meta, postgrest, realtime,
   storage-api, studio, supavisor, vector`. This also retires the 2026-08-03
   finding that `inbucket` was "still valid because `--help` lists it" — `--help`
-  listing it is exactly the thing that misleads.
+  listing it is exactly the thing that misleads. Worth knowing when reading
+  `docker ps`: the container is still *named* `supabase_inbucket_<project>`
+  even though its image is `mailpit`, so the old name survives in three places
+  (`--help`, the container name, and stale notes) and is correct in none of
+  them.
 
   **`kong` and `postgrest` must be excluded together.** The CLI health-checks
   PostgREST *through* Kong (`HEAD 127.0.0.1:54321/rest-admin/v1/ready`), so
@@ -232,7 +241,7 @@ Three deliberate choices:
   `config.toml` change, or a CLI bump, so gating on changed paths would miss
   cases.
 
-Cold image pulls still make `e2e` — nine containers to this job's three — the
+Cold image pulls still make `e2e` — eight containers to this job's three — the
 slow job in the matrix; both keep `timeout-minutes: 20` as a backstop against a
 container that never reaches healthy. A `docker ps -a` + `supabase status` step
 runs `if: failure()` for triage.
@@ -345,6 +354,34 @@ the exact version is genuinely the only patched build, so the next patch can
 flow in on a refresh. And when an advisory names a package already in
 `overrides`, re-check whether the override is still *needed* before raising it —
 if the patch is in the parent's range, the entry should be deleted, not bumped.
+
+**A cleared advisory does not stay cleared (2026-08-07, then 2026-08-24).** Two
+more rounds, both stale pins, and it is the repetition that carries the lesson:
+
+| Advisory | Package | Patched | Parent's range | Fix |
+|---|---|---|---|---|
+| GHSA-5p4m-2wfm-xmqj | `js-yaml` 4.3.0 | `>=4.3.1` | `cosmiconfig` `^4.1.0` / `@eslint/eslintrc` `^4.1.1` — **in range** | `pnpm update js-yaml --depth Infinity` |
+| GHSA-2v37-7h3g-55p8 | `nanoid` 3.3.16 | `>=3.3.17` | `postcss` wants `^3.3.16` — **in range** | `pnpm update nanoid --depth Infinity` |
+| GHSA-2v37-7h3g-55p8 *(again)* | `nanoid` 3.3.17 | `>=3.3.18` | `postcss` wants `^3.3.16` — **in range** | `pnpm update nanoid --depth Infinity` |
+
+The third row is the **same advisory** as the second, seventeen days later
+(issue #110). Nothing regressed in the tree and nothing of ours changed: the
+advisory's **patched floor moved 3.3.17 → 3.3.18**, so the exact version that
+closed it became the flagged one. An advisory is a moving target rather than a
+fact with a clearance date, and the blocking audit step is the only thing in the
+stack that notices — which means a red gate on a dependency nobody touched is an
+expected shape here, not evidence that someone broke something. Re-run the
+refresh before concluding an override is needed: the parent's declared range is
+what decides, and `^3.3.16` admits the new floor just as it admitted the old one.
+
+Two reading habits from the same round, both cheap and both easy to get
+backwards. **Verify in `pnpm-lock.yaml`, not `node_modules`** — CI installs with
+`--frozen-lockfile`, so the lockfile is what it actually reads, and pnpm does
+not prune its virtual store on update, leaving stale `nanoid@3.3.16` directories
+under `node_modules/.pnpm` that are unreferenced rather than live. And **the
+audit table's path count is paths, not copies**: nanoid's "5 paths" is one
+deduped copy under `postcss`, shared by next / `@tailwindcss/postcss` / vite,
+which `pnpm why nanoid` reports as "Found 1 version".
 
 ### Why the gate requires pnpm 11 (`packageManager` pin)
 
@@ -522,21 +559,30 @@ Tuning applied (issue #23):
   major bump, so Dependabot never crosses a major on its own — it's
   version-agnostic, not tied to `24`.
 
+**What it does not cover, on the evidence (2026-08-24).** Neither nanoid
+clearance arrived as a Dependabot security PR — both were transitive and
+lockfile-only (no manifest entry to bump), and the red `pnpm audit` step was the
+notification both times. Grouped weekly version updates are what this config
+buys; a transitive advisory reaching us before CI does is not something to plan
+around. Open question, filed in [`backlog.md`](backlog.md): whether that is the
+lockfile-only shape or the moved floor being a revision rather than a new
+advisory.
+
 ### Moving Node to a new major (do it in this order)
 
-The runtime pin and the types pin are two different files. Bump the **runtime
-first**, then the types — bumping only `@types/node` recreates the exact
-mismatch this rule exists to prevent.
+The runtime constraints and the types pin are separate settings. Bump both
+**runtime constraints first**, then the types — bumping only `@types/node`
+recreates the exact mismatch this rule exists to prevent.
 
-1. **`.nvmrc`** → the new major (e.g. `24` → `26`). This is the runtime, and
-   it is the *only* runtime pin in the repo: CI reads it via
+1. **`.nvmrc`** → the new major (e.g. `24` → `26`). CI reads it via
    `node-version-file: .nvmrc` in **both** the `verify` and `e2e` jobs
-   (`ci.yml`), and `nvm use` reads it locally. There is no `engines` field in
-   `package.json` and no Dockerfile yet — if either is added later, they become
-   runtime pins too and belong in this step.
-2. **`package.json`** → `@types/node` to the matching major (`^24` → `^26`),
+   (`ci.yml`), and `nvm use` reads it locally.
+2. **`package.json` `engines.node`** → the matching major range (e.g.
+   `>=24 <25` → `>=26 <27`). Package managers read this constraint and warn
+   when a local install uses the wrong Node major.
+3. **`package.json`** → `@types/node` to the matching major (`^24` → `^26`),
    then `pnpm install`.
-3. **Leave the Dependabot `ignore:` rule alone.** It drops any `@types/node`
+4. **Leave the Dependabot `ignore:` rule alone.** It drops any `@types/node`
    major regardless of number, so it keeps working on the new major with no
    edit. Removing it would let the types start leading the runtime again.
 
@@ -550,6 +596,23 @@ that pair is what caught the `^20`-types-on-Node-24 skew in the first place.
 Prettier **intentionally ignores Markdown** (`*.md` in `.prettierignore`) —
 docs are hand-formatted. The pnpm lockfile and generated Next.js output are
 ignored too. So `pnpm format:check` failures are never about docs.
+
+**`.editorconfig` is the layer below Prettier, and nothing enforces it.**
+It sets UTF-8, LF, two-space indent, a final newline, and trailing-whitespace
+trimming for every file, so an editor gets the house style right in file types
+Prettier never sees — SQL migrations, `.env.example`, `.nvmrc`, shell scripts,
+the Husky hooks. There is no CI step for it and there is not meant to be: it
+steers editors as you type, while Prettier remains the gate for the extensions
+it owns. Where the two overlap they already agree, and `pnpm format:check`
+stays authoritative if they ever drift.
+
+Two overrides earn their place. **`[*.md] trim_trailing_whitespace = false`** —
+Markdown's hard line break *is* two trailing spaces, so trimming would silently
+rewrite docs; this is also why the setting cannot simply mirror the global
+block. **`[*.py] indent_size = 4`** covers the one Python file in the repo,
+`.github/scripts/semgrep-annotations.py` (PEP 8, not the JS two). Prettier
+formats neither extension, so in both cases `.editorconfig` is the only thing
+expressing the convention at all.
 
 **YAML is the opposite case, and it has a blind spot.** Prettier *does* format
 `*.yml`/`*.yaml` (only `pnpm-lock.yaml` is exempt), and its glob traverses
@@ -571,6 +634,14 @@ worth adding (`actionlint` doesn't understand the issue-forms schema anyway).
 Running record of problems hit and calls made, newest first. (PR numbers are
 the paper trail; see git history for the full diffs.)
 
+- **2026-08 · a cleared advisory came back on its own** (issue #110) —
+  GHSA-2v37-7h3g-55p8's patched floor moved 3.3.17 → 3.3.18, so the blocking
+  audit step went red on every branch seventeen days after that same advisory
+  was cleared, with no dependency change of ours in between. Another
+  `pnpm update nanoid --depth Infinity` was the whole fix — still inside
+  `postcss`'s declared `^3.3.16`, so still no override. Worth recording because
+  the instinct on a red gate is to hunt for what *we* changed; here the answer
+  was that the advisory moved. Detail in the dependency-gate section above.
 - **2026-08 · the `e2e` job carries a real secret now** — closing the vertical
   slice put two service-role writes in the app (the vendor invite and the
   attachment-metadata insert), so the job's `.env.local` step gained

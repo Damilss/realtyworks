@@ -1,0 +1,21 @@
+<!--
+  The password-recovery email (supabase/config.toml,
+  [auth.email.template.recovery]). Like confirmation.html, this points at our
+  cookie-writing route handler instead of GoTrue's implicit-flow URL fragment.
+-->
+<h2>Reset your RealtyWorks password</h2>
+
+<p>
+  Follow the link below to verify the request and choose a new password. If you
+  did not request this, you can ignore the message and keep your current
+  password.
+</p>
+
+<p>
+  <a
+    href="{{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&type=recovery"
+    >Choose a new password</a
+  >
+</p>
+
+<p>The link is single use and expires in an hour.</p>

@@ -59,11 +59,11 @@ reporting above.
 | Framework | [Next.js](https://nextjs.org) 16 (App Router) |
 | Language | TypeScript (strict) on React 19 |
 | Package manager | **pnpm** `11.13.1` (pinned via `packageManager`) |
-| Runtime | Node **24** (pinned in `.nvmrc`, matched by CI) |
+| Runtime | Node **24** (pinned in `.nvmrc`, matched by CI; `engines.node` warns on a wrong major) |
 | Unit tests | Vitest |
 | E2E tests | Playwright (the whole vertical slice runs in CI against a real seeded stack — see [docs/playwright.md](docs/playwright.md)) |
 | Database | Supabase (Postgres 17, Auth, Storage, RLS) — local stack via the pinned `supabase` CLI; schema lives in `supabase/migrations/` (RLS ships with each table), pgTAP tests in `supabase/tests/` |
-| Lint / format | ESLint (`next/core-web-vitals` + TypeScript) · Prettier |
+| Lint / format | ESLint (`next/core-web-vitals` + TypeScript) · Prettier · `.editorconfig` (editor-side, not gated) |
 | Git hygiene | Husky + lint-staged · commitlint (conventional commits) · gitleaks |
 
 Server-side auth is `@supabase/ssr`: browser and per-request server clients in
@@ -82,8 +82,10 @@ on 2026-07-27, the staff write path on 2026-08-02, and the vendor half on
 2026-08-03 — zod schemas in `src/schemas/`, the server-only data-access layer
 and server actions in `src/server/`, the `(auth)` / `(dashboard)` route groups,
 and `src/app/auth/confirm/route.ts`, which redeems a magic link into cookie
-session. Planned for a later phase (decided, not yet installed): Sentry
-(Phase 4). There is **no separate backend service** — backend logic lives in
+    session. Email confirmations followed on 2026-08-25 (the last gate before
+    Phase 4), reusing that same route handler for signup and password-recovery
+    links. Both finish through verified account setup. Planned for a later phase
+    (decided, not yet installed): Sentry (Phase 4). There is **no separate backend service** — backend logic lives in
 Postgres (RLS/constraints), Next.js server actions/route handlers, and Supabase
 Edge Functions. See `CLAUDE.md` §2.
 
@@ -95,6 +97,9 @@ Edge Functions. See `CLAUDE.md` §2.
 
 - **Node 24** — pinned in `.nvmrc`. `nvm use` reads it; any Node 24 also works
   if you manage versions another way (fnm, asdf, Volta, or a manual install).
+  `package.json` declares `engines.node` (`>=24 <25`) as a second signal: a
+  wrong major prints an `Unsupported engine` warning on `pnpm install` — it
+  warns, it does not stop the install.
 - **pnpm 11.13.1** — easiest via [corepack](https://nodejs.org/api/corepack.html)
   (`corepack enable`), which reads the `packageManager` field and activates the
   pinned version on first use; **do not use npm**. The first `pnpm` command may
@@ -158,10 +163,18 @@ pnpm dev              # http://127.0.0.1:3000
 ```
 
 `/` redirects to `/dashboard`, which redirects to **`/login`** when there is no
-session. **`/signup`** is open self-registration (name, email, password,
-phone) — but a self-registered account is deliberately inert: it lands as an
-unlinked `vendor`, so RLS returns nothing until staff link it to a `vendors`
-row, and the dashboard says as much instead of rendering an empty table.
+session. **`/signup`** is open self-registration and starts with only an email.
+The owner follows the confirmation link, then enters their name and phone and
+chooses a password in authenticated account setup. This order matters: Supabase
+resends a link for an existing unconfirmed address without replacing its old
+password or metadata, so RealtyWorks accepts neither until the mailbox has been
+verified. Locally that mail goes to **mailpit** at
+<http://127.0.0.1:54324>, not to a real inbox. **`/forgot-password`** sends a
+non-enumerating recovery link through the same setup boundary.
+Even once confirmed, a self-registered account is deliberately inert: it lands
+as an unlinked `vendor`, so RLS returns nothing until staff link it to a
+`vendors` row, and the dashboard says as much instead of rendering an empty
+table.
 
 Prefer `127.0.0.1` over `localhost` for the dev server. It is what
 `[auth] site_url` in `supabase/config.toml` and the Playwright `baseURL` both
@@ -243,7 +256,9 @@ timeout, not on an assertion. The specs sign in as the seeded users and assert
 against the seeded fixtures **by identity, not by row count**, so the variables
 must point at a **running, freshly reset** stack; placeholders no longer work.
 The vendor-loop specs also need `SUPABASE_SECRET_KEY`, since inviting a vendor
-is a service-role write. Most specs write, and the signup and invite paths
+is a service-role write. The signup spec needs the **mail container** running
+(it reads the confirmation link out of mailpit), which `supabase start` gives
+you by default. Most specs write, and the signup and invite paths
 create real `auth.users` rows that nothing cleans up, so a second run without
 `db reset` fails on "account already exists". CI's `e2e` job does exactly this —
 boots a stack, resets it, writes `.env.local` from `supabase status` — see
@@ -274,12 +289,14 @@ way — is in [Testing](#testing) below and [docs/playwright.md](docs/playwright
   `pnpm exec vitest run src/path/to/file.test.ts`, or filter by name with
   `pnpm exec vitest run -t "name of test"`.
 - **E2E (Playwright)** — owns `tests/e2e/`: the boot smoke test plus the three
-  slice suites — `auth.spec.ts` (sign in as each seeded role, self-register,
-  wrong password, signed-out redirect, sign out), `work-orders.spec.ts` (create,
+  slice suites — `auth.spec.ts` (sign in as each seeded role, self-register and
+  confirm by following a link read out of the real mailbox, wrong password,
+  signed-out redirect, sign out), `work-orders.spec.ts` (create,
   assign, note, the 404 and vendor-refusal paths), and `vendor-loop.spec.ts`
   (invite → redeem a real magic link in a second browser context → status +
-  photo, plus single-use and the stale link clearing from the page on
-  reassignment). Requires a one-time browser download:
+  photo, plus single-use, the stale link clearing from the page on
+  reassignment, and `/auth/confirm` refusing a hostile post-login destination
+  while still deep-linking to the job). Requires a one-time browser download:
   `pnpm exec playwright install chromium`, and a seeded local stack. All of them
   run in CI (the parallel `e2e` job in `.github/workflows/ci.yml`), which boots
   its own Supabase stack — so CI proves the app runs *and* that RLS holds
@@ -323,8 +340,8 @@ auth loop, staff write path, and vendor loop. (The job is still *named* "E2E
 any branch-protection rule that matches the check by name.) `db`
 runs the pgTAP suite from `supabase/tests/`, so an RLS or write-guard regression
 fails CI rather than merging green — on a **deliberately smaller stack**, three
-containers to `e2e`'s nine, because pg_prove talks to Postgres directly and
-never makes an HTTP request. The two `-x` exclusion lists are not the same list
+containers to `e2e`'s eight, because pg_prove talks to Postgres directly and
+never makes an HTTP request (and, unlike `e2e`, has no mailbox to read). The two `-x` exclusion lists are not the same list
 and must not be synced. Both jobs pull Docker images cold, so they, not
 `verify`, set the wall-clock. Details: [docs/tooling.md](docs/tooling.md).
 
@@ -366,9 +383,9 @@ realtyworks/
 ├── public/
 ├── src/
 │   ├── app/                # Next.js App Router · globals.css carries the shadcn zinc theme
-│   │   ├── (auth)/         # login · signup (signed-out route group)
+│   │   ├── (auth)/         # login · signup · recovery · verified account setup
 │   │   ├── (dashboard)/    # authed shell · /dashboard · /work-orders/{new,[id]} · /vendors
-│   │   └── auth/confirm/   # route handler: redeems a magic link → session cookies
+│   │   └── auth/confirm/   # route handler: redeems auth email links → session cookies
 │   ├── components/
 │   │   ├── features/       # composed, domain-specific components (work-orders/)
 │   │   └── ui/             # shadcn/ui primitives (button, input, label, card, table, badge, textarea, native-select, form-feedback)
@@ -383,14 +400,16 @@ realtyworks/
 ├── supabase/
 │   ├── migrations/         # timestamped SQL — SOURCE OF TRUTH (RLS ships with its table)
 │   ├── tests/              # pgTAP RLS/write-guard suite
+│   ├── templates/          # confirmation/recovery mail → /auth/confirm
 │   ├── seed.sql            # 3 login-able users + sample data
 │   └── config.toml
 ├── tests/
 │   ├── unit/               # Vitest (DOM harness)
 │   └── e2e/                # Playwright specs (smoke · auth · work-orders · vendor-loop)
 ├── .env.example            # committed template — documents every required var
+├── .editorconfig           # editor defaults (LF, 2-space, final newline)
 ├── .gitleaks.toml          # secret-scanning config
-├── .nvmrc                  # Node 24
+├── .nvmrc                  # Node 24 (with package.json engines)
 ├── commitlint.config.mjs   # conventional-commit rules
 ├── playwright.config.ts
 ├── vitest.config.ts

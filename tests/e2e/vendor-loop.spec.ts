@@ -397,6 +397,13 @@ test("the confirm endpoint refuses an off-site redirect", async ({
 
   await expect(deepLinked).toHaveURL(workOrderPath);
   await expect(deepLinked.getByRole("heading", { name: title })).toBeVisible();
+
+  // Closed for the same reason the loop closes its own: `browser` is
+  // worker-scoped, so a context left open outlives this test, and Playwright
+  // starts a trace chunk on every still-open context at the start of each
+  // later test in the worker — padding unrelated traces with a session that
+  // stopped being interesting here.
+  await deepLinked.context().close();
 });
 
 test("a vendor cannot reach the vendors page", async ({ page }) => {

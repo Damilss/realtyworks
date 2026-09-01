@@ -192,8 +192,10 @@ record what was actually observed.
   Two behaviours worth recording because the design leans on them, both
   confirmed against the local stack:
   - **`generateLink` sends no email.** Mailpit stayed at zero messages across a
-    full invite. That is what lets the CI `e2e` job keep excluding the mail
-    container, and what makes "Copy link" cost nothing to run.
+    full invite, which is what makes "Copy link" cost nothing to run. (It used
+    to be the reason the CI `e2e` job could exclude the mail container too. That
+    half expired on 2026-08-25: signup confirmations now send real mail and the
+    job boots mailpit deliberately. The invite still sends none.)
   - **The token is single use.** A replayed `token_hash` comes back
     `otp_expired`. Pinned by `tests/e2e/vendor-loop.spec.ts`.
 
@@ -279,6 +281,24 @@ redeeming one lands the holder inside our own app.
   **not** a decision that gating is unnecessary: the first column that holds an
   access instruction or a tenant's contact details re-opens this question, and
   device binding on first open is the option to weigh then.
+
+### 6b. `/auth/confirm` now serves signup too (2026-08-25, issue #93)
+
+The endpoint built for the invite turned out to be the whole cost of turning
+email confirmations on: `[auth.email.template.confirmation]` points the signup
+email at `/auth/confirm?token_hash={{ .TokenHash }}&type=signup`, the same URL
+shape `buildInviteUrl()` produces, and `signup` joined `ALLOWED_TYPES`.
+
+Two consequences for this document. **The mail container is no longer optional
+in CI** — see the correction under §6 above. And **the address-squat window
+narrowed**: `inviteVendor`'s refusal of a pre-existing account was written when
+anyone could register an address they did not own, and an attacker now has to
+control the mailbox. The check stays, because the remaining cases — a shared or
+recycled mailbox, an honest collision between two vendors — are real and it is
+one comparison.
+
+`recovery` and `email_change` are still refused, and for an unchanged reason:
+both end in a credential change that this handler does nothing about.
 
 ---
 

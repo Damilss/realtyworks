@@ -65,9 +65,14 @@ jobs:
         if: ${{ !cancelled() }}
         run: pnpm run typecheck
 
-      - name: Unit tests
+      # Coverage is reported, never enforced (issue #28): the config sets no
+      # thresholds, so this step fails on a failing test and nothing else. The
+      # table lands in the log to show what is untested — the coverage `include`
+      # spans all of src/, so a module with no test at all appears as 0% rather
+      # than being absent from the report.
+      - name: Unit tests (with coverage report)
         if: ${{ !cancelled() }}
-        run: pnpm run test
+        run: pnpm run test:coverage
 
       - name: Build
         if: ${{ !cancelled() }}
@@ -90,7 +95,7 @@ jobs:
   e2e:
     name: E2E (Playwright auth loop)
     runs-on: ubuntu-latest
-    # 9 containers pulled cold — the heaviest job in the matrix since `db`
+    # 8 containers pulled cold — the heaviest job in the matrix since `db`
     # dropped to three. The cap is a backstop against a boot that never reaches
     # healthy, instead of burning the 6h default.
     timeout-minutes: 20
@@ -139,21 +144,21 @@ jobs:
       # `storage` schema 20260717120800_create_storage_bucket.sql writes into),
       # and `db` is not excludable at all.
       #
-      # Three names below are inert: `functions`, `analytics` and `inbucket` are
-      # not valid `-x` values — the validator's list is edge-runtime, gotrue,
-      # imgproxy, kong, logflare, mailpit, postgres-meta, postgrest, realtime,
-      # storage-api, studio, supavisor, vector — and a name off it is silently
-      # ignored rather than rejected. So logflare and mailpit boot regardless,
-      # and only studio/imgproxy/edge-runtime/vector are actually dropped:
-      # 9 containers, not the 7 this reads like. Correcting them is a live
-      # backlog item, not a tidy-up, because the mailbox is conditional —
-      # `inbucket` (i.e. `mailpit`) is meant to be gone only while
-      # [auth.email] enable_confirmations is false. Turning confirmations on
-      # (required before the Phase 4 public deploy) makes signup send mail and
-      # this job needs the mailbox back, so the fix and that flag are decided
-      # together. See docs/backlog.md and docs/tooling.md.
+      # USE THE NAMES THE CLI VALIDATES, NOT THE ONES `--help` PRINTS — a name
+      # off the validator's list (edge-runtime, gotrue, imgproxy, kong, logflare,
+      # mailpit, postgres-meta, postgrest, realtime, storage-api, studio,
+      # supavisor, vector) is silently ignored rather than rejected. This list
+      # used to carry three such names (`functions`, `analytics`, `inbucket`), so
+      # logflare booted on every run despite appearing excluded.
+      #
+      # `mailpit` is now absent on purpose rather than by accident. Since
+      # [auth.email] enable_confirmations went on (issue #93), signup sends real
+      # mail and tests/e2e/auth.spec.ts reads the mailbox to follow the link, so
+      # the mail container is a dependency of this job — not dead weight.
+      # That leaves 8 containers: postgres, gotrue, kong, postgrest, realtime,
+      # storage-api, postgres-meta, mailpit.
       - name: Start Supabase stack
-        run: pnpm exec supabase start -x studio,imgproxy,edge-runtime,functions,analytics,vector,inbucket
+        run: pnpm exec supabase start -x studio,imgproxy,edge-runtime,logflare,vector
 
       # The specs assert against the seeded fixtures by name, and most of them
       # write — including auth.users rows nothing cleans up — so they need the
@@ -260,7 +265,8 @@ jobs:
       #
       # The `e2e` job's list is deliberately NOT the same and must not be synced
       # to this one: it drives the app over HTTP and needs Kong, PostgREST and
-      # Realtime. (It does still carry the ignored names — see docs/backlog.md.)
+      # Realtime — and it keeps `mailpit`, which the signup-confirmation spec
+      # reads. This job has no mail to read and drops it.
       - name: Start Supabase stack
         run: pnpm exec supabase start -x studio,imgproxy,edge-runtime,logflare,vector,mailpit,postgrest,realtime,postgres-meta,kong
 

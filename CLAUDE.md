@@ -10,8 +10,10 @@ Read this fully before generating code, scaffolding, or migrations.
 ## 0. Quick reference
 
 **Package manager is `pnpm` (`pnpm@11.13.1`), not npm.** Node is pinned to
-**24** (`.nvmrc`, matched by CI). Stack versions are new and have breaking
-changes: **Next.js 16.2.11**, **React 19.2.4**. Per `AGENTS.md`, read the
+**24** in two places that move together — `.nvmrc` (matched by CI) and
+`engines.node` in `package.json` (`>=24 <25`, a warning on install, not a
+gate). Stack versions are new and have breaking changes:
+**Next.js 16.2.11**, **React 19.2.4**. Per `AGENTS.md`, read the
 relevant guide in `node_modules/next/dist/docs/` (`01-app`, `02-pages`,
 `03-architecture`, …) before writing Next.js code — do not assume
 training-data APIs.
@@ -25,6 +27,7 @@ pnpm start              # serve the production build
 pnpm lint               # eslint (next core-web-vitals + typescript)
 pnpm typecheck          # tsc --noEmit (strict)
 pnpm test               # vitest run --passWithNoTests
+pnpm test:coverage      # same, + the v8 coverage table (what CI runs; no thresholds)
 pnpm test:e2e           # playwright auth-loop suite (also runs in CI; boots the dev
                         # server itself, but needs a seeded local stack + .env.local)
 pnpm format             # prettier --write .
@@ -54,7 +57,12 @@ Vitest only collects `src/**/*.{test,spec}.{ts,tsx}` and
 via the `@/*` alias (`@/* → ./src/*`, `tsconfig.json`).
 
 **CI** (`.github/workflows/ci.yml`, on PR + push to `main`/`dev`): the `verify` job
-runs lint → format:check → typecheck → test → build → audit. Each check step
+runs lint → format:check → typecheck → test → build → audit. The test step
+runs `test:coverage`, so the coverage table prints in the log; it is
+**visibility, not a gate** — no thresholds are configured, and the step fails
+only on a failing test (issue #28). Coverage `include` spans all of `src/`, so
+an untested module reports 0% instead of vanishing from the table the way
+Vitest's default (loaded modules only) would show it. Each check step
 after the first uses `if: !cancelled()` so one run reports *every* failure, not
 just the first. A parallel `e2e` job boots a local Supabase stack
 (`supabase start -x …` → `db reset` → write `.env.local` from `supabase
@@ -69,7 +77,10 @@ deliberate change, not a tidy-up.) That job sets no
 Its env-writing step is an **allowlist**, not a filter: it admits the CLI's
 `SECRET_KEY` and renames it to `SUPABASE_SECRET_KEY` (the invite and the
 attachment insert are service-role writes), while `SERVICE_ROLE_KEY` and
-`JWT_SECRET` never reach a file `next build` reads.
+`JWT_SECRET` never reach a file `next build` reads. Its stack is **eight
+containers**, and since 2026-08-25 that deliberately includes **mailpit**: the
+signup spec reads the confirmation email out of it (`tests/e2e/mailbox.ts`), so
+the mail container is a dependency of that job rather than dead weight.
 A parallel `db` job runs the pgTAP suite (`supabase test db`), so an RLS or
 write-guard regression fails CI instead of merging green. It boots a **strictly
 smaller stack than `e2e`** — three containers (Postgres, gotrue, storage-api),
@@ -149,8 +160,9 @@ Verify before assuming they exist:
 - **In place — auth loop (2026-07-27):** `src/schemas/auth.ts` (zod v4
   `loginSchema` / `signupSchema` / `normalizePhone`), `src/server/queries/`
   (`session.ts` — the DAL: `getSession`, `requireSession`, `getCurrentProfile`,
-  `isStaff`, `cache()`-memoized behind `import "server-only"`; `work-orders.ts`
-  — `listWorkOrders()`), `src/server/actions/auth.ts` (`signIn` · `signUp` ·
+  `isStaff`, plus `getVerifiedCaller` since 2026-08-30, `cache()`-memoized
+  behind `import "server-only"`; `work-orders.ts` — `listWorkOrders()`),
+  `src/server/actions/auth.ts` (`signIn` · `signUp` ·
   `signOut`), the `(auth)` route group (`/login` + `/signup`, `useActionState`
   client forms), the `(dashboard)` shell (name, role badge, sign-out **form
   POST**) and `/dashboard` (work-order list, plus a pending-access state for an
@@ -158,9 +170,18 @@ Verify before assuming they exist:
   primitives: `input`, `label`, `card`, `table`, `badge`; new deps: `zod`,
   `server-only`. **Auth checks live in pages and the DAL, never in a layout** —
   Next.js Partial Rendering means a layout check stops running on client-side
-  navigation between sibling routes. **Every `useActionState` form echoes its
-  non-sensitive submitted values back** in the action's state and reads them as
-  `defaultValue` (fixed 2026-08-01) — React resets an uncontrolled form after
+  navigation between sibling routes. **A mutating action resolves its caller
+  through the DAL too, with `getVerifiedCaller()`** (2026-08-30, PR review):
+  `getSession()` reads the JWT's claims, which is a *local* signature check
+  once a project uses asymmetric signing keys, so it admits a session revoked
+  up to `jwt_expiry` ago — fine for deciding what to render, wrong for
+  changing a credential or writing an actor id. `getVerifiedCaller()` asks the
+  Auth server instead. An action may import a `server-only` module:
+  `"use server"` means the client's module graph stops at the RPC reference,
+  which is what keeps the DAL usable from both halves of `src/server/`.
+  **Every `useActionState` form echoes its non-sensitive submitted values
+  back** in the action's state and reads them as `defaultValue` (fixed
+  2026-08-01) — React resets an uncontrolled form after
   *every* function action, error paths included, so anything not echoed is
   retyped after a failed submit. Passwords are never echoed; that one field
   clears. It holds for every form added since, and for the next one.
@@ -169,17 +190,38 @@ Verify before assuming they exist:
   `vendors` row, so `current_vendor_id()` is NULL and every vendor-scoped
   policy arm returns nothing (pinned by
   `supabase/tests/03_signup_defaults.test.sql`). Forward migration
-  `20260727140000_handle_new_user_phone_from_metadata.sql` makes
-  `handle_new_user()` read the signup form's phone out of `raw_user_meta_data`
-  (`auth.users.phone` still wins when set) and store whitespace-only name/phone
-  as NULL. Two accepted risks, both in `docs/backlog.md`:
-  `[auth.email] enable_confirmations` is still `false` (must be on before the
-  Phase 4 public deploy), and there is no CAPTCHA —
-  `[auth.rate_limit] sign_in_sign_ups` is the only brake. One known **defect**
-  is filed alongside them (nobody chose this one): `signOut()` passes no
-  options, and auth-js defaults that to **global** scope, so signing out on one
-  device revokes the account's sessions everywhere. It should pass
-  `{ scope: "local" }`.
+  `20260727140000_handle_new_user_phone_from_metadata.sql` taught
+  `handle_new_user()` to fall back to `raw_user_meta_data ->> 'phone'`
+  (`auth.users.phone` still wins when set) and to store whitespace-only
+  name/phone as NULL. **The phone half of that fallback is now dormant**
+  (2026-08-31): `/signup` collects an email and nothing else, so `signUp()`
+  sends no `options.data` at all, and the only other account-creating path —
+  `inviteVendor`'s `admin.createUser` — sends `user_metadata.full_name` and no
+  phone. Name and phone are collected at `/account-setup` after the emailed
+  link is followed, and `completeAccountSetup()` writes them to `profiles`
+  directly; the trigger is `after insert on auth.users`, so the
+  `updateUser({ data })` it also makes never reaches it. Leave the fallback in
+  place — it is free, it stays correct, and SMS signup (`[auth.sms]
+  enable_signup`, Phase 5) is the path that would make it live again — but do
+  not describe it as the route a phone travels today. The `full_name` half is
+  still live, through the invite. One accepted risk remains, in
+  `docs/backlog.md`: there is no
+  CAPTCHA, and `[auth.rate_limit] sign_in_sign_ups` is the only brake. (The
+  other, `enable_confirmations = false`, was closed 2026-08-25 — see the email
+  confirmations bullet below.) **`/forgot-password` widened that risk**
+  (2026-09-01, PR review): it is a second unauthenticated endpoint that sends
+  mail on an anonymous caller's say-so, and `sign_in_sign_ups` does **not**
+  cover `/recover` — 34 consecutive requests from one IP all returned 200 and
+  all 34 sent, verified against the running stack. The only cap is
+  `[auth.rate_limit] email_sent`, which is a *blast radius* rather than a
+  brake: it is project-wide, so `/signup` and `/forgot-password` share one
+  hourly pool and exhausting it stops confirmation mail for real signups — and
+  it is unenforced locally, because it requires custom SMTP and that block is
+  commented out. CAPTCHA covers `/recover` as well as `/signup`, which is why
+  the backlog entry now names both. The `signOut()` global-scope defect filed
+  alongside it is **fixed** (2026-08-25, issues #92/#98): the action now passes
+  `{ scope: "local" }`, so signing out on one device no longer revokes the
+  account's sessions everywhere.
 - **In place — staff write path (2026-08-02):** `src/schemas/work-order.ts`,
   `src/server/actions/work-orders.ts` (`createWorkOrder` · `assignVendor` ·
   `addNote`), `src/server/queries/` (`properties.ts` · `vendors.ts`, plus
@@ -254,6 +296,99 @@ Verify before assuming they exist:
   leaves its test green, the test does not cover the guard** — check by actually
   deleting it once. Reasoning: `docs/vendor-access.md` §6a; the testing half:
   `docs/playwright.md`.
+- **In place — email confirmations (2026-08-25, issue #93)** — billed at the
+  time as the last gate before Phase 4, though PR review opened another on the
+  same endpoint (see the end of this bullet): `[auth.email] enable_confirmations = true`, a custom
+  `supabase/templates/confirmation.html`, `signup` added to `/auth/confirm`'s
+  `ALLOWED_TYPES`, `signUp()` returning a "check your email" state instead of
+  redirecting, and `tests/e2e/mailbox.ts` reading the real mailbox. **No
+  migration** — the seeded users already carry `email_confirmed_at`, so every
+  existing login and all 94 pgTAP assertions were untouched. Five things worth
+  carrying forward, all verified against the running stack rather than read in
+  a doc. **The default template is unusable here**: `{{ .ConfirmationURL }}` is
+  GoTrue's implicit flow, so the template points at our own `/auth/confirm`
+  with `token_hash={{ .TokenHash }}&type=signup` — the same shape
+  `buildInviteUrl()` builds. **`content_path` under
+  `[auth.email.template.*]` resolves from the project root**, while
+  `[auth.email.notification.*]` resolves from `supabase/`; the CLI's two
+  commented examples differ for that reason and it is not a typo. **Editing a
+  template while the stack runs silently stops all auth mail** (found 2026-08-28,
+  reviewing this branch): each one is bind-mounted into Kong as a single *file*,
+  so rewriting it on the host orphans the container's inode, Kong 404s, and
+  GoTrue sends nothing — reported as a spec timing out on an empty mailbox, at
+  the next container restart rather than at the edit. `supabase stop && start`
+  rebinds it and `db reset` does not; CI is immune, since it never edits a
+  template mid-run. Same shape as the `-x` trap: a local-only failure whose
+  symptom names the wrong subsystem. **A duplicate
+  signup still errors** — `user_already_exists` / 422 for a *confirmed*
+  address, contrary to the docs' claim that the response becomes obfuscated;
+  what changed is that re-submitting an *unconfirmed* address resends the link,
+  which is why there is no separate "resend" control. And **`signIn` names the
+  `email_not_confirmed` case on purpose**: GoTrue only returns it after the
+  password checked out, so it is not an enumeration oracle, while the generic
+  message would tell someone who simply has not opened their email that their
+  password is wrong. The local mailbox is **mailpit** (`[local_smtp]`, port
+  54324) even though its container is still named `supabase_inbucket_*`.
+  Production SMTP is written into `config.toml` as Resend, **commented out** —
+  deliberately not `enabled = false`. Enabling it in the file would route local
+  dev and the CI mailbox spec through a real provider, so it is turned on for
+  the hosted project only; but `enabled = false` is not the safe way to say that.
+  `supabase config push` sends the whole auth block as one body, and the CLI maps
+  a *present* smtp table with `enabled = false` to `smtp_host = ""` — the way you
+  **disable** custom SMTP. Present-and-false would therefore let any later push
+  wipe hosted SMTP alongside `mailer_autoconfirm = false`, i.e. mandatory
+  confirmation mail sent through the built-in 2/hour mailer, so new accounts get
+  no link and cannot sign in. Commented out, no `smtp_*` field is emitted at all.
+  The general rule: **in `config.toml`, "off" and "absent" are the same locally
+  and opposite remotely** — reach for absent unless you mean to push the off.
+  **One 🟠 gate reopened here on 2026-08-28** (`docs/backlog.md`): `/auth/confirm`
+  redeems on `GET`, so a mail gateway that prefetches links spends the one-time
+  token — and takes the session cookie — before the recipient clicks. Reproduced
+  with `curl`. It predates this work (`magiclink`/`invite` have redeemed on GET
+  since 2026-08-03) and confirmations widened it to `signup`/`recovery`; it is
+  invisible locally because mailpit follows nothing, and live as soon as real
+  mail leaves Resend. Fix it before the public deploy, not after.
+- **In place — verified account setup + password recovery (2026-08-26,
+  `defb1bd`):** `src/app/(auth)/account-setup/` and
+  `src/app/(auth)/forgot-password/` (a page + `useActionState` form each),
+  `accountSetupSchema` / `passwordResetSchema` in `src/schemas/auth.ts`,
+  `completeAccountSetup` + `requestPasswordReset` in
+  `src/server/actions/auth.ts`, `supabase/templates/recovery.html` registered at
+  `[auth.email.template.recovery]`, and `recovery` added to both `ALLOWED_TYPES`
+  and `ACCOUNT_SETUP_TYPES` in `/auth/confirm`. `/login` links to
+  `/forgot-password`. **No migration** — `profiles` already had the columns and
+  the policies. Four things worth carrying forward.
+
+  **`/signup` collects an email and nothing else.** The account it creates holds
+  a random 32-byte password (`pendingAccountPassword()`) that is never returned,
+  logged, or shown, so a pre-confirmation account is unreachable by password and
+  every authoritative value is chosen at `/account-setup` by whoever proved they
+  hold the mailbox. That is what makes GoTrue's ambiguous answer to a repeat
+  signup safe to treat as one case: a resend for an unconfirmed address does not
+  replace the first password or metadata, and here there is nothing
+  authoritative for it to fail to replace.
+
+  **Recovery re-enters the same boundary.** A `recovery` token redeems at
+  `/auth/confirm` and lands on `/account-setup`, so losing the confirmation
+  session is not a lockout — the second half of the reason `/signup` never sets
+  a password.
+
+  **The profile UPDATE is selected back, not written blind.** PostgREST answers
+  an UPDATE that matched no row with 204 and a null error, so `profileError`
+  alone cannot tell "written" from "no such row" — and that state is not
+  hypothetical, since `getCurrentProfile()` already handles a live session whose
+  profile row is missing. Missing it here would spend the one-time link, change
+  the password anyway, and land the user on a dashboard saying their account is
+  not configured, with no link left to retry.
+
+  **`/account-setup` is a default destination, not an enforced one** — a 🟡 in
+  `docs/backlog.md`. `/auth/confirm` reads `type` from the caller's own query
+  string, and GoTrue does not bind a token to the type used to redeem it, so the
+  holder can rewrite `type` and land on `next` instead. That is a bypassable
+  guardrail, not an authorization bypass — it mints no session the holder could
+  not already get, and `completeAccountSetup()` re-resolves the caller through
+  `getVerifiedCaller()` regardless. Do not add a check that reads `type` and
+  call it enforcement.
 - **Not yet created:** `supabase/functions/`, `src/app/api/`. Neither is a gap
   to fill on its own — edge functions are Phase 5 (§6 SMS), and the only route
   handler that exists is `src/app/auth/confirm/route.ts`, which is deliberately
@@ -400,7 +535,7 @@ realtyworks/
 ├── public/
 ├── src/
 │   ├── app/                        # App Router
-│   │   ├── (auth)/                 # route group: login, signup
+│   │   ├── (auth)/                 # route group: login, signup, account-setup, forgot-password
 │   │   ├── (dashboard)/            # route group: authed app shell (work orders, vendors)
 │   │   ├── auth/confirm/route.ts   # redeems a magic link → session cookies
 │   │   ├── api/                    # route handlers (webhooks etc.) — not created yet
@@ -427,6 +562,7 @@ realtyworks/
 │   └── proxy.ts                    # Next 16 root convention (was middleware.ts)
 ├── supabase/
 │   ├── migrations/                 # timestamped SQL — SOURCE OF TRUTH (RLS ships with its table)
+│   ├── templates/                  # confirmation.html · recovery.html — both point at /auth/confirm
 │   ├── functions/                  # edge functions (not created until needed)
 │   ├── tests/                      # pgTAP RLS/guard suite — `pnpm exec supabase test db`
 │   ├── seed.sql                    # 3 test users + sample data (db reset loads it)
@@ -436,8 +572,9 @@ realtyworks/
 │   └── e2e/                        # playwright
 ├── .env.example                    # committed — documents required vars
 ├── .env.local                      # gitignored — real secrets
+├── .editorconfig                   # editor defaults (LF, 2-space, final newline) — not CI-enforced
 ├── .gitleaks.toml                  # secret-scanning config (default rules + allowlist)
-├── .nvmrc                          # pinned Node, matches CI
+├── .nvmrc                          # pinned Node, matches CI + package.json engines
 ├── commitlint.config.mjs
 ├── eslint.config.mjs
 ├── .prettierrc
@@ -459,7 +596,20 @@ realtyworks/
   `src/server/actions/**` is the exception: client components are *meant* to
   import server actions, because `"use server"` swaps the body for an RPC
   reference and the implementation never ships. A lint rule blocking all of
-  `@/server/*` would break the login form; scope one to `queries/` (backlog).
+  `@/server/*` would break the login form, so the one in `eslint.config.mjs`
+  (`realtyworks/no-server-queries-in-client`, 2026-08-28, issue #29) is scoped
+  to `queries/` and fires only inside a `"use client"` module. It allows
+  `import type`, which is how all five client components that name a query
+  module reach their types — those imports are erased before bundling. It
+  matches by **resolving** the specifier rather than reading its text, so an
+  alias and the relative path to the same file are one case, and it covers
+  every node that pulls a module in: static import, dynamic `import()`,
+  `export … from`, `export * from`, and `require()` (2026-09-01, PR review —
+  a text-prefix check on `ImportDeclaration` alone missed all four of the
+  others). It is not the boundary and never was: `server-only` fails
+  `next build` for every one of these, verified against a real build. The rule
+  buys that same failure earlier, with a message that names the boundary —
+  which is worth nothing for a shape it does not match.
 - `src/schemas/` (zod) is imported by both client and server: validate in both,
   trust only the server. Schemas do NOT live in `src/server/`.
 - `database.types.ts` is generated via `supabase gen types typescript`.
