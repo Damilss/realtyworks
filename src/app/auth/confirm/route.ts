@@ -29,10 +29,38 @@ import { createClient } from "@/lib/supabase/server";
  * redeem an `email_change` token at an endpoint that was never reviewed for it.
  *
  * `signup` joined the list when email confirmations went on, and `recovery`
- * joined when verified account setup moved behind this endpoint. Both are
- * forced to `/account-setup`, where the session minted here authorizes the
- * credential change. `email_change` is still refused because that flow has
- * different two-address confirmation semantics.
+ * joined when verified account setup moved behind this endpoint. `email_change`
+ * is still refused because that flow has different two-address confirmation
+ * semantics.
+ *
+ * **`ACCOUNT_SETUP_TYPES` is a default destination, not an enforced one.** It
+ * reads the caller's own query string, and GoTrue does not bind a token to the
+ * type used to redeem it — it looks the hash up in the column that type implies,
+ * and several types share a column. Verified against the running stack
+ * (2026-09-01), redeeming each token under a *different* type:
+ *
+ *   recovery token + `type=magiclink`  → accepted, session minted
+ *   signup token   + `type=invite`     → accepted, session minted
+ *   signup token   + `type=magiclink`  → refused (`otp_expired`)
+ *
+ * So the pairs that collide are the ones sharing storage — `recovery`/`magiclink`
+ * in `recovery_token`, `signup`/`invite` in `confirmation_token` — and each
+ * account-setup type has a non-setup partner. Whoever holds the link can edit
+ * `type` and land on `next` instead of `/account-setup`.
+ *
+ * That is a bypassable *guardrail*, and deliberately not relied on as a gate.
+ * Rewriting `type` cannot change which user the token belongs to, so it grants
+ * no session the holder could not already mint; `next` stays bounded by
+ * `safeNext` below; and nothing downstream treats "went through /account-setup"
+ * as authorization — `completeAccountSetup()` re-resolves the caller through
+ * `getVerifiedCaller()` and writes through RLS.
+ *
+ * What it does cost is the *guarantee*, and one consequence is filed in
+ * docs/backlog.md: a self-registration that skips setup keeps the unknown
+ * random password `signUp()` generated, so it is locked out once the session
+ * expires. Do not add a check here that reads `type` and calls it enforcement —
+ * for `recovery` there is nothing to enforce with, because a recovery token and
+ * a magic link are the same bytes in the same column.
  */
 const ALLOWED_TYPES = new Set(["magiclink", "invite", "signup", "recovery"]);
 const ACCOUNT_SETUP_TYPES = new Set(["signup", "recovery"]);

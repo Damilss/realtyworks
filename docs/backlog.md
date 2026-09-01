@@ -836,6 +836,66 @@ a browser and landing signed in; and the redirect-guard table still fails when
 
 ## 🟡 Medium
 
+### 🟡 `/account-setup` is a default destination, not an enforced one (2026-09-01, PR review)
+**Why:** `/auth/confirm` decides whether to force `/account-setup` by reading
+`ACCOUNT_SETUP_TYPES.has(type)` — and `type` comes from the caller's query
+string. GoTrue does not bind a token to the type used to redeem it: it looks the
+hash up in whichever column that type implies, and several types share a column.
+Verified against the running stack, redeeming each token under a *different*
+type than it was minted for:
+
+```
+recovery token + type=magiclink  → accepted, session minted
+signup   token + type=invite     → accepted, session minted
+signup   token + type=magiclink  → refused (otp_expired)
+```
+
+So the collisions are exactly the pairs sharing storage — `recovery`/`magiclink`
+in `recovery_token`, `signup`/`invite` in `confirmation_token` — and **both**
+account-setup types have a non-setup partner. Whoever holds the link can edit
+`type` and land on `next` instead.
+
+**This is not an authorization bypass, and should not be filed as one.**
+Rewriting `type` cannot change which user the token belongs to, so it mints no
+session the holder could not already get; `next` is still bounded by
+`safeNext()`; and nothing downstream treats "arrived via /account-setup" as
+authorization — `completeAccountSetup()` re-resolves its caller with
+`getVerifiedCaller()` and writes through RLS. What is lost is the *guarantee*,
+and the only person who can spend it is the one it protects.
+
+**The consequence worth fixing is a lockout.** `signUp()` sets
+`pendingAccountPassword()` — 32 random bytes nobody keeps — and `/account-setup`
+is where the real password gets chosen. A self-registration that redeems its
+confirmation as `type=invite` gets a session and skips that step, leaving an
+account whose password is unknown permanently. It works until the session
+expires, then cannot sign in; recovery is the only way back, and the same edit
+skips that too. `tests/e2e/auth.spec.ts` calls recovery-into-setup "the second
+lockout path" closed — this reopens it for anyone who edits the URL.
+
+**Do:** stop deriving the destination solely from `type`, and add a check on
+state the caller cannot forge: after a successful exchange, if the profile is
+incomplete (`full_name is null`, which `completeAccountSetup()` is what fills),
+force `/account-setup` regardless of the type claimed. That closes the signup
+half robustly and costs one indexed read on a path that already round-trips to
+GoTrue. An invited vendor is unaffected — `inviteVendor` sets `full_name` from
+`vendors.name`, which `createVendorSchema` requires.
+
+**The recovery half is not fixable here, and that is the honest answer.** A
+recovery token and a magic link are the same bytes in the same column; the
+endpoint cannot tell "reset my password" from "log me in" once the type is a
+lie. A user who chooses to skip setting a new password keeps their old one and
+harms only themselves. Do not add a `type`-reading check and call it enforcement.
+
+**Interacts with the 🟠 GET entry above.** Moving redemption to a POST
+interstitial does *not* fix this — `type` just moves from the query string to a
+form field and stays caller-supplied. Whoever does that work should land the
+profile-completeness check in the same change rather than assume the method
+change covers it.
+
+**Done when:** a signup token redeemed as `type=invite` still lands on
+`/account-setup`, proven by a spec that fails if the completeness check is
+deleted (§5 — delete it once and watch it go red).
+
 ### 🟡 Trim required text fields before the length CHECK (issues #75, #77)
 **Why:** Round 5 fixed `city`/`state`/`postal_code` with `char_length(trim(...)) > 0`
 but left the neighbouring `between 1 and N` checks untrimmed, so a whitespace-only
