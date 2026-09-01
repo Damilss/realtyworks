@@ -135,6 +135,27 @@ test("a self-registration must confirm its email, and then has no access at all"
   // The app now accepts neither before verification, so the ambiguous success
   // has nothing authoritative to discard.
   //
+  // Drain the first link and empty the mailbox before triggering the resend.
+  // `waitForAuthLink` returns the newest message *present*, which is not the
+  // same claim as the newest message *sent* — and the two come apart precisely
+  // here, because the resend rotates `auth.users.confirmation_token` and kills
+  // the first message's token. Verified against the running stack: the
+  // pre-resend `token_hash` comes back 403 `otp_expired`, and /auth/confirm
+  // collapses every verification failure into /login?error=invalid-link, so the
+  // symptom would be the bare "expected /account-setup" mismatch three
+  // assertions below, naming neither mail nor tokens.
+  //
+  // The margin today is wide rather than absent: GoTrue hands the message to
+  // the SMTP container *before* it answers the signup request — measured at
+  // ~2-3ms to searchable, against the much longer trip back through the action,
+  // React's re-render and Playwright's poll — so the stale message has stopped
+  // being the newest one long before the wait below starts. That is a property
+  // of this mailer rather than of this test, and custom SMTP would make the
+  // handoff a real network call. Clearing makes "newest present" and "sent by
+  // the resend" the same message, so the assertion cannot turn on the gap.
+  await waitForAuthLink(email);
+  await clearMailbox(email);
+
   // Wait out [auth.email] max_frequency ("1s") before resending. A fixed sleep
   // is normally the wrong tool, but this is a server-side time window rather
   // than a UI state worth polling for: resend inside it and GoTrue returns 429
@@ -148,8 +169,9 @@ test("a self-registration must confirm its email, and then has no access at all"
     page.getByRole("heading", { name: "Check your email" }),
   ).toBeVisible();
 
-  // Only the newest emailed link opens setup. This is the half that a bogus
-  // token would silently skip — see the /auth/confirm lesson in docs/backlog.md.
+  // Only the newest emailed link opens setup, and after the clear above it is
+  // the only one there is. This is the half that a bogus token would silently
+  // skip — see the /auth/confirm lesson in docs/backlog.md.
   await page.goto(await waitForAuthLink(email));
   await expect(page).toHaveURL("/account-setup");
   await page.getByLabel("Full name").fill("Self Registered");

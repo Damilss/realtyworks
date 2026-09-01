@@ -89,7 +89,8 @@ export async function clearMailbox(email: string): Promise<void> {
 }
 
 /**
- * The `/auth/confirm` URL out of the newest message addressed to `email`.
+ * The `/auth/confirm` URL out of the newest message *currently* addressed to
+ * `email` — see `waitForAuthLink` for why the qualifier is load-bearing.
  *
  * Matched out of the body rather than parsed out of the markup: the template
  * (supabase/templates/confirmation.html) has exactly one link, and a regex over
@@ -120,11 +121,27 @@ async function findConfirmationLink(email: string): Promise<string | null> {
 }
 
 /**
- * Polls until the confirmation email for `email` arrives, and returns its link.
+ * Polls until an auth email for `email` is in the mailbox, and returns its link.
  *
- * Mail delivery is asynchronous — the signup response returns before GoTrue has
- * handed the message to the SMTP container — so there is nothing to await on the
- * page.
+ * There is nothing to await on the page: the message arrives over SMTP, so no UI
+ * state reflects it.
+ *
+ * **This waits for a message to be present, not for the one the last step
+ * triggered** — the two are the same claim only when the mailbox was empty to
+ * begin with. Send a second link while an earlier one is still sitting there and
+ * this returns the earlier one for as long as the new message is in flight, and
+ * an earlier link is generally already dead: GoTrue keeps one token per flow
+ * (`confirmation_token`, `recovery_token`) and rotates it on every send, so the
+ * previous one verifies as 403 `otp_expired`. /auth/confirm turns that into
+ * /login?error=invalid-link, which reaches the spec as a URL mismatch that says
+ * nothing about mail.
+ *
+ * So the discipline is **clear, act, wait**: `clearMailbox()` before the step
+ * that sends, and "newest present" and "the one this step sent" cannot diverge.
+ * Every caller in auth.spec.ts does. The window is currently narrow — GoTrue
+ * hands the message off before answering the request that triggered it, ~2-3ms
+ * to searchable — but that is the mailer's behaviour, not a property of these
+ * helpers, and custom SMTP makes the handoff a network call.
  */
 export async function waitForAuthLink(
   email: string,
