@@ -208,7 +208,17 @@ Verify before assuming they exist:
   `docs/backlog.md`: there is no
   CAPTCHA, and `[auth.rate_limit] sign_in_sign_ups` is the only brake. (The
   other, `enable_confirmations = false`, was closed 2026-08-25 — see the email
-  confirmations bullet below.) The `signOut()` global-scope defect filed
+  confirmations bullet below.) **`/forgot-password` widened that risk**
+  (2026-09-01, PR review): it is a second unauthenticated endpoint that sends
+  mail on an anonymous caller's say-so, and `sign_in_sign_ups` does **not**
+  cover `/recover` — 34 consecutive requests from one IP all returned 200 and
+  all 34 sent, verified against the running stack. The only cap is
+  `[auth.rate_limit] email_sent`, which is a *blast radius* rather than a
+  brake: it is project-wide, so `/signup` and `/forgot-password` share one
+  hourly pool and exhausting it stops confirmation mail for real signups — and
+  it is unenforced locally, because it requires custom SMTP and that block is
+  commented out. CAPTCHA covers `/recover` as well as `/signup`, which is why
+  the backlog entry now names both. The `signOut()` global-scope defect filed
   alongside it is **fixed** (2026-08-25, issues #92/#98): the action now passes
   `{ scope: "local" }`, so signing out on one device no longer revokes the
   account's sessions everywhere.

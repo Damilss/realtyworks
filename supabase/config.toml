@@ -209,7 +209,24 @@ password_requirements = ""
 # Number of emails that can be sent per hour. Requires auth.email.smtp to be enabled.
 # Raised from the CLI default of 2 when confirmations went on (2026-08-25): every signup now
 # sends mail, and the CI `e2e` job alone sends more than two per run. 30/hour is Supabase
-# Cloud's own default with custom SMTP, and it is still a brake on email-bombing a mailbox.
+# Cloud's own default with custom SMTP.
+#
+# Read this as a BLAST RADIUS, not as a per-caller brake, and note the two limits on it
+# (both verified against the running stack on 2026-09-01, not read in a doc):
+#
+# 1. It is PROJECT-WIDE. Every other key in this block says "per IP address"; this one and
+#    sms_sent do not. /signup and /forgot-password draw on the same hourly pool, so a script
+#    hammering either one silently stops confirmation mail for real signups. That is the
+#    denial-of-service worth caring about here — not the mail itself.
+# 2. It does nothing LOCALLY. "Requires auth.email.smtp to be enabled" is literal, and the
+#    [auth.email.smtp] block below is commented out by design, so this cap is unenforced on
+#    the local stack: 34 consecutive POSTs to /auth/v1/recover for a seeded address all
+#    returned 200 and all 34 landed in mailpit. Nothing here is exercised by `pnpm test:e2e`.
+#
+# And nothing else covers those endpoints: sign_in_sign_ups (30 / 5 min / IP) does NOT apply
+# to /recover — the same 34-request probe never saw a 429 — and [auth.captcha] is off. The
+# per-address brake is [auth.email].max_frequency below, set to "1s". The mitigation is
+# tracked in docs/backlog.md under the CAPTCHA entry; do it before the public deploy.
 email_sent = 30
 # Number of SMS messages that can be sent per hour. Requires auth.sms to be enabled.
 sms_sent = 30

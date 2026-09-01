@@ -1247,25 +1247,68 @@ arrives at lint time and the message names the trust boundary instead of a
 module resolution error. The test files are unaffected — they have no
 `"use client"` directive, so the rule never looks at them.
 
-### 🟡 CAPTCHA on signup
-**Why:** With self-registration open, `[auth.rate_limit] sign_in_sign_ups` — 30
-per 5 minutes per IP — is the *only* brake on automated account creation. That
-is a speed bump, not a defense: every bot account becomes a row in `auth.users`
-and `profiles` that a human eventually has to look at and decide about. Low
-urgency while the app is unlisted; do it before or with the Phase 4 public
-deploy. It is now the *last* of the two costs of opening signup — email
-confirmations closed 2026-08-25 — and confirmations raise the cost of a bot
-account without removing it: a throwaway-mailbox service defeats them, and the
-row still lands in `auth.users` either way.
+### 🟡 CAPTCHA on the mail-sending endpoints (signup **and** password reset)
+*Widened 2026-09-01 from "CAPTCHA on signup", on PR review of the
+`/forgot-password` change.*
+
+**Why:** Two unauthenticated endpoints now send mail on an anonymous caller's
+say-so — `/signup` and `/forgot-password` — and neither has a per-caller brake.
+
+The bot-account half is the original entry: `[auth.rate_limit]
+sign_in_sign_ups` — 30 per 5 minutes per IP — is the only brake on automated
+account creation, and that is a speed bump, not a defense. Every bot account
+becomes a row in `auth.users` and `profiles` that a human eventually has to
+look at and decide about. Email confirmations (closed 2026-08-25) raise the
+cost without removing it: a throwaway-mailbox service defeats them and the row
+lands either way.
+
+The mail-spend half is new, and it is the sharper of the two. Verified against
+the running stack on 2026-09-01 rather than read in a doc:
+
+- **`sign_in_sign_ups` does not cover `/recover`.** 34 consecutive POSTs to
+  `/auth/v1/recover` from one IP returned 200 every time — no 429, no
+  throttling of any kind. The per-IP limits in `[auth.rate_limit]` are scoped
+  to the endpoints their comments name, and recovery is not one of them.
+- **All 34 actually sent** — mailpit received 34 messages for the one seeded
+  address. So this is a working mailbox-flood primitive against any address an
+  attacker can guess is a user, with no account needed and nothing to solve.
+- **`email_sent = 30` is a blast radius, not a brake.** It is project-wide, not
+  per IP, and `/signup` and `/forgot-password` draw on the same hourly pool. In
+  the hosted project, ~30 recovery requests an hour is enough to stop
+  confirmation mail for *real* signups. That collateral — a signup path that
+  silently stops working — matters more than the wasted mail.
+- **It is unenforced locally.** "Requires auth.email.smtp to be enabled" is
+  literal, and `[auth.email.smtp]` is commented out by design, which is why the
+  34 probes sailed through. Nothing in `pnpm test:e2e` exercises this, so CI
+  will never warn about it.
+
+Low urgency while the app is unlisted; **do it before or with the Phase 4
+public deploy**, which is the moment the address space stops being three seeded
+test users.
+
 **Do:** Supabase Auth supports hCaptcha and Cloudflare Turnstile natively — the
 `[auth.captcha]` block is already in `config.toml`, commented out. Enable it
-with the secret read from an env var (`CLAUDE.md` §5, never a literal), render
-the widget on the signup form, and pass the token through
-`signUp({ options: { captchaToken } })`. Keep it off locally so the e2e suite
-still runs unattended. Login probably does not need it — the rate limit plus
-the deliberately opaque failure message already cover credential stuffing.
-**Done when:** a signup submission without a valid captcha token is rejected in
-a captcha-enabled environment, and `pnpm test:e2e` still passes locally.
+with the secret read from an env var (`CLAUDE.md` §5, never a literal), and
+render the widget on **both** the signup and forgot-password forms, passing the
+token through `signUp({ options: { captchaToken } })` and
+`resetPasswordForEmail(email, { captchaToken })`. Supabase applies the captcha
+to `/recover` as well as `/signup`, so one provider covers both. Keep it off
+locally so the e2e suite still runs unattended. Login probably does not need it
+— the rate limit plus the deliberately opaque failure message already cover
+credential stuffing.
+
+**Cheap partial mitigation, deliberately not taken yet:** `[auth.email]
+max_frequency` is `"1s"`, and raising it throttles repeat sends *to one
+address*, which is exactly the mailbox-flood half. It does nothing about budget
+exhaustion across many addresses, and it is not free —
+`tests/e2e/auth.spec.ts` waits that window out (`page.waitForTimeout(1_100)`)
+to exercise GoTrue's resend path, so a 60s value adds a minute to the suite and
+changes what a user sees when they resubmit an unconfirmed signup. Worth
+deciding on with the deploy, alongside the captcha, rather than in isolation.
+
+**Done when:** a signup *and* a password-reset submission without a valid
+captcha token are rejected in a captcha-enabled environment, and
+`pnpm test:e2e` still passes locally.
 
 ### 🟡 Optional hygiene: `knip`
 **Why:** Catches dead deps/exports early — cheap signal for a solo dev.
@@ -1467,10 +1510,13 @@ rather than settings alone.
    `e2e` job's display name is **"E2E (Playwright auth loop)"**, and branch
    protection matches required checks **by name** — so if it was ever selected as
    required, re-select it under the new name or it silently stops gating.
-3. **CAPTCHA on signup** (🟡 above) — now the *only* remaining cost of opening
-   signup, and the one that confirmations did not pay off: a throwaway-mailbox
-   service defeats an email gate, and the row still lands in `auth.users`.
-   Do it before or with the public deploy.
+3. **CAPTCHA on the mail-sending endpoints** (🟡 above) — the *only* remaining
+   cost of opening signup, and the one that confirmations did not pay off: a
+   throwaway-mailbox service defeats an email gate, and the row still lands in
+   `auth.users`. Widened 2026-09-01: `/forgot-password` is a second
+   unauthenticated endpoint spending the same project-wide mail budget, with
+   *no* per-IP limit on it at all (verified — 34 unthrottled sends). Do it
+   before or with the public deploy.
 4. **SSO (Google)** (🟢 above) — blocked on registering the OAuth app, which is
    not code, so start that registration before you need it. It smooths the door;
    it does not block the deploy. Note that its callback will be the second route
