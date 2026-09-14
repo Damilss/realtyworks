@@ -383,6 +383,48 @@ audit table's path count is paths, not copies**: nanoid's "5 paths" is one
 deduped copy under `postcss`, shared by next / `@tailwindcss/postcss` / vite,
 which `pnpm why nanoid` reports as "Found 1 version".
 
+**When upstream catches up, the override has to go (2026-09-13).** Nine
+advisories at once — two critical, six high, one moderate — and the first round
+whose fix *deleted* overrides rather than adding or raising one:
+
+| Advisory | Package | Patched | Parent's range | Fix |
+|---|---|---|---|---|
+| GHSA-p293-qw3h-jr36, GHSA-2xp9-vwfh-vxw4 (critical) | `next` 16.2.11 | `>=16.3.3` | direct dependency, exact pin | bump `next` + `eslint-config-next` to 16.3.5 |
+| GHSA-rgj7-g3m4-5g8c | `sharp` 0.35.3 | `>=0.35.4` | `next@16.3.5` wants `^0.35.4` — **in range** | delete `sharp@<0.35.0`; arrives with next |
+| GHSA-5jgf-p345-68v8, GHSA-f65p-4m7j-42xc, GHSA-fph4-wmhf-6fwf, GHSA-jqff-g426-hqxp | `fast-uri` 3.1.5 | `>=3.1.6` | `ajv` wants `^3.0.1` — **in range** | `pnpm update fast-uri js-yaml baseline-browser-mapping --depth Infinity` |
+| GHSA-2883-xcg3-v3hh | `js-yaml` 4.3.1 | `>=4.3.2` | `cosmiconfig` / `@eslint/eslintrc` — **in range** | same refresh |
+| GHSA-w5vr-8v7q-w6rv (moderate) | `baseline-browser-mapping` 2.10.30 | `>=2.11.0` | `next` wants `^2.9.19` — **in range** | same refresh |
+
+Both criticals are RCEs patched only from 16.3.3, so there was no 16.2.x release
+to take; 16.3.5 is the latest in that line, and the exact pin with
+`eslint-config-next` in lockstep carries over. Neither was plausibly reachable
+here — GHSA-p293 needs a Windows-hosted server, GHSA-2xp9 needs the optimizer to
+decode a hostile AVIF — but "no page renders `<Image>`" is **not** a mitigation:
+`next start` mounts `/_next/image` regardless and answers it (a 400 from its own
+parameter validation, not a 404). Upgrade rather than argue reachability.
+
+The lesson is on the override side: **both removal conditions came true in the
+same bump.** next 16.3.5 declares `sharp: ^0.35.4` and exact-pins
+`postcss 8.5.23`, so neither `sharp@<0.35.0` nor `postcss@<8.5.23` matched any
+declared range any more. Left in place they would have been inert entries that
+read as protection. Deleting them leaves `minimatch@<9` as the only override.
+The tree now holds two postcss copies — 8.5.23 under next, 8.5.25 under vite /
+`@tailwindcss/postcss` — which is expected once nothing forces them together;
+both are past the patched floor. **Whenever a parent named in `overrides`
+moves, re-read each entry's "drop it once" line** — that comment is the removal
+condition, and nothing else in the stack notices when it comes true.
+
+What was verified, since this is a minor Next bump rather than a lockfile
+refresh: the version-matched docs in `node_modules/next/dist/docs/` were
+snapshotted before install and diffed after (nothing touching proxy, route
+handlers, `redirect()` or server actions beyond wording); lint → format:check →
+typecheck → test → build passed; sharp 0.35.4, resolved from next, encodes
+webp/avif/png/jpeg on libvips 8.18.6 / libheif 1.23.2, with
+`@img/sharp-libvips-linux-x64` at 1.3.3 in the lockfile; and a `next start`
+smoke rendered `/login`, `/signup`, `/forgot-password` and redirected `/`,
+`/dashboard`, `/auth/confirm` as before. The Playwright suite was **not** run
+locally (no Docker) — CI's `e2e` job is that check.
+
 ### Why the gate requires pnpm 11 (`packageManager` pin)
 
 npm retired the legacy audit endpoints (`/-/npm/v1/security/audits` and
@@ -634,6 +676,16 @@ worth adding (`actionlint` doesn't understand the issue-forms schema anyway).
 Running record of problems hit and calls made, newest first. (PR numbers are
 the paper trail; see git history for the full diffs.)
 
+- **2026-09 · Next 16.3.5 for two critical RCEs; two overrides retired** —
+  GHSA-p293-qw3h-jr36 (Windows path traversal) and GHSA-2xp9-vwfh-vxw4 (AVIF
+  decode in the image optimizer) are patched only from 16.3.3, so `next` and
+  `eslint-config-next` moved 16.2.11 → 16.3.5 together. That release declares
+  `sharp: ^0.35.4` and pins `postcss 8.5.23`, which met both overrides' removal
+  conditions at once, so `sharp@<0.35.0` and `postcss@<8.5.23` were deleted
+  rather than left inert. The remaining highs (`fast-uri` ×4, `js-yaml`) and
+  the moderate (`baseline-browser-mapping`) were stale pins, cleared by one
+  refresh. Audit reads zero at every level. Detail in the dependency-gate
+  section above.
 - **2026-08 · a cleared advisory came back on its own** (issue #110) —
   GHSA-2v37-7h3g-55p8's patched floor moved 3.3.17 → 3.3.18, so the blocking
   audit step went red on every branch seventeen days after that same advisory

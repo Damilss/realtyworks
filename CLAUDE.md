@@ -13,7 +13,7 @@ Read this fully before generating code, scaffolding, or migrations.
 **24** in two places that move together — `.nvmrc` (matched by CI) and
 `engines.node` in `package.json` (`>=24 <25`, a warning on install, not a
 gate). Stack versions are new and have breaking changes:
-**Next.js 16.2.11**, **React 19.2.4**. Per `AGENTS.md`, read the
+**Next.js 16.3.5**, **React 19.2.4**. Per `AGENTS.md`, read the
 relevant guide in `node_modules/next/dist/docs/` (`01-app`, `02-pages`,
 `03-architecture`, …) before writing Next.js code — do not assume
 training-data APIs.

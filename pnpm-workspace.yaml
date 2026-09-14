@@ -17,18 +17,6 @@ allowBuilds:
 # so use `pnpm update <pkg> --depth Infinity` instead (docs/tooling.md).
 # Range-scoped keys so the fix isn't forced onto a consumer of another major.
 overrides:
-  # GHSA-f88m-g3jw-g9cj — libvips CVE-2026-33327/33328/35590/35591, patched in
-  # sharp 0.35.0. Reached via `next > sharp`, and next declares `^0.34.5`
-  # (still true as of 16.2.11), so nothing to upgrade into — this deliberately
-  # forces past next's range. Drop it once next's floor reaches >=0.35.0.
-  sharp@<0.35.0: ^0.35.0
-  # GHSA-6g55-p6wh-862q + GHSA-r28c-9q8g-f849 + GHSA-fxqj-rqcc-2cmp — postcss
-  # sourceMappingURL path traversal / arbitrary .map file read. The third is an
-  # incomplete-fix follow-up to the first and lifts the patched floor to 8.5.23.
-  # Reached via `next > postcss` (next exact-pins 8.4.31, outside the patched
-  # range) and `vite > postcss` (^8.5.16, in range). One range-scoped override
-  # lifts both. Drop it once next's pin reaches >=8.5.23.
-  postcss@<8.5.23: ^8.5.23
   # GHSA-mh99-v99m-4gvg + GHSA-rgw5-rvv9-x895 — brace-expansion DoS via
   # unbounded expansion; the second bypasses the first's mitigation and is
   # patched in 5.0.9. Reached solely through minimatch, and the pre-9 minimatch
