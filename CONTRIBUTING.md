@@ -2,7 +2,7 @@
 
 **This repository is not open source** ([`LICENSE.md`](LICENSE.md)) and is not
 accepting outside contributions. It is a private, proprietary, one-developer
-project. This file is the working agreement — with future-you, and with any
+project. This file is the working agreement, with future-you, and with any
 collaborator or coding agent that shows up later.
 
 [`CLAUDE.md`](CLAUDE.md) is the engineering source of truth: architecture,
